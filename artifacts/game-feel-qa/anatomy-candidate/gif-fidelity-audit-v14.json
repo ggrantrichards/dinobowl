@@ -1,0 +1,30 @@
+[
+  {
+    "scene": "tackle",
+    "nativeFrames": 20,
+    "decodedFrames": 20,
+    "alphaPixels": 0,
+    "meanRgbAbsDiff": 0.0236
+  },
+  {
+    "scene": "firstdown",
+    "nativeFrames": 20,
+    "decodedFrames": 20,
+    "alphaPixels": 0,
+    "meanRgbAbsDiff": 0.0391
+  },
+  {
+    "scene": "catch",
+    "nativeFrames": 20,
+    "decodedFrames": 20,
+    "alphaPixels": 0,
+    "meanRgbAbsDiff": 0.0256
+  },
+  {
+    "scene": "interception",
+    "nativeFrames": 20,
+    "decodedFrames": 20,
+    "alphaPixels": 0,
+    "meanRgbAbsDiff": 0.0266
+  }
+]

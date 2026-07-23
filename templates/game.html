@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <title>Dino Bowl — 8-bit football with dinosaurs</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --field: #0a1f14;
+      --accent: #ffd23f;
+    }
+
+    * { box-sizing: border-box }
+
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(120% 90% at 50% -10%, #0e2a1b, var(--field) 60%);
+      color: #f4f6f1;
+      font-family: 'Press Start 2P', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: max(12px, env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) max(12px, env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px));
+      /* no rubber-banding / text-selection on touch while playing */
+      overflow: hidden;
+      overscroll-behavior: none;
+      touch-action: none;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .frame {
+      /* keep the 16:9 field fully on-screen on any device (letterbox as needed) */
+      /* Do not cap a desktop game at its internal 960px canvas size.  Pixel
+         art scales cleanly, and a physically larger field makes a drive read
+         like a journey instead of a tiny simulation in the middle of a 4K screen. */
+      width: min(100%, calc((100dvh - 70px) * 1.7778));
+      border: 3px solid #1d4030;
+      border-radius: 4px;
+      box-shadow: 0 12px 60px rgba(0, 0, 0, .55);
+      background: #000;
+      line-height: 0;
+    }
+
+    canvas {
+      width: 100%;
+      display: block;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+      outline: none;
+      cursor: crosshair;
+      touch-action: none;
+    }
+
+    .bar {
+      width: min(100%, calc((100dvh - 70px) * 1.7778));
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 9px;
+      color: #9db0a4;
+    }
+
+    @media (max-width: 700px) { .bar { font-size: 7px } }
+
+    .bar a { color: var(--accent); text-decoration: none }
+    .bar a:hover { text-decoration: underline }
+
+    #fs-mobile { display: none; }
+    @media (max-height: 520px) {
+      html, body { padding: 2px; gap: 2px; }
+      .bar { display: none; }
+      .frame { width: min(100%, calc((100vh - 6px) * 1.7778)); border-width: 1px; box-shadow: none; }
+      #fs-mobile { display: block; position: fixed; z-index: 80; top: calc(5px + env(safe-area-inset-top, 0px)); right: calc(5px + env(safe-area-inset-right, 0px));
+        background: rgba(5,12,8,.78); color: var(--accent); border: 1px solid #1d4030; border-radius: 6px; font: inherit; font-size: 11px; padding: 7px; touch-action: manipulation; }
+      @supports (height: 100dvh) { .frame { width: min(100%, calc((100dvh - 6px) * 1.7778)); } }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="bar">
+    <span>🦖 DINO BOWL</span>
+    <span id="online-status">ONLINE: NOT CONFIGURED</span>
+    <span><a href="#" id="fs-btn">⛶ fullscreen</a>&nbsp;&nbsp;·&nbsp;&nbsp;H = controls&nbsp;&nbsp;·&nbsp;&nbsp;<a href="/">← back to Gridiron</a></span>
+  </div>
+  <button id="fs-mobile" aria-label="Toggle fullscreen">⛶</button>
+  <div class="frame" id="frame">
+    <canvas id="game" width="960" height="540" tabindex="0"></canvas>
+  </div>
+  <script>
+    // Fullscreen (with landscape lock on phones/tablets where supported)
+    const toggleFullscreen = async (e) => {
+      e.preventDefault();
+      const el = document.documentElement;
+      try {
+        if (document.fullscreenElement || document.webkitFullscreenElement) {
+          await (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+          return;
+        }
+        await (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+        if (screen.orientation && screen.orientation.lock) {
+          screen.orientation.lock('landscape').catch(() => {});
+        }
+      } catch (err) { /* iOS Safari may refuse; the page still plays inline */ }
+    };
+    document.getElementById('fs-btn').addEventListener('click', toggleFullscreen);
+    document.getElementById('fs-mobile').addEventListener('click', toggleFullscreen);
+  </script>
+  <script src="/static/game/sprites.js?v=game-feel-compact-v28-tucked-ball-20260721"></script>
+  <script>window.DINO_BOWL_FIREBASE_CONFIG = {{ firebase_config|tojson }};</script>
+  <!-- Compat build keeps the multiplayer adapter small and works without a JS build step. -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+  <script src="/static/game/game.js?v=game-feel-compact-v28-tucked-ball-20260721"></script>
+</body>
+
+</html>

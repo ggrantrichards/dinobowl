@@ -1,0 +1,102 @@
+[
+  {
+    "desired": 0,
+    "time": 0.059,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-000.png"
+  },
+  {
+    "desired": 0.08315789473684211,
+    "time": 0.058,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-001.png"
+  },
+  {
+    "desired": 0.16631578947368422,
+    "time": 0.141,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-002.png"
+  },
+  {
+    "desired": 0.24947368421052632,
+    "time": 0.216,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-003.png"
+  },
+  {
+    "desired": 0.33263157894736844,
+    "time": 0.316,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-004.png"
+  },
+  {
+    "desired": 0.41578947368421054,
+    "time": 0.4,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-005.png"
+  },
+  {
+    "desired": 0.49894736842105264,
+    "time": 0.474,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-006.png"
+  },
+  {
+    "desired": 0.5821052631578948,
+    "time": 0.572,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-007.png"
+  },
+  {
+    "desired": 0.6652631578947369,
+    "time": 0.639,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-008.png"
+  },
+  {
+    "desired": 0.748421052631579,
+    "time": 0.723,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-009.png"
+  },
+  {
+    "desired": 0.8315789473684211,
+    "time": 0.811,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-010.png"
+  },
+  {
+    "desired": 0.9147368421052633,
+    "time": 0.891,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-011.png"
+  },
+  {
+    "desired": 0.9978947368421053,
+    "time": 0.973,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-012.png"
+  },
+  {
+    "desired": 1.0810526315789473,
+    "time": 1.057,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-013.png"
+  },
+  {
+    "desired": 1.1642105263157896,
+    "time": 1.141,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-014.png"
+  },
+  {
+    "desired": 1.2473684210526317,
+    "time": 1.224,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-015.png"
+  },
+  {
+    "desired": 1.3305263157894738,
+    "time": 1.29,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-016.png"
+  },
+  {
+    "desired": 1.4136842105263157,
+    "time": 1.382,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-017.png"
+  },
+  {
+    "desired": 1.496842105263158,
+    "time": 1.453,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-018.png"
+  },
+  {
+    "desired": 1.58,
+    "time": 1.533,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/first-down/frame-019.png"
+  }
+]
