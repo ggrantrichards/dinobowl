@@ -7,17 +7,9 @@
 
   // ------------------------------------------------------------------ consts
   const W = 960, H = 540;
-  // A 24px yard gives the live camera roughly 40 yards of field rather than
-  // 48.  The scale is deliberate: a first down has room to develop and a TD
-  // feels like the payoff to a drive, while all football distances remain
-  // expressed in real yards through xAtYd / ydAtX.
-  const YPX = 24;                       // px per yard (x axis)
-  // A football play must always resolve. This is a last-resort whistle for
-  // rare traffic jams or an abandoned user input sequence; normal passes,
-  // runs, returns, tackles, and bounds checks all end much sooner.
-  const MAX_LIVE_PLAY_T = 16;
-  const FIELD_X0 = 10 * YPX;            // x of the left goal line
-  const FIELD_LEN = 120 * YPX;          // 120 yards incl endzones
+  const YPX = 20;                       // px per yard (x axis)
+  const FIELD_X0 = 200;                 // x of offense's own goal line... x of left goal line
+  const FIELD_LEN = 2400;               // 120 yards incl endzones
   const TOP = 84, BOT = 508;            // sidelines (y)
   const MID = (TOP + BOT) / 2;
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
@@ -185,14 +177,14 @@
   const PASSIVES = {
     cannon: { label: "HOWITZER ARM", desc: "Bombs travel farther, accurate even on the run." },
     escape: { label: "HOUDINI", desc: "Slips would-be sacks and scrambles like the wind." },
-    truck: { label: "TRUCKSTICK", desc: "Has a 25–40% strength-based chance to shrug off each of the first two tacklers." },
+    truck: { label: "TRUCKSTICK", desc: "Shrugs off the first two tacklers every carry." },
     burner: { label: "AFTERBURNER", desc: "Game-breaking top-end speed." },
-    yac: { label: "YAC MONSTER", desc: "Has a strong agility-based chance to make the first tackler miss." },
-    redzone: { label: "RED-ZONE MAGNET", desc: "Reliable hands and body control inside the 20." },
+    yac: { label: "YAC MONSTER", desc: "The first tackler almost always whiffs." },
+    redzone: { label: "RED-ZONE MAGNET", desc: "Nearly automatic hands inside the 20." },
     sack: { label: "QB HUNTER", desc: "Explodes off the edge; sacks jar the ball loose." },
     wall: { label: "IMMOVABLE", desc: "Collapses the pocket and swats passes." },
-    tackle: { label: "HEAT-SEEKER", desc: "Improved pursuit and finishing on tackles." },
-    ballhawk: { label: "BALLHAWK", desc: "Elite range and timing when playing the ball." },
+    tackle: { label: "HEAT-SEEKER", desc: "Huge tackle radius; erases the run." },
+    ballhawk: { label: "BALLHAWK", desc: "Blankets receivers and picks off throws." },
   };
   // team -> star name shown on the hype screen + which passive they carry
   const RAMPAGERS = {
@@ -328,7 +320,6 @@
     pick: () => [700, 500, 350].forEach((f, i) => beep(f, 0.13, "square", 0.07, i * 0.11)),
     roar: () => { beep(80, 0.5, "sawtooth", 0.16); beep(55, 0.6, "sawtooth", 0.14, 0.1); },
     kick: () => beep(300, 0.1, "square", 0.06),
-    doink: () => { beep(1180, 0.08, "square", 0.09); beep(760, 0.12, "triangle", 0.05, 0.05); },
     juke: () => beep(880, 0.05, "square", 0.04),
     firstdown: () => [600, 800].forEach((f, i) => beep(f, 0.1, "square", 0.06, i * 0.1)),
   };
@@ -357,14 +348,6 @@
     stats: { passYds: 0, rushYds: 0, tds: 0 },
     msg: "",
     tape: [], replay: null,
-    // `?qa=1` is a local, non-gameplay visual review surface.  It lets the
-    // team record the exact same canvas renderer used in a match without
-    // relying on random drive outcomes to inspect a tackle or high-point grab.
-    qaMode: new URLSearchParams(location.search).has("qa"),
-    // `?qa=1&capture=1` keeps the deterministic review scene but removes
-    // review-only chrome from a rendered GIF. Production play continues to
-    // show its normal ball indicator and carrier name.
-    qaCapture: new URLSearchParams(location.search).has("capture"), qaScene: null, qaStill: false,
     diff: parseInt(localStorage.getItem("dinobowl_diff") || "1", 10),
     record: JSON.parse(localStorage.getItem("dinobowl_record") || '{"w":0,"l":0,"t":0}'),
   };
@@ -377,106 +360,6 @@
   function saveRecord() {
     localStorage.setItem("dinobowl_record", JSON.stringify(G.record));
     localStorage.setItem("dinobowl_diff", String(G.diff));
-  }
-
-  // Persistent CPU scouting lives only in this browser.  It is intentionally
-  // small and aggregate: the CPU remembers play style and results, never raw
-  // input recordings.  That lets a returning player face a coordinator that
-  // recognizes repeated habits without turning one bad game into a cheat code.
-  const CPU_SCOUT_KEY = "dinobowl_cpu_scout_v2";
-  const freshScoutLine = () => ({ plays: 0, pass: 0, run: 0, sneak: 0, deep: 0, risky: 0, success: 0, turnovers: 0, tds: 0 });
-  const freshCpuMemory = () => ({ version: 2, games: 0, wins: 0, losses: 0, opp: { all: freshScoutLine() }, cpu: { plays: {} } });
-  function loadCpuMemory() {
-    try {
-      const saved = JSON.parse(localStorage.getItem(CPU_SCOUT_KEY) || "null");
-      if (saved && saved.version === 2 && saved.opp && saved.cpu) {
-        for (const key of Object.keys(saved.opp)) saved.opp[key] = Object.assign(freshScoutLine(), saved.opp[key]);
-        saved.opp.all = saved.opp.all || freshScoutLine();
-        saved.cpu.plays = saved.cpu.plays || {};
-        return saved;
-      }
-    } catch (_) { /* a malformed old save simply starts fresh */ }
-    return freshCpuMemory();
-  }
-  function saveCpuMemory() {
-    try { localStorage.setItem(CPU_SCOUT_KEY, JSON.stringify(G.cpuMemory)); } catch (_) { }
-  }
-  G.cpuMemory = loadCpuMemory();
-
-  function scoutSituation() {
-    if (G.losYd >= 80 || G.losYd + G.toGain >= 100) return "redzone";
-    if (G.toGain <= 3) return "short";
-    if (G.toGain >= 8) return "long";
-    return "normal";
-  }
-  function scoutLineFor(bucket) {
-    const opp = G.cpuMemory.opp;
-    if (!opp[bucket]) opp[bucket] = freshScoutLine();
-    return opp[bucket];
-  }
-  function persistentScout(bucket) {
-    const specific = scoutLineFor(bucket || scoutSituation());
-    return specific.plays >= 6 ? specific : scoutLineFor("all");
-  }
-  function cpuExperience() {
-    const all = scoutLineFor("all");
-    // The learning curve is meaningful by a few games, but capped so the CPU
-    // still has to execute rather than becoming statistically unbeatable.
-    return clamp(G.cpuMemory.games * 0.08 + all.plays * 0.006, 0, 1);
-  }
-  function cpuRiskPickBoost(isRisky) {
-    if (!isRisky || G.drive !== "A" || G.humanB) return 0;
-    const scout = persistentScout(scoutSituation());
-    const riskyRate = scout.risky / Math.max(1, scout.pass);
-    const reps = clamp(scout.risky / 16, 0, 1);
-    return clamp((0.025 + riskyRate * 0.06) * reps * (0.45 + cpuExperience() * 0.55), 0, 0.09);
-  }
-  function noteAiPlayStart() {
-    if (G.practice || G.patMode || !G.curPlay) { G.aiPlay = null; return; }
-    if (!G.driveStory || G.driveStory.side !== G.drive) G.driveStory = { side: G.drive, startYd: G.losYd, plays: 0 };
-    G.driveStory.plays++;
-    G.aiPlay = {
-      side: G.drive, name: G.curPlay.name || "UNKNOWN", type: G.curPlay.type || "pass",
-      tags: (G.curPlay.tags || []).slice(), startYd: G.losYd, toGain: G.toGain,
-      qbKeep: !!G.curPlay.qbKeep,
-      bucket: scoutSituation(), risky: false, counted: false,
-    };
-  }
-  function recordAiPlayResult(reason, info, noSpot, spotYd) {
-    const meta = G.aiPlay;
-    if (!meta || meta.counted || G.practice || G.humanB) return;
-    meta.counted = true;
-    const turnover = !!(info && info.turnover);
-    const gain = noSpot ? 0 : spotYd - meta.startYd;
-    const td = !turnover && !noSpot && spotYd >= 100;
-    const success = !turnover && !noSpot && (td || spotYd >= meta.startYd + meta.toGain || gain >= Math.max(3, meta.toGain * 0.55));
-    if (isHuman(meta.side)) {
-      for (const key of ["all", meta.bucket]) {
-        const line = scoutLineFor(key);
-        line.plays++; line[meta.type === "pass" ? "pass" : "run"]++;
-        if (meta.qbKeep) line.sneak++;
-        if (meta.tags.includes("deep")) line.deep++;
-        if (meta.risky) line.risky++;
-        if (success) line.success++;
-        if (turnover) line.turnovers++;
-        if (td) line.tds++;
-      }
-    } else {
-      const plays = G.cpuMemory.cpu.plays;
-      const line = plays[meta.name] || (plays[meta.name] = { plays: 0, success: 0, yards: 0, turnovers: 0, tds: 0 });
-      line.plays++; line.yards += gain;
-      if (success) line.success++;
-      if (turnover) line.turnovers++;
-      if (td) line.tds++;
-    }
-    saveCpuMemory();
-  }
-  function recordCpuGameResult() {
-    if (G.humanB || G.practice) return;
-    G.cpuMemory.games++;
-    if (G.score.B > G.score.A) G.cpuMemory.wins++;
-    else if (G.score.B < G.score.A) G.cpuMemory.losses++;
-    saveCpuMemory();
   }
   window.__game = G; // for debugging / automated tests
   window.addEventListener("error", (e) => { G.lastErr = e.message + " @ " + e.lineno; });
@@ -504,16 +387,11 @@
       players: G.players, ball: G.ball, carrier, phase: G.phase, playT: G.playT, callsheet: G.callsheet,
       playIdx: G.playIdx, curPlay: G.curPlay, defCall: G.defCall, aim: G.aim, kick: G.kick, banner: G.banner,
       deadT: G.deadT, camX: G.camX, shake: G.shake, parts: G.parts, pteros: G.pteros, ot: G.ot,
-      stats: G.stats, gameStats: G.gameStats, patMode: G.patMode, clockStopped: G.clockStopped, humanB: true,
-      // so a matched guest can WATCH the host pick teams (read-only)
-      selA: G.selA, selB: G.selB, selStep: G.selStep, selectFor: G.selectFor, mode: G.mode
+      stats: G.stats, gameStats: G.gameStats, patMode: G.patMode, clockStopped: G.clockStopped, humanB: true
     });
   }
   function applyNetFrame(f) {
     if (!f) return;
-    // the host's pre-game lobby frame must not yank the guest off its own
-    // "matched — waiting for host" screen
-    if (f.state === "online_wait" || f.state === "loading" || f.state === "title" || f.state === "menu") return;
     const teamChanged = f.my && (G.my !== f.my || G.opp !== f.opp);
     Object.assign(G, f);
     G.carrier = f.carrier >= 0 ? G.players[f.carrier] : null;
@@ -551,103 +429,6 @@
       Net.inputRef = ref.child("inputs"); netStatus("CONNECTED · TEAM B");
     } catch (err) { console.error(err); netStatus("JOIN FAILED"); alert("Could not join this room: " + err.message); }
   }
-  // ------------------------------------------------- QUICK MATCH (auto-queue)
-  // Two strangers who both tap QUICK MATCH get paired into ONE game via a
-  // single atomic slot at dinobowl/matchmaking/waiting. Whoever arrives first
-  // parks there as the host; the next arrival CLAIMS that slot (transaction
-  // pops it) and joins as the guest. Stale slots (>45s) self-heal.
-  function resetNet() {
-    Net.role = null; Net.remoteView = false; Net.room = null;
-    Net.inputRef = null; Net.frameRef = null; Net.guestRef = null; Net.waitRef = null; Net.cancelled = false;
-  }
-  async function ensureFirebase() {
-    if (!window.DINO_BOWL_FIREBASE_CONFIG || !window.firebase) return false;
-    if (!firebase.apps.length) firebase.initializeApp(window.DINO_BOWL_FIREBASE_CONFIG);
-    await firebase.auth().signInAnonymously();
-    Net.db = firebase.database();
-    return true;
-  }
-  async function startQuickMatch() {
-    resetNet();
-    G.online = { phase: "searching", since: performance.now(), role: null };
-    G.state = "online_wait";
-    try {
-      if (!(await ensureFirebase())) { alert("Online multiplayer needs Firebase config."); G.state = "menu"; return; }
-    } catch (err) { console.error(err); alert("Could not sign in for matchmaking: " + err.message); G.state = "menu"; return; }
-    if (Net.cancelled) return;
-    const myUid = firebase.auth().currentUser.uid;
-    const waitRef = Net.db.ref("dinobowl/matchmaking/waiting");
-    Net.waitRef = waitRef;
-    let asGuestRoom = null, asHostRoom = null;
-    try {
-      await waitRef.transaction((cur) => {
-        const fresh = cur && typeof cur.ts === "number" && (Date.now() - cur.ts) < 45000;
-        if (fresh && cur.uid && cur.uid !== myUid) {
-          asGuestRoom = cur.room; asHostRoom = null;
-          return null;                 // claim this waiting player → pop the slot
-        }
-        asGuestRoom = null; asHostRoom = roomId();
-        return { uid: myUid, room: asHostRoom, ts: firebase.database.ServerValue.TIMESTAMP };
-      });
-    } catch (err) {
-      console.error(err); netStatus("MATCH FAILED");
-      alert("Matchmaking is unavailable (database rules may need deploying). Try ONLINE (LINK) instead.");
-      G.online = null; G.state = "menu"; return;
-    }
-    if (Net.cancelled) { if (asHostRoom) waitRef.transaction((c) => (c && c.uid === myUid ? null : c)); return; }
-    if (asGuestRoom) { await joinMatchedRoom(asGuestRoom, myUid); }
-    else { await hostMatchedRoom(asHostRoom, myUid); }
-  }
-  async function hostMatchedRoom(room, myUid) {
-    Net.role = "host"; Net.room = room;
-    G.online.role = "host";
-    netStatus("HOSTING · WAITING FOR A PLAYER");
-    const ref = Net.db.ref("dinobowl/rooms/" + room);
-    await ref.set({ meta: { createdAt: firebase.database.ServerValue.TIMESTAMP, version: 1, hostUid: myUid }, frame: netFrame() });
-    Net.inputRef = ref.child("inputs");
-    Net.inputRef.on("child_added", (snap) => { const input = snap.val(); snap.ref.remove(); if (input) applyRemoteInput(input); });
-    // if we drop while still waiting, clear our queue slot so nobody joins a dead room
-    Net.waitRef.onDisconnect().remove();
-    Net.guestRef = ref.child("guestJoined");
-    Net.guestRef.on("value", (snap) => {
-      const g = snap.val();
-      if (!g || !g.uid || !G.online || G.online.phase !== "searching") return;
-      G.online.phase = "found";
-      netStatus("MATCHED · YOU HOST");
-      Net.waitRef.onDisconnect().cancel();
-      Net.waitRef.transaction((cur) => (cur && cur.uid === myUid ? null : cur));   // tidy the slot
-      // host picks the teams; the game streams to the guest from there
-      setTimeout(() => {
-        if (Net.cancelled) return;
-        G.mode = "online"; G.humanB = true; G.career = null; G.selectFor = "exh";
-        G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
-      }, 1100);
-    });
-  }
-  async function joinMatchedRoom(room, myUid) {
-    Net.role = "guest"; Net.room = room; Net.remoteView = true;
-    G.online = { phase: "found", role: "guest", since: performance.now() };
-    const ref = Net.db.ref("dinobowl/rooms/" + room);
-    Net.frameRef = ref.child("frame");
-    await ref.child("guestJoined").set({ uid: myUid, ts: firebase.database.ServerValue.TIMESTAMP });
-    Net.frameRef.on("value", (snap) => applyNetFrame(snap.val()));
-    Net.inputRef = ref.child("inputs");
-    netStatus("MATCHED · TEAM B");
-  }
-  function cancelMatch() {
-    Net.cancelled = true;
-    try {
-      const uid = firebase.auth().currentUser && firebase.auth().currentUser.uid;
-      if (Net.waitRef) { Net.waitRef.onDisconnect().cancel(); Net.waitRef.transaction((c) => (c && c.uid === uid ? null : c)); }
-      if (Net.frameRef) Net.frameRef.off();
-      if (Net.guestRef) Net.guestRef.off();
-      if (Net.inputRef) Net.inputRef.off();
-    } catch (_) { /* best-effort cleanup */ }
-    resetNet();
-    G.online = null; G.state = "menu"; G.menuIdx = 0;
-    netStatus("READY");
-  }
-
   function canControlHere() {
     if (!Net.role) return true;
     if (Net.role === "guest") return G.drive === "B" && ["playcall", "presnap", "live", "kick", "ptchoice"].includes(G.state);
@@ -695,16 +476,10 @@
   cv.addEventListener("contextmenu", (e) => e.preventDefault());
   window.addEventListener("keydown", (e) => {
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Tab"].includes(e.key)) e.preventDefault();
-    const key = e.key.toLowerCase();
-    // QA capture keys are intentionally edge-triggered. Browser automation
-    // correctly sends key-down input but may coalesce repeated numeric taps;
-    // unlike movement, these local review controls must never be treated as a
-    // held key or an export can silently duplicate a stale canvas frame.
-    if (G.qaMode && ["1", "2", "3", "4", "5"].includes(key)) { onKey(key); return; }
-    if (keys[key]) return;
-    keys[key] = true;
-    if (onlineInput({ type: "key", key })) keys[key] = false;
-    else onKey(key);
+    if (keys[e.key.toLowerCase()]) return;
+    keys[e.key.toLowerCase()] = true;
+    if (onlineInput({ type: "key", key: e.key.toLowerCase() })) keys[e.key.toLowerCase()] = false;
+    else onKey(e.key.toLowerCase());
   });
   window.addEventListener("keyup", (e) => {
     keys[e.key.toLowerCase()] = false;
@@ -776,11 +551,7 @@
   const rnd = (a, b) => a + Math.random() * (b - a);
   const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-  const SPEED_SCALE = 0.6;   // deliberately slow league — the field plays HUGE
-  // Preserve rating spread without letting the slowest roster entry turn into
-  // a visibly stalled sprite.  Retro-style football needs every on-field dino
-  // to have enough baseline motion for routes, pursuit, and contact to read.
-  const spdPx = (r) => Math.max(56, (96 + (r - 60) * 1.9) * SPEED_SCALE);   // rating -> px/s
+  const spdPx = (r) => 96 + (r - 60) * 1.9;   // rating -> px/s
   const lastName = (n) => {
     const p = (n || "").split(" ").filter((w2) => !["II", "III", "IV", "Jr.", "Jr", "Sr.", "Sr"].includes(w2));
     return p[p.length - 1] || n || "";
@@ -844,33 +615,10 @@
       G.rosters = null; G.msg = "Roster API unavailable — using generic dino rosters.";
       G.season = new Date().getFullYear();
     }
-    // A football is deliberately smaller than a 16×16 dino map. At one
-    // pixel per ball-cell it lands inside the compact action claws instead of
-    // reading as a white/orange block pasted over a helmet or torso.
-    G.ballSpr = DinoSprites.buildBall(1);
+    G.ballSpr = DinoSprites.buildBall(2);
     G.snowSpr = DinoSprites.buildSnowball(2);
-    // Bare-dino sheets are kept for non-playing sideline staff only. Stadium
-    // spectators themselves are deliberately simple color blocks, so the
-    // stands stay readable instead of looking like a second team on the field.
-    G.fanSprites = DinoSprites.buildFanSprites ? DinoSprites.buildFanSprites(1) : null;
     buildCrowd();
     G.state = "title";
-    // A frozen `?qa=1&capture=1&qaStill=tackle&qaAt=.72` frame is a local
-    // review aid only. It lets animation QA inspect the exact same renderer
-    // at a named moment without racing requestAnimationFrame or touching live
-    // gameplay state.
-    const qaStillKind = G.qaMode && new URLSearchParams(location.search).get("qaStill");
-    const qaStillAt = Number(new URLSearchParams(location.search).get("qaAt"));
-    if (["tackle", "firstdown", "catch", "interception"].includes(qaStillKind)) {
-      stageHighlight(qaStillKind);
-      let remain = clamp(Number.isFinite(qaStillAt) ? qaStillAt : 0, 0, 2.2);
-      while (remain > 0.0001) {
-        const step = Math.min(1 / 120, remain);
-        updateHighlight(step);
-        remain -= step;
-      }
-      G.qaStill = true;
-    }
   }
 
   function fallbackRoster(abbr) {
@@ -909,17 +657,12 @@
     }
     // in-season development: hot streaks raise a player's ratings, slumps
     // drop them — earned game by game over the year (Retro Bowl style)
-    if (G.szn && G.szn.team === abbr && ((G.szn.dev && Object.keys(G.szn.dev).length) || (G.szn.devF && Object.keys(G.szn.devF).length))) {
+    if (G.szn && G.szn.team === abbr && G.szn.dev && Object.keys(G.szn.dev).length) {
       if (!cloned) { r2 = JSON.parse(JSON.stringify(r2)); cloned = true; }
       const applyDev = (p2) => {
-        const d = (G.szn.dev || {})[p2.name];
-        if (d) for (const f2 of ["spd", "hands", "agi", "acc", "arm", "tkl", "str"]) {
+        const d = G.szn.dev[p2.name]; if (!d) return;
+        for (const f2 of ["spd", "hands", "agi", "acc", "arm", "tkl", "str"]) {
           if (p2[f2] != null) p2[f2] = clamp(p2[f2] + d, 55, 99);
-        }
-        // hand-picked TRAIN upgrades (the clickable upgrade screen)
-        const df2 = (G.szn.devF || {})[p2.name];
-        if (df2) for (const [f3, amt] of Object.entries(df2)) {
-          p2[f3] = clamp((p2[f3] || 70) + amt, 40, 99);
         }
       };
       r2.offense.forEach(applyDev);
@@ -928,50 +671,19 @@
     return r2;
   };
 
-  function crowdFanPalette(homeColor) {
-    const home = (G.stadium && TEAMS[G.stadium.home]) || null;
-    // The team colors are present, but never dominate the whole stand.  The
-    // other swatches make a packed stadium read as a mix of individual fans.
-    return [
-      homeColor || "#d39b68", home ? home[2] : "#d7ba71",
-      "#d39b68", "#75a2bf", "#a57daa", "#6eaa70",
-      "#c87567", "#d0ba79", "#8997aa",
-    ];
-  }
-
-  function drawCrowdFanBlock(g, x, y, seed, palette) {
-    // A spectator is intentionally just a compact cluster of rectangles.  No
-    // limbs, tails, or sprite silhouette: at field scale these read cleanly as
-    // a full stand without competing with the playable dinosaurs.
-    const w = 4 + (seed % 3) * 2;
-    const h = 3 + ((seed >>> 3) % 2) * 2;
-    g.fillStyle = "#090f16";
-    g.fillRect(x - 1, y + h, w + 2, 1);
-    g.fillStyle = palette[(seed >>> 6) % palette.length];
-    g.fillRect(x, y, w, h);
-    // A restrained one-pixel highlight gives the block a little texture while
-    // preserving the square/rectangle language of the crowd.
-    if ((seed >>> 9) % 4 === 0) {
-      g.fillStyle = "rgba(244,246,241,.42)";
-      g.fillRect(x + 1, y, Math.max(1, w - 3), 1);
-    }
-  }
-
   function buildCrowd(homeColor) {
-    const c = DinoSprites.makeCanvas(FIELD_LEN, 66);
+    const c = DinoSprites.makeCanvas(FIELD_LEN, 64);
     const g = c.getContext("2d");
     g.fillStyle = "#131a22"; g.fillRect(0, 0, FIELD_LEN, 64);
-    g.imageSmoothingEnabled = false;
-    const palette = crowdFanPalette(homeColor);
-    // Pixel rails break up the seating rows; the short, varied blocks below
-    // remain legible as fans without accidentally creating another dinosaur
-    // silhouette in the background.
-    g.fillStyle = "#25303b";
-    for (let y = 2; y < 64; y += 12) g.fillRect(0, y, FIELD_LEN, 1);
-    for (let y = 6, row = 0; y < 59; y += 10, row++) {
-      for (let x = 4 + (row % 2) * 5; x < FIELD_LEN - 8; x += 12) {
-        const seed = (((x * 37) ^ (row * 101) ^ (x >>> 1)) >>> 0);
-        if (seed % 11 !== 0) drawCrowdFanBlock(g, x, y + ((seed >>> 12) % 2), seed, palette);
+    const cols = ["#4caf50", "#8a6f3c", "#7a8a99", "#c98f4a", "#d4a373", "#5d8aa8", "#9b6a97"];
+    for (let y = 8; y < 60; y += 10) {
+      for (let x = 4; x < FIELD_LEN; x += 8) {
+        if (Math.random() < 0.85) {
+          // half the herd wears the home jersey
+          g.fillStyle = homeColor && Math.random() < 0.45 ? homeColor : cols[(Math.random() * cols.length) | 0];
+          g.fillRect(x + ((y / 10) % 2) * 3, y, 5, 5);            // dino head
+          g.fillRect(x + ((y / 10) % 2) * 3 + 4, y + 1, 2, 2);    // snout
+        }
       }
     }
     // home banners
@@ -1137,20 +849,8 @@
 
   function seasonAfterGame() {
     const won = G.score.A > G.score.B;
-    // TRAIN points: 2 for a win, 1 for showing up, +1 for a 250-yard day
-    G.szn.trainPts = (G.szn.trainPts || 0) + (won ? 2 : 1) +
-      ((G.stats.passYds + G.stats.rushYds) >= 250 ? 1 : 0);
     mergeSeasonStats();
     developPlayers();
-    // CONDITION: a game takes it out of the legs; STAMINA decides how much
-    // comes back by next Sunday. Low-motor dinos start the next game duller.
-    G.szn.condition = G.szn.condition || {};
-    for (const s2 of Object.values(G.gameStats || {})) {
-      if (s2.side !== "A") continue;
-      const st = stamOf(s2.name, s2.pos);
-      const drop = rnd(8, 20) - (st - 75) * 0.5;
-      G.szn.condition[s2.name] = Math.round(clamp(100 - Math.max(0, drop), 78, 100));
-    }
     careerXpAfterGame();
     if (G.szn.phase === "regular") {
       const sched = G.szn.schedule[G.szn.week - 1];
@@ -1529,7 +1229,6 @@
     G.sheets.B = DinoSprites.buildTeamSprites(TEAMS[G.opp][1], TEAMS[G.opp][2]);
     G.score = { A: 0, B: 0 }; G.quarter = 1; G.clock = 180; G.ot = false;
     G.rampage = { A: 0, B: 0 }; G.ramp = null;
-    G.rampUsed = { A: 0, B: 0 };   // holds the half-number it was spent in
     G.stadium = makeStadium(G.homeAbbr || G.my);
     // the calendar drives the climate: season/career games use their real week,
     // playoffs are January football, exhibitions land on a random week
@@ -1542,23 +1241,18 @@
     G.drive = G.openingDrive;
     G.lastOffSide = null;   // 2-player device-pass tracking
     G.losYd = 25; G.down = 1; G.toGain = 10;
-    G.driveStory = { side: G.drive, startYd: G.losYd, plays: 0 };
     G.stats = { passYds: 0, rushYds: 0, tds: 0 };
     G.gameStats = {}; G.challengeUsed = false; G.ticker = null;
     G.banner = null;
     // show the pregame hype/lineup screen first; kickoff waits for ENTER/tap
-    G.intro = { t: 0 };
-    G.state = "intro";
+    G.state = "pregame";
     sfx.td();
   }
   function kickoffAfterPregame() {
     const wtxt = G.weather.type === "CLEAR" ? "Clear skies in the Cretaceous." :
       G.weather.type === "RAIN" ? "Rain — slick ball, watch for fumbles!" : "Snow — heavy legs, short passes!";
     banner(TEAMS[G.my][0].toUpperCase() + " vs " + TEAMS[G.opp][0].toUpperCase(), wtxt + "  " + (G.drive === "A" ? "You receive!" : (G.humanB ? "P2 receives!" : "CPU receives!")), 2.4);
-    // Opening possession starts with an actual kick and return, not a silent
-    // placement at the 25.  G.drive is already the team receiving the toss.
-    const receiving = G.drive;
-    G.state = "dead"; G.deadT = 2.4; G.deadNext = () => startKickoff(receiving);
+    G.state = "dead"; G.deadT = 2.4; G.deadNext = enterPlaycall;
   }
 
   // ------------------------------------------------------------- practice mode
@@ -1577,7 +1271,6 @@
     buildCrowd(TEAMS[G.my][1]);
     G.gameStats = {}; G.stats = { passYds: 0, rushYds: 0, tds: 0 };
     G.drive = "A"; G.losYd = 35; G.down = 1; G.toGain = 10;
-    G.driveStory = { side: G.drive, startYd: G.losYd, plays: 0 };
     banner("PRACTICE FIELD", "No clock, no pressure — try everything!", 1.6);
     G.state = "dead"; G.deadT = 1.6; G.deadNext = enterPlaycall;
   }
@@ -1656,138 +1349,36 @@
     enterPresnap();
   }
 
-  function learnedCpuOffensePick(candidates) {
-    if (!candidates.length) return null;
-    const learned = G.cpuMemory.cpu.plays || {};
-    const experience = cpuExperience();
-    const weights = candidates.map((p) => {
-      const line = learned[p.name];
-      if (!line || !line.plays) return 1;
-      const n = line.plays;
-      const confidence = clamp(n / 8, 0, 1);
-      const success = line.success / n;
-      const yards = clamp((line.yards / n + 2) / 10, 0, 1);
-      const tdRate = line.tds / n;
-      const turnoverRate = line.turnovers / n;
-      // Results pick the better answer more often as the coordinator gathers
-      // evidence, while a nonzero base weight preserves variety and avoids a
-      // solved, single-play CPU offense.
-      const value = success * 0.52 + yards * 0.25 + tdRate * 0.35 - turnoverRate * 0.45;
-      return Math.max(0.2, 1 + experience * confidence * value * 2.1);
-    });
-    const total = weights.reduce((s, w) => s + w, 0);
-    let roll = Math.random() * total;
-    for (let i = 0; i < candidates.length; i++) {
-      roll -= weights[i];
-      if (roll <= 0) return candidates[i];
-    }
-    return candidates[candidates.length - 1];
-  }
-
   function cpuChooseOff() {
     if (G.down === 4 && !G.patMode) {
       const fgDist = 100 - G.losYd + 17;
-      // A CPU that is chasing the score has to treat fourth down differently.
-      // The old rule took every makeable field goal (or punted) regardless of
-      // game state, so it could casually surrender a late possession while
-      // down multiple scores.
-      const cpuSide = G.drive;
-      const deficit = Math.max(0, G.score[other(cpuSide)] - G.score[cpuSide]);
-      const trailing = deficit > 0;
-      const late = G.quarter >= 4;
-      const urgent = late && G.clock <= 120;
-      const short = G.toGain <= 3;
-      let goForP = 0;
-      if (trailing && late) {
-        if (deficit >= 8) goForP = urgent ? 0.94 : 0.52;
-        else if (deficit >= 4) goForP = urgent ? 0.72 : 0.34;
-        else goForP = G.clock <= 75 ? 0.60 : 0.20;
-        if (short) goForP += 0.10;
-        if (G.losYd >= 50) goForP += 0.08;
-        if (G.losYd <= 25 && !urgent) goForP -= 0.12;
-      } else if (trailing && G.quarter >= 3 && deficit >= 8 && short && G.losYd >= 45) {
-        // Start applying pressure before the final quarter when a possession
-        // is already not enough to catch up.
-        goForP = 0.28;
-      }
-      if (goForP > 0 && Math.random() < clamp(goForP, 0, 0.97)) {
-        G.cpuFourthDecision = "GO";
-      } else {
-        G.cpuFourthDecision = fgDist <= 50 ? "FG" : "PUNT";
-        if (fgDist <= 50) { enterKick("FG"); return null; }
-        if (G.losYd < 58 || G.toGain > 2) { enterKick("PUNT"); return null; }
-      }
+      if (fgDist <= 50) { enterKick("FG"); return null; }
+      if (G.losYd < 58 || G.toGain > 2) { enterKick("PUNT"); return null; }
     }
-    // Pick from the situationally-relevant set with a little noise — and
-    // never run the exact same call back-to-back.  The old coordinator ran
-    // on 42% of ordinary downs and repeatedly chose interior runs, which made
-    // the CPU easy to sit on.  It now treats the run as a constraint/clock
-    // tool and favors the perimeter unless the situation calls for power.
+    // pick from the situationally-relevant set with a little noise —
+    // and never run the exact same call back-to-back
     let pool = relevantOffense(5);
     if (pool.length > 1 && G.cpuLastOff) pool = pool.filter((p) => p.name !== G.cpuLastOff);
     const short = G.toGain <= 3;
-    const goalLine = G.losYd + G.toGain >= 100 || G.losYd >= 96;
+    // a real coordinator runs it ~42% of the time (more on short yardage); the
+    // pool is topped up with runs so the ground game actually shows up
     let runs = pool.filter((p) => p.type === "run"), passes = pool.filter((p) => p.type === "pass");
     if (!runs.length) runs = RUN_PLAYS.slice();
     let choice;
-    const runRate = goalLine ? 0.52 : (short ? 0.46 : (G.toGain >= 8 ? 0.18 : 0.28));
-    if (Math.random() < runRate && runs.length) {
-      const conventional = runs.filter((p) => !p.hbPass && !p.sweepPass);
-      const candidates = conventional.length ? conventional : runs;
-      const outside = candidates.filter((p) => p.lane && p.lane !== 0);
-      const middle = candidates.filter((p) => !p.lane || p.lane === 0);
-      // Sweeps give the CPU a viable second answer; short yardage and the
-      // goal line still lean into the interior by design.
-      let lanePool = (!short && !goalLine && outside.length && Math.random() < 0.72) ? outside : (middle.length ? middle : candidates);
-      if (lanePool.length > 1 && G.cpuLastRunLane != null) {
-        const varied = lanePool.filter((p) => p.lane !== G.cpuLastRunLane);
-        if (varied.length) lanePool = varied;
-      }
-      choice = learnedCpuOffensePick(lanePool);
-      G.cpuLastRunLane = choice.lane || 0;
-    }
-    else choice = learnedCpuOffensePick(passes.length ? passes : pool);
+    if ((Math.random() < (short ? 0.58 : 0.42)) && runs.length) choice = runs[(Math.random() * runs.length) | 0];
+    else choice = (passes[0] ? passes : pool)[(Math.random() * (passes.length || pool.length)) | 0];
     G.cpuLastOff = choice && choice.name;
     return choice;
   }
   function cpuChooseDef() {
     const pool = relevantDefense(4);
-    // Long-term scouting survives game-to-game. The coordinator remembers
-    // player play style by situation, then chooses a counter more often as
-    // the sample and game experience grow.
-    const book = persistentScout(scoutSituation());
-    // The CPU never sees the selected card.  It does remember that the QB
-    // keeps sneaking in the same short-yardage spots, then comes in with a
-    // prepared front.  That makes a fake-pass/sneak a counterable tendency,
-    // not an automatic first down or a psychic defensive call.
-    const sneakRate = (book.sneak || 0) / Math.max(1, book.plays);
-    if (G.toGain <= 3 && book.sneak >= 2 && sneakRate >= 0.18 &&
-      Math.random() < clamp(0.34 + cpuExperience() * 0.34 + (book.sneak - 2) * 0.06, 0.34, 0.82)) {
-      const antiSneak = DEF_PLAYS.filter((d) => d.tags.includes("run") || d.tags.includes("goalline") || d.spy);
-      if (antiSneak.length) return antiSneak[(Math.random() * antiSneak.length) | 0];
-    }
-    if (book.plays >= 6) {
-      const passRate = book.pass / book.plays;
-      const deepRate = Math.max(book.deep / Math.max(1, book.pass), book.risky / Math.max(1, book.pass));
-      const want = passRate >= 0.56
-        ? (deepRate >= 0.32 ? ["deep", "long", "prevent"] : ["blitz", "short", "deep"])
-        : passRate <= 0.34 ? ["run", "short", "goalline"] : null;
-      const learnedCounterP = clamp(0.22 + cpuExperience() * 0.24 + (book.plays - 6) * 0.015, 0.22, 0.76);
-      if (want && Math.random() < learnedCounterP) {
-        const counter = DEF_PLAYS.filter((d) => d.tags.some((tg) => want.includes(tg)));
-        if (counter.length) return counter[(Math.random() * counter.length) | 0];
-      }
-    }
     // the CPU coordinator scouts YOUR tendencies: a pass-happy stretch pulls
     // coverage/blitz calls, ground-and-pound pulls run-stuffers
     const recent = G.recentOff || [];
     if (recent.length >= 3) {
       const rate = recent.filter((t) => t === "pass").length / recent.length;
       const want = rate > 0.7 ? ["deep", "long", "blitz"] : rate < 0.3 ? ["run", "short", "goalline"] : null;
-      // The short-term read reacts inside the current drive; the persistent
-      // book above means the CPU also arrives prepared next game.
-      const learnedCounterP = clamp(0.45 + (recent.length - 2) * 0.12, 0.45, 0.81);
-      if (want && Math.random() < learnedCounterP) {
+      if (want && Math.random() < 0.55) {
         const counter = DEF_PLAYS.filter((d) => d.tags.some((tg) => want.includes(tg)));
         if (counter.length) return counter[(Math.random() * counter.length) | 0];
       }
@@ -1818,436 +1409,17 @@
   }
 
   // -------------------------------------------------------- player entities
-  // STAMINA (Madden-style ranges): how long a dino holds top speed before the
-  // legs go. Backs/corners run all day; linemen live in 4-second bursts.
-  // Derived per player from the name seed so every dino is a little different.
-  const STAM_BASE = {
-    QB: 78, RB: 88, FB: 82, WR: 87, WR1: 87, WR2: 87, WR3: 87, TE: 84,
-    OL: 76, EDGE: 79, DL: 78, LB: 85, CB: 88, S: 87, K: 72,
-  };
-  // Collision bodies describe the part of each dino that actually occupies
-  // turf (torso / hips), not the full sprite rectangle including a tail,
-  // horns, or outstretched arms.  This keeps a line of trikes shoulder-to-
-  // shoulder without letting bodies clip through one another.  Mass is used
-  // only to split positional correction: a triceratops wins more of a crowd
-  // than a raptor, but no player is immovable.
-  const BODY_PROFILES = {
-    // These radii intentionally clear the painted 32px silhouettes, not just
-    // a tiny centre dot. Normal football traffic always leaves a visible seam.
-    // A completed tackle is the one deliberate exception: its paired bodies
-    // may share a brief shoulder-wrap window before the carrier falls away.
-    troodon: { r: 13, mass: 0.88 }, carno: { r: 15, mass: 1.18 },
-    pachy: { r: 15, mass: 1.22 }, veloci: { r: 13, mass: 0.82 },
-    deino: { r: 14, mass: 1.08 }, trike: { r: 16, mass: 1.42 },
-    stego: { r: 16, mass: 1.38 }, allo: { r: 15, mass: 1.16 },
-    spino: { r: 15, mass: 1.20 }, deinony: { r: 13, mass: 0.86 },
-    quetz: { r: 14, mass: 0.94 }, trex: { r: 20, mass: 1.75 },
-    ptero: { r: 10, mass: 0.65 }, default: { r: 14, mass: 1.0 },
-  };
-  let nextBodyId = 1;
-  const stamOf = (name, role) =>
-    clamp((STAM_BASE[role] || 82) + (seedHash((name || "dino") + "stam") % 21) - 10, 60, 99);
-  // kickers: RANGE comes from the leg; ACCURACY is its own talent
-  const kickAccOf = (name) => clamp(68 + (seedHash((name || "ptero") + "kacc") % 30), 65, 99);
   function mkEnt(team, species, name, role, sp, extra) {
-    const body = BODY_PROFILES[species] || BODY_PROFILES.default;
-    const e = Object.assign({
+    return Object.assign({
       team, species, name: name || "", role: role || "", spd: spdPx(sp || 78),
       x: 0, y: 0, vx: 0, vy: 0, dir: team === "off" ? 1 : -1, animT: Math.random(),
-      bodyId: nextBodyId++, bodyR: body.r, bodyMass: body.mass,
       state: "idle", path: null, pathI: 0, endMode: "stop",
       engaged: null, engageT: 0, staggerT: 0, jukeT: 0, jukeCd: 0, diveT: 0, proneT: 0,
       hands: 75, agi: 75, tkl: 75, acc: 75, arm: 75, controlled: false, cover: null, zone: null,
       tackleCd: 0, soarT: 0, soarCd: 0, soarCharge: 0.35, punching: 0, punchCd: 0, spinCd: 0, throwT: 0, jumpT: 0,
-      stiffT: 0, stiffCd: 0, stamNow: 1, coldT: 0,
-      // Visual action state is deliberately separate from gameplay timers.
-      // It shifts the original compact species sprite for a dive, high-point
-      // catch, stiff-arm, tackle aftermath, or celebration—never a generic
-      // replacement body that could break the field's visual language.
-      pose: "", poseT: 0, poseDur: 0, impactT: 0, impactLead: false, catchDiveT: 0,
-      // A successful tackle owns one intentionally overlapping pair for a
-      // fraction of a second. These fields never participate in ordinary
-      // player movement or collision; they only exempt that named contact
-      // from the separation solver while the shoulder wrap is on screen.
-      tackleImpactT: 0, tackleImpactWith: 0, tackleImpactRole: "", tackleFallDir: 0, tackleFallPending: false,
       // unique athletic profile: jump derives from the name so every dino differs
       jump: 55 + (seedHash(name || species) % 30),
     }, extra || {});
-    if (!e.stam) e.stam = stamOf(e.name, e.role);
-    return e;
-  }
-  // An action pose is cosmetic state layered on top of the original compact
-  // species sprite.  Gameplay never depends on this timer: a dropped frame
-  // cannot change a catch, tackle, or possession outcome.
-  function playPose(e, pose, duration) {
-    if (!e || !pose) return;
-    e.pose = pose;
-    e.poseDur = Math.max(0.08, duration || 0.48);
-    e.poseT = e.poseDur;
-  }
-  function continuePose(e, pose, remaining) {
-    // Keep an anticipatory catch in the frame it has earned. Restarting it at
-    // possession would make hands fall back to a load after the ball arrived.
-    if (e && e.pose === pose && e.poseT > 0) {
-      const p = poseState(e).progress;
-      e.poseDur = Math.max(0.08, remaining / Math.max(0.06, 1 - p));
-      e.poseT = Math.max(0.08, remaining);
-      return;
-    }
-    playPose(e, pose, remaining);
-  }
-
-  // ---------------------------------------------------------------- tackle contact beat
-  // Normal dinos must never visually overlap. A real tackle is different:
-  // for one short, named shoulder-wrap window the driver puts body mass into
-  // the carrier, then the carrier is moved backward out of the contact. The
-  // pair identity prevents a nearby third dino from ever inheriting this
-  // exception by accident.
-  function isIntentionalTacklePair(a, b) {
-    if (!a || !b || !(a.tackleImpactT > 0) || !(b.tackleImpactT > 0)) return false;
-    if (a.tackleImpactWith !== b.bodyId || b.tackleImpactWith !== a.bodyId) return false;
-    const driver = a.tackleImpactRole === "driver" ? a : (b.tackleImpactRole === "driver" ? b : null);
-    const carrier = a.tackleImpactRole === "carrier" ? a : (b.tackleImpactRole === "carrier" ? b : null);
-    if (!driver || !carrier) return false;
-    // It is not a permanent collision exemption after the action cels end.
-    return driver.poseT > 0 && carrier.poseT > 0 &&
-      ["dive", "tackle"].includes(driver.pose) && ["tackled", "prone"].includes(carrier.pose);
-  }
-  function tickTackleImpact(e, dt) {
-    if (!e || !(e.tackleImpactT > 0)) return;
-    e.tackleImpactT = Math.max(0, e.tackleImpactT - dt);
-    if (!e.tackleImpactT) {
-      e.tackleImpactWith = 0; e.tackleImpactRole = ""; e.tackleFallDir = 0;
-    }
-  }
-  function beginTackleImpact(tackler, carrier, duration, options) {
-    if (!tackler || !carrier) return null;
-    const opt = options || {};
-    const dur = Math.max(0.08, duration || 0.48);
-    let dx = carrier.x - tackler.x, dy = carrier.y - tackler.y;
-    let d = Math.hypot(dx, dy);
-    if (d < 0.001) { dx = tackler.dir || 1; dy = 0; d = 1; }
-    const nx = dx / d, ny = dy / d;
-    const fallDir = Math.abs(nx) > 0.18 ? (nx >= 0 ? 1 : -1) : (carrier.dir || tackler.dir || 1);
-    tackler.tackleImpactT = dur; carrier.tackleImpactT = dur;
-    tackler.tackleImpactWith = carrier.bodyId; carrier.tackleImpactWith = tackler.bodyId;
-    tackler.tackleImpactRole = "driver"; carrier.tackleImpactRole = "carrier";
-    carrier.tackleFallDir = fallDir; carrier.tackleFallPending = true;
-
-    // The live play has just had its ordinary bodies separated by physics.
-    // Move only this pair into a clearly readable shoulder overlap; the ball
-    // carrier is displaced *away* from the driver rather than folded in place.
-    if (opt.reposition !== false) {
-      const impactGap = opt.impactGap == null
-        ? Math.max(11, Math.round(bodyContactRange(tackler, carrier) * 0.48))
-        : opt.impactGap;
-      const knockback = opt.knockback == null ? Math.max(6, Math.round(impactGap * 0.55)) : opt.knockback;
-      carrier.x += nx * knockback; carrier.y += ny * knockback;
-      tackler.x = carrier.x - nx * impactGap; tackler.y = carrier.y - ny * impactGap;
-      if (Math.abs(nx) > 0.18) tackler.dir = fallDir;
-    }
-    return { nx, ny, fallDir };
-  }
-
-  // ------------------------------------------------------ visual QA scenes
-  // These four tiny, deterministic set pieces are intentionally available
-  // only through the `?qa=1` local review URL. They use the production field,
-  // player sprites, ball renderer, action motion, and contact solver—so a GIF is
-  // evidence of the actual game path, not a separate mockup.  Each scene has
-  // an approach/read before its football moment, then holds its aftermath long
-  // enough for frame-by-frame inspection.
-  function qaSetPose(e, pose, duration) {
-    playPose(e, pose, duration);
-    e.poseDur = duration;
-  }
-  // Export a review frame through a DOM attribute only when a reviewer asks
-  // for it in `?qa=1`.  The browser harness reads the exact canvas PNG from
-  // this attribute, so exports cannot accidentally include browser chrome or
-  // JPEG-compress the single-pixel artwork.
-  function qaExportFrame() {
-    if (!G.qaMode) return;
-    render();
-    cv.dataset.qaState = G.state;
-    cv.dataset.qaScene = G.qaScene ? G.qaScene.kind : "";
-    cv.dataset.qaTime = G.qaScene ? G.qaScene.t.toFixed(3) : "0.000";
-    cv.dataset.qaPng = cv.toDataURL("image/png");
-  }
-  function qaStepCosmetics(dt) {
-    for (const e of G.players || []) {
-      e.animT += dt * 7;
-      if (e.jumpT > 0) e.jumpT = Math.max(0, e.jumpT - dt);
-      if (e.catchDiveT > 0) e.catchDiveT = Math.max(0, e.catchDiveT - dt);
-      if (e.impactT > 0) e.impactT = Math.max(0, e.impactT - dt);
-      tickTackleImpact(e, dt);
-      if (e.poseT > 0) {
-        e.poseT = Math.max(0, e.poseT - dt);
-        if (!e.poseT) e.pose = "";
-      }
-      if (e.fdCeleb > 0) e.fdCeleb = Math.max(0, e.fdCeleb - dt);
-    }
-  }
-  function stageHighlight(kind) {
-    // A fixed daytime KC/PIT presentation prevents weather, roster loading,
-    // or camera randomness from hiding an artifact in the visual gate.
-    G.mode = "qa"; G.practice = false; G.humanB = false;
-    G.my = "KC"; G.opp = "PIT"; G.homeAbbr = "KC";
-    G.sheets.A = DinoSprites.buildTeamSprites(TEAMS.KC[1], TEAMS.KC[2]);
-    G.sheets.B = DinoSprites.buildTeamSprites(TEAMS.PIT[1], TEAMS.PIT[2]);
-    G.stadium = makeStadium("KC"); G.stadium.dome = false; G.stadium.time = "day";
-    G.weather = { type: "CLEAR", wind: { x: 0, y: 0 }, catchMod: 0, speedMod: 1, fumbleMod: 0, kickMod: 0, temp: 72, month: "SEP" };
-    buildCrowd(TEAMS.KC[1]);
-    G.score = { A: 17, B: 14 }; G.quarter = 4; G.clock = 82;
-    G.rampage = { A: 52, B: 40 }; G.ramp = null; G.rampUsed = { A: 0, B: 0 };
-    // Keep the QA tackle/catch lane free of the blue/yellow sticks. In real
-    // play those lines can cross any collision, but a review GIF must not let
-    // a first-down stripe hide the tackler's shoulder at the exact contact.
-    G.drive = "A"; G.losYd = 36; G.down = 2; G.toGain = 8;
-    G.curPlay = OFF_PLAYS.find((p) => p.name === "SLANTS") || OFF_PLAYS[1];
-    G.defCall = DEF_PLAYS[0]; G.parts = []; G.ticker = null; G.banner = null;
-    G.fdFlash = 0; G.carrier = null; G.controlled = null; G.playT = 0;
-    buildPlayers();
-
-    const qb = G.players.find((e) => e.team === "off" && e.role === "QB");
-    const rb = G.players.find((e) => e.team === "off" && e.role === "RB");
-    const wr = G.players.find((e) => e.team === "off" && e.role === "WR1") ||
-      G.players.find((e) => e.team === "off" && e.routeEligible);
-    const db = G.players.find((e) => e.team === "def" && e.species === "deinony") ||
-      G.players.find((e) => e.team === "def");
-    const safety = G.players.find((e) => e.team === "def" && e.species === "quetz") || db;
-    // Use a midpoint between major yard stripes so the QA contact is not
-    // visually bisected by a white field line in its most important frame.
-    const baseX = xAtYd(57), baseY = MID;
-    const use = (...actors) => {
-      G.players = actors.filter(Boolean);
-      for (const e of G.players) {
-        e.vx = e.vy = 0; e.state = "idle"; e.path = null; e.pathI = 0;
-        e.pose = ""; e.poseT = 0; e.poseDur = 0; e.jumpT = 0; e.proneT = 0;
-        e.impactT = 0; e.impactLead = false; e.catchDiveT = 0; e.fdCeleb = 0;
-        e.tackleImpactT = 0; e.tackleImpactWith = 0; e.tackleImpactRole = "";
-        e.tackleFallDir = 0; e.tackleFallPending = false;
-        e.soarT = 0; e.soarCd = 0; e.soarCharge = 0.35; e.controlled = false;
-      }
-    };
-    const hold = (e) => {
-      G.carrier = e;
-      G.ball = { mode: "held", holder: e, x: e.x + e.dir * 8, y: e.y, z: 12 };
-    };
-
-    let scene;
-    if (kind === "tackle") {
-      use(db, rb);
-      const gap = bodyContactRange(db, rb) + 1;
-      db.x = baseX - 53; db.y = baseY + 2; db.dir = 1;
-      rb.x = baseX + 53; rb.y = baseY; rb.dir = -1;
-      hold(rb);
-      scene = { kind, t: 0, dur: 1.58, baseX, baseY, tackler: db, carrier: rb, gap,
-        // A real wrap intentionally brings the two painted bodies together;
-        // this is much closer than the ordinary torso gap but only lasts long
-        // enough to read as one dino driving the other backwards.
-        impactGap: Math.max(11, Math.round(gap * 0.48)),
-        startGap: 106, dive: false, wrap: false, caption: "TACKLE · APPROACH → DIVE → SHOULDER DRIVE → BACKWARD FALL" };
-    } else if (kind === "firstdown") {
-      use(rb, db);
-      G.losYd = 50; G.toGain = 10; G.down = 2;
-      const firstDownX = xAtYd(60);
-      rb.x = firstDownX - 44; rb.y = baseY; rb.dir = 1;
-      db.x = rb.x - 92; db.y = baseY + 54; db.dir = 1;
-      hold(rb);
-      scene = { kind, t: 0, dur: 1.56, baseX, baseY, runner: rb, defender: db, crossed: false,
-        firstDownX, finishX: firstDownX + 36, celebrated: false,
-        caption: "FIRST DOWN · CROSS → PLANT → POINT" };
-    } else if (kind === "catch") {
-      use(qb, wr, db);
-      qb.x = baseX - 172; qb.y = baseY + 46; qb.dir = 1;
-      wr.x = baseX - 28; wr.y = baseY; wr.dir = 1;
-      db.x = baseX + 62; db.y = baseY - 48; db.dir = -1;
-      G.carrier = null;
-      G.ball = { mode: "held", holder: qb, x: qb.x + 8, y: qb.y, z: 12 };
-      qb.throwT = 0.32; qaSetPose(qb, "throw", 0.32);
-      scene = { kind, t: 0, dur: 1.58, baseX, baseY, qb, receiver: wr, defender: db, caught: false,
-        releaseAt: 0.16, flight: 0.72, contactQ: 0.78, target: { x: baseX + 10, y: baseY },
-        caption: "HIGH-POINT CATCH · LOAD → LEAP → CLAWS" };
-    } else { // interception
-      use(qb, wr, safety);
-      qb.x = baseX - 172; qb.y = baseY + 46; qb.dir = 1;
-      safety.x = baseX + 46; safety.y = baseY; safety.dir = -1;
-      wr.x = baseX - 24; wr.y = baseY + 38; wr.dir = 1;
-      G.carrier = null;
-      G.ball = { mode: "held", holder: qb, x: qb.x + 8, y: qb.y, z: 12 };
-      qb.throwT = 0.32; qaSetPose(qb, "throw", 0.32);
-      scene = { kind: "interception", t: 0, dur: 1.58, baseX, baseY, qb, receiver: wr, defender: safety, picked: false,
-        releaseAt: 0.16, flight: 0.72, contactQ: 0.76, target: { x: baseX + 10, y: baseY },
-        safetyGrounded: true, caption: "INTERCEPTION · READ → JUMP → TURN" };
-    }
-    G.qaScene = scene; G.state = "qa"; G.phase = kind === "tackle" || kind === "firstdown" ? "carry" : "air";
-    G.camX = clamp(baseX - W * 0.45, 0, FIELD_LEN - W);
-    resolvePlayerContacts();
-    return scene;
-  }
-  function updateHighlight(dt) {
-    const s = G.qaScene;
-    if (!s) { G.state = "title"; return; }
-    const hold = (e) => {
-      G.carrier = e;
-      G.ball = { mode: "held", holder: e, x: e.x + e.dir * 8, y: e.y, z: 12 };
-    };
-    const lerp = (a, b, q) => a + (b - a) * clamp(q, 0, 1);
-    s.t = Math.min(s.dur, s.t + dt);
-    qaStepCosmetics(dt);
-    if (s.kind === "tackle") {
-      const clearGap = s.gap + 4;
-      // Let the launch read for nearly half a second. The impact then closes
-      // into a genuine, transient body-on-body wrap before the carrier is
-      // knocked backward and falls out of it. Keeping those three beats
-      // separate prevents a tackle from reading as two sprites merely
-      // squeezing together at a permanent physics seam.
-      const diveStart = 0.10, wrapStart = 0.46;
-      if (s.t < wrapStart) {
-        const q = s.t / wrapStart;
-        const d = lerp(s.startGap, clearGap, q);
-        s.tackler.x = s.baseX - d / 2; s.carrier.x = s.baseX + d / 2;
-        s.tackler.y = s.baseY + 2; s.carrier.y = s.baseY;
-        if (!s.dive && s.t >= diveStart) {
-          s.dive = true; s.diveAt = s.t; s.phase = "gather";
-          // The launch clears the turf briefly, peaks during the head-first
-          // lunge, and is back down before the shoulder wrap. This is visual
-          // motion only—the collision solver still owns the body gap.
-          s.tackler.jumpT = 0.34;
-          qaSetPose(s.tackler, "dive", 0.38);
-        }
-      } else {
-        const closeQ = clamp((s.t - wrapStart) / 0.12, 0, 1);
-        const driveQ = clamp((s.t - (wrapStart + 0.08)) / 0.46, 0, 1);
-        // Keep the shoulder engaged through the entire backwards rotation.
-        // A tackle that releases before the carrier hits the turf reads as a
-        // pass-by; a real defender stays connected through the fall.
-        const releaseQ = clamp((s.t - 1.48) / 0.22, 0, 1);
-        // First close to a shoulder/body overlap. The last few review frames
-        // only ease that compression slightly, rather than reopening a field
-        // coloured gap before the backward-fall silhouette has landed.
-        let d = lerp(clearGap, s.impactGap, closeQ);
-        if (releaseQ > 0) d = lerp(s.impactGap, Math.min(clearGap, s.impactGap + 4), releaseQ);
-        const knockback = 18 * (driveQ * driveQ * (3 - 2 * driveQ));
-        s.carrier.x = s.baseX + d / 2 + knockback;
-        s.tackler.x = s.carrier.x - d;
-        // Keep the driver one pixel nearer camera, but align its shoulder to
-        // the carrier's chest. The older low offset landed at the thighs and
-        // looked like two dinos slipping past each other rather than a wrap.
-        s.carrier.y = s.baseY + Math.round(2 * driveQ);
-        // As the carrier rotates down, the tackler drops its shoulder and
-        // torso with the hit. That keeps the body-led wrap connected to the
-        // carrier's ribs instead of leaving a helmet-to-helmet-looking tap.
-        const fallSink = clamp((s.t - 1.02) / 0.22, 0, 1);
-        s.tackler.y = s.carrier.y + 1 + Math.round(4 * fallSink);
-        if (!s.wrap) {
-          s.wrap = true; s.wrapAt = s.t; s.phase = "wrap";
-          // This narrowly scoped contact exception is the only time the
-          // exact mask/body solvers allow visual overlap. All other players
-          // retain their normal physical separation.
-          beginTackleImpact(s.tackler, s.carrier, 1.18, { reposition: false, impactGap: s.impactGap });
-          qaSetPose(s.tackler, "tackle", 1.24);
-          qaSetPose(s.carrier, "tackled", 1.18);
-          // The overlapping shoulder/torso silhouettes communicate contact
-          // directly; no detached burst is needed to fake the collision.
-          s.carrier.impactLead = false; s.carrier.impactT = 0;
-        }
-        if (s.t >= 0.72) s.phase = "drive";
-        if (s.t >= 1.02) s.phase = "backward-fall";
-        // Finish on the compact backward-fall cel, which keeps the football
-        // tucked to the torso and preserves the dino's full body volume.
-        if (!s.fallen && s.t >= 1.08) {
-          s.fallen = true;
-          s.carrier.tackleFallPending = false;
-          // Hold the authored fall past the end of the review clip. Letting
-          // this timer expire on the final GIF frame snapped the carrier back
-          // upright and erased the payoff of an otherwise correct tackle.
-          qaSetPose(s.carrier, "prone", Math.max(0.72, s.dur - s.t + 0.22));
-        }
-      }
-      hold(s.carrier);
-    } else if (s.kind === "firstdown") {
-      if (s.t < 0.26) s.runner.x = lerp(s.firstDownX - 44, s.firstDownX, s.t / 0.26);
-      else if (s.t < 0.42) s.runner.x = lerp(s.firstDownX, s.finishX, (s.t - 0.26) / 0.16);
-      else s.runner.x = s.finishX;
-      s.defender.x = s.runner.x - 86; s.defender.y = s.baseY + 54;
-      if (!s.crossed && s.t >= 0.26) {
-        s.crossed = true;
-        s.crossedAt = s.t; G.fdFlash = 0.66;
-      }
-      if (!s.celebrated && s.t >= 0.42) {
-        // One small plant/hop, then a downfield point with the ball tucked in
-        // the opposite arm. The result text is deliberately only a brief tag.
-        s.celebrated = true; s.celebratedAt = s.t; s.phase = "point";
-        s.runner.jumpT = 0.4; s.runner.fdCeleb = 0.62;
-        qaSetPose(s.runner, "celebrate", 0.92);
-      }
-      hold(s.runner);
-    } else {
-      const landing = s.kind === "catch" ? s.receiver : s.defender;
-      if (s.t < s.releaseAt) {
-        // The throw begins in the quarterback's actual claws; the football
-        // is not rendered in midair before his release cel has moved.
-        G.ball = { mode: "held", holder: s.qb, x: s.qb.x + s.qb.dir * 8, y: s.qb.y, z: 12 };
-      } else if (!s.caught && !s.picked) {
-        if (!s.released) {
-          s.released = true;
-          G.ball = {
-            mode: "air", kind: "lob",
-            from: { x: s.qb.x + s.qb.dir * 10, y: s.qb.y - 10 },
-            to: { x: s.target.x, y: s.target.y },
-            x: s.qb.x + s.qb.dir * 10, y: s.qb.y - 10, z: 12, holder: null,
-          };
-        }
-        const q = clamp((s.t - s.releaseAt) / s.flight, 0, 1);
-        const b = G.ball;
-        b.x = lerp(b.from.x, b.to.x, q);
-        b.y = lerp(b.from.y, b.to.y, q);
-        // At the contact beat the ball is at the jumper's claws, not on the
-        // turf under a sprite. Its arc is kept deliberately modest and clear.
-        b.z = 12 + 42 * Math.sin(Math.PI * q);
-        if (s.kind === "catch") {
-          if (s.receiverStartX == null) { s.receiverStartX = s.receiver.x; s.defenderStartX = s.defender.x; }
-          s.receiver.x = lerp(s.receiverStartX, s.target.x, q / 0.62);
-          s.defender.x = lerp(s.defenderStartX, s.target.x + 28, q / 0.58);
-          s.defender.y = lerp(s.baseY - 48, s.baseY - 28, q / 0.58);
-          // A compact three-cel action needs a short load so the middle cel
-          // is the actual high point when the football reaches the claws.
-          // It is continued at possession below rather than restarted there.
-          if (!s.loaded && q >= 0.48) { s.loaded = true; s.loadedAt = s.t; s.phase = "load"; qaSetPose(s.receiver, "catchHigh", 0.54); }
-          if (!s.leapt && q >= 0.56) { s.leapt = true; s.leaptAt = s.t; s.phase = "leap"; s.receiver.jumpT = 0.4; }
-          if (!s.diveAttempt && q >= 0.58) { s.diveAttempt = true; qaSetPose(s.defender, "dive", 0.40); }
-        } else {
-          if (s.safetyStartX == null) { s.safetyStartX = s.defender.x; s.receiverStartX = s.receiver.x; }
-          // The safety reads and walks into the window on foot. `soarT` is
-          // intentionally pinned at zero in this set piece.
-          s.defender.soarT = 0;
-          s.defender.x = lerp(s.safetyStartX, s.target.x + 2, q / 0.58);
-          s.receiver.x = lerp(s.receiverStartX, s.target.x - 18, q / 0.72);
-          if (!s.loaded && q >= 0.46) { s.loaded = true; s.loadedAt = s.t; s.phase = "read"; qaSetPose(s.defender, "catchHigh", 0.54); }
-          if (!s.leapt && q >= 0.55) { s.leapt = true; s.leaptAt = s.t; s.phase = "jump"; s.defender.jumpT = 0.4; }
-          if (!s.contested && q >= 0.54) { s.contested = true; qaSetPose(s.receiver, "dive", 0.36); }
-        }
-        if (q >= s.contactQ) {
-          s.contactAt = s.t;
-          // Do not snap back to the loading frame on possession.  Retiming
-          // the same pose lets the apex resolve to a tucked-ball landing.
-          continuePose(landing, "catchHigh", 0.78);
-          if (s.kind === "catch") { s.caught = true; s.phase = "secure"; hold(s.receiver); }
-          else { s.picked = true; s.phase = "secure"; hold(s.defender); }
-        }
-      } else {
-        // A visible landing/pivot comes after possession; it never happens on
-        // the same frame as the ball contact.
-        if (s.kind === "interception" && s.t > s.releaseAt + s.flight * 0.92) landing.dir = 1;
-        if (s.t > s.releaseAt + s.flight * 0.94) landing.x += (s.kind === "catch" ? 14 : 12) * dt;
-      }
-    }
-    G.fdFlash = Math.max(0, (G.fdFlash || 0) - dt);
-    resolvePlayerContacts();
-    // Keep the review camera locked on the action lane. A real game camera
-    // tracks the ball, but a QA GIF must make a 32px tackle or high-point
-    // legible from frame one instead of panning the moment out of its crop.
-    G.camX = clamp((s.baseX || xAtYd(60)) - W * 0.45, 0, FIELD_LEN - W);
   }
 
   function buildPlayers() {
@@ -2268,20 +1440,16 @@
     for (let i = 0; i < 5; i++) {
       const op = olist[i % olist.length];
       const e = mkEnt("off", "trike", op.name || "", "OL", Math.min(70, op.spd || 60),
-        // BLOCKING is the O-lineman's stat (his "catching") — real Madden
-        // pass/run-block when we have it, mass+technique otherwise
-        { tkl: op.tkl || 80, str: op.str || 75, jump: op.jump || 60, stam: op.stam,
-          blk: op.blk || clamp(Math.round((op.str || 75) * 0.65 + (op.tkl || 80) * 0.35), 60, 99) });
+        { tkl: op.tkl || 80, str: op.str || 75, jump: op.jump || 60 });
       e.x = losX - 14; e.y = MID - 64 + i * 32; e.state = "block";
-      e.lineSlot = i; e.lineOffset = -64 + i * 32;
       P.push(e);
     }
     // QB: troodon
-    const eqb = mkEnt("off", "troodon", qb.name, "QB", qb.spd, { acc: qb.acc, arm: qb.arm, agi: qb.agi, hands: 70, str: qb.str || 72, jump: qb.jump || 65, stam: qb.stam, stiff: qb.stiff });
+    const eqb = mkEnt("off", "troodon", qb.name, "QB", qb.spd, { acc: qb.acc, arm: qb.arm, agi: qb.agi, hands: 70, str: qb.str || 72, jump: qb.jump || 65 });
     eqb.x = losX - 46; eqb.y = MID; P.push(eqb);
     // RB: carnotaurus
-    const erb = mkEnt("off", "carno", rb.name, "RB", rb.spd, { hands: rb.hands, agi: rb.agi, str: rb.str || 78, jump: rb.jump || 70, stam: rb.stam, stiff: rb.stiff });
-    erb.x = losX - 56; erb.y = MID + 14; P.push(erb);
+    const erb = mkEnt("off", "carno", rb.name, "RB", rb.spd, { hands: rb.hands, agi: rb.agi, str: rb.str || 78, jump: rb.jump || 70 });
+    erb.x = losX - 84; erb.y = MID + 14; P.push(erb);
     // FB: pachycephalosaurus lead blocker on power plays (subs in for the
     // slot receiver so the offense still fields exactly 11)
     const hasFB = !!(G.curPlay && G.curPlay.fb);
@@ -2299,7 +1467,7 @@
     ];
     for (const [slot, p, x, y] of slots) {
       if (hasFB && slot === "WR3") continue;   // the FB took his snap
-      const e = mkEnt("off", slot === "TE" ? "deino" : "veloci", p.name, slot, p.spd, { hands: p.hands, agi: p.agi, str: p.str || 68, jump: p.jump || 72, stam: p.stam, stiff: p.stiff });
+      const e = mkEnt("off", slot === "TE" ? "deino" : "veloci", p.name, slot, p.spd, { hands: p.hands, agi: p.agi, str: p.str || 68, jump: p.jump || 72 });
       e.x = x; e.y = y; P.push(e);
     }
 
@@ -2309,20 +1477,10 @@
     const tackles = dline.filter((d) => d.pos !== "DE");
     const lb = defR.defense.filter((d) => ["LB", "ILB", "OLB", "MLB"].includes(d.pos));
     const db = defR.defense.filter((d) => ["CB", "DB", "S", "FS", "SAF"].includes(d.pos));
-    // every starter is a REAL, NAMED player: if a position group runs dry
-    // (say, a 4-DB roster in a nickel front), the next man up comes off the
-    // actual bench instead of materializing as a nameless "Dino"
-    const usedDefs = new Set();
-    const benchDef = () => defR.defense.find((p2) => !usedDefs.has(p2));
-    const pick = (arr, i, alt, fbName) => {
-      let c = arr[i] && !usedDefs.has(arr[i]) ? arr[i] : null;
-      if (!c && alt && !usedDefs.has(alt)) c = alt;
-      if (!c) c = benchDef();
-      if (!c) c = { name: fbName, spd: 78, tkl: 78 };
-      usedDefs.add(c);
-      return c;
-    };
-    const dget = (arr, i, fb) => pick(arr, i, null, fb);
+    const dget = (arr, i, fb) => arr[i] || { name: fb, spd: 78, tkl: 78 };
+    // a TRUE 11-man defense: 4 down linemen (EDGE-DT-DT-EDGE), 2 LBs and a
+    // nickel secondary (3 CBs + 2 safeties) — a real modern base front
+    const pick = (arr, i, alt, fbName) => arr[i] || alt || { name: fbName, spd: 78, tkl: 78 };
     const lineSpec = [
       [pick(edges, 0, dline[0], "Edge Dino"), "allo", "EDGE"],
       [pick(tackles, 0, dline[2], "Nose Dino"), "stego", "DL"],
@@ -2332,7 +1490,7 @@
     const lineY = [MID - 60, MID - 20, MID + 20, MID + 60];
     for (let i = 0; i < 4; i++) {
       const [d, species, role] = lineSpec[i];
-      const e = mkEnt("def", species, d.name, role, d.spd, { tkl: d.tkl, state: "rush", str: d.str || 82, jump: d.jump || 65, stam: d.stam });
+      const e = mkEnt("def", species, d.name, role, d.spd, { tkl: d.tkl, state: "rush", str: d.str || 82, jump: d.jump || 65 });
       e.x = losX + 16; e.y = lineY[i]; e.state = "rush";
       // edge rushers each bring a signature pass-rush technique (speed / spin / bull)
       if (role === "EDGE") e.rushTech = (e.spd > spdPx(84)) ? "speed" : ((e.str || 82) >= 84 ? "bull" : "spin");
@@ -2341,7 +1499,7 @@
     // 2 LB: spinosaurus
     for (let i = 0; i < 2; i++) {
       const d = dget(lb, i, "Backer");
-      const e = mkEnt("def", "spino", d.name, "LB", d.spd, { tkl: d.tkl, str: d.str || 78, jump: d.jump || 70, stam: d.stam });
+      const e = mkEnt("def", "spino", d.name, "LB", d.spd, { tkl: d.tkl, str: d.str || 78, jump: d.jump || 70 });
       e.x = losX + 90; e.y = MID - 50 + i * 100; e.state = "read"; P.push(e);
     }
     // 5 DB: three deinonychus corners + a strong safety + the soaring
@@ -2356,7 +1514,7 @@
     for (let i = 0; i < 5; i++) {
       const d = dget(db, i, "Cover Dino");
       const [y0, slot, role, species, depth] = dbSpec[i];
-      const e = mkEnt("def", species, d.name, role, d.spd, { tkl: d.tkl, str: d.str || 66, jump: d.jump || 80, hands: d.hands || 74, stam: d.stam });
+      const e = mkEnt("def", species, d.name, role, d.spd, { tkl: d.tkl, str: d.str || 66, jump: d.jump || 80, hands: d.hands || 74 });
       e.x = losX + depth; e.y = y0; e.coverSlot = slot;
       e.state = "cover"; P.push(e);
     }
@@ -2364,9 +1522,6 @@
     // defensive call adjustments
     const call = G.defCall || DEF_PLAYS[0];
     const lbs = P.filter((e) => e.role === "LB");
-    const sneakBook = !G.humanB && G.drive === "A" ? persistentScout(scoutSituation()) : null;
-    const sneakAlert = !!(sneakBook && G.toGain <= 3 && sneakBook.sneak >= 2 &&
-      sneakBook.sneak / Math.max(1, sneakBook.plays) >= 0.18);
     // rush count: 4 base (the down linemen) → add LBs as the number climbs;
     // light 3-man rushes drop an edge into coverage
     if (call.rush >= 5 && lbs[0]) lbs[0].state = "rush";
@@ -2384,16 +1539,6 @@
     if (call.deep) P.filter((e) => e.role === "S").forEach((e, i) => { e.y = MID + (i === 0 ? -90 : 90); e.x = losX + (call.prevent ? 320 : 260); });
     if (call.run) P.filter((e) => e.role === "LB" || e.role === "S").forEach((e) => { e.x = Math.min(e.x, losX + 40); e.runStuff = true; });
     if (call.spy) { const s = lbs[0] || P.find((e) => e.role === "LB"); if (s) { s.state = "spy"; } }
-    // A prepared short-yardage front is earned by film, not by knowing the
-    // offense's card.  One backer shadows the QB while his partner plugs the
-    // A-gap; a real pass still has its normal coverage answers.
-    if (sneakAlert && !G.patMode) {
-      const spy = lbs[0], plug = lbs[1];
-      if (spy) { spy.state = "spy"; spy.x = losX + 30; spy.y = MID - 18; spy.runStuff = true; }
-      if (plug) { plug.state = "read"; plug.x = losX + 36; plug.y = MID + 18; plug.runStuff = true; }
-      P.filter((e) => e.role === "EDGE").forEach((e) => { e.contain = true; });
-      G.sneakAlert = true;
-    } else G.sneakAlert = false;
     // TAMPA 2: a linebacker bails out and sprints to the deep middle hole
     if (call.tampa) {
       const mlb = lbs[0];
@@ -2441,12 +1586,12 @@
     // passive: always-on stat/speed tweaks for the apex dino
     for (const e of P) {
       if (!e.apex) continue;
-      if (e.passive === "burner") e.spd *= 1.08;
+      if (e.passive === "burner") e.spd *= 1.13;
       if (e.passive === "cannon") { e.arm = Math.min(99, e.arm + 12); e.acc = Math.min(99, e.acc + 4); }
-      if (e.passive === "escape") e.agi = Math.min(99, e.agi + 8);
-      if (e.passive === "tackle") e.tkl = Math.min(99, e.tkl + 6);
-      if (e.passive === "ballhawk") { e.spd *= 1.03; e.tkl = Math.min(99, e.tkl + 4); e.jump = Math.max(e.jump, 92); }
-      if (e.passive === "redzone") { e.hands = Math.min(99, e.hands + 5); e.jump = Math.max(e.jump, 90); }
+      if (e.passive === "escape") e.agi = Math.min(99, e.agi + 12);
+      if (e.passive === "tackle") e.tkl = Math.min(99, e.tkl + 10);
+      if (e.passive === "ballhawk") { e.spd *= 1.06; e.tkl = Math.min(99, e.tkl + 6); e.jump = 99; }
+      if (e.passive === "redzone") { e.hands = Math.min(99, e.hands + 8); e.jump = Math.max(e.jump, 95); }
     }
     // elite-hands receivers and tight ends are the other true leapers
     for (const e of P) {
@@ -2471,18 +1616,6 @@
       }
     }
 
-    // CONDITION carry-over (season/career): tired legs from last week start
-    // the game slower and with a partly-drained stamina tank
-    if (G.szn && G.szn.condition) {
-      const mySide = G.drive === "A" ? "off" : "def";
-      for (const e of P) {
-        if (e.team !== mySide) continue;
-        const cond = G.szn.condition[e.name];
-        if (cond == null || cond >= 100) continue;
-        e.spd *= 0.85 + 0.15 * (cond / 100);
-        e.stamNow = cond / 100;
-      }
-    }
     // difficulty: the CPU-run side gets faster or slower legs
     const cpuTeam = G.drive === "A" ? "def" : "off";
     for (const e of P) if (e.team === cpuTeam) e.spd *= diff().defSpd;
@@ -2509,27 +1642,12 @@
       const defs2 = P.filter((e) => e.team === "def");
       defs2.forEach((e) => { e.spd *= 1.12; });
       const edges = defs2.filter((e) => e.role === "EDGE");
-      const tackles2 = defs2.filter((e) => e.role === "DL");
-      // Give the short-yardage front real lanes before contact solving it.
-      // The old 40px-wide interior put the line and the two A-gap backers
-      // inside one another; this wider bear front still plugs the middle while
-      // keeping every dinosaur's body distinct on the pre-snap frame.
-      edges.forEach((e, i) => { e.contain = true; e.y = MID + (i === 0 ? -84 : 84); });
-      tackles2.forEach((e, i) => { e.y = MID + (i === 0 ? -50 : 50); });
-      // Stack the A-gaps: the sneak is the FIRST thing this defense takes away.
-      P.filter((e) => e.team === "def" && e.role === "LB").forEach((e, i) => {
-        e.x = losX + 24; e.y = MID + (i === 0 ? -16 : 16); e.runStuff = true;
-      });
+      edges.forEach((e, i) => { e.contain = true; e.y = MID + (i === 0 ? -70 : 70); });
     }
 
     G.players = P;
     G.ball = { mode: "held", holder: eqb, x: eqb.x, y: eqb.y, z: 10 };
     G.carrier = null;
-    // Formation coordinates are authored for football spacing, but species have
-    // different physical footprints.  Settle them before the first rendered
-    // pre-snap frame as well as during live play.
-    resolvePlayerContacts();
-    G.ball.x = eqb.x + eqb.dir * 8; G.ball.y = eqb.y;
     G.controlled = null;
     if (defenseHumanSteers()) {
       // single-player defense: the user drives the (soaring) free safety by default
@@ -2542,9 +1660,7 @@
   // ----------------------------------------------------------------- snap!
   function snap() {
     G.state = "live"; G.phase = "drop"; G.playT = 0;
-    G.tape = []; G.playPass = null; G.aim = null; G.soarAim = null; G.slingAnchor = null;
-    noteAiPlayStart();
-    G.selCard = null;   // the pre-snap info card never lingers into the play
+    G.tape = []; G.playPass = null; G.aim = null; G.soarAim = null;
     // scouting log for the CPU defensive coordinator
     if (G.curPlay && offenseIsUser()) {
       G.recentOff = (G.recentOff || []).slice(-4);
@@ -2571,15 +1687,10 @@
       const oline = G.players.filter((e) => e.team === "off" && e.role === "OL");
       const rushStr = rush.reduce((s, e) => s + (e.str || 80), 0) / Math.max(1, rush.length);
       const olStr = oline.reduce((s, e) => s + (e.str || 75), 0) / Math.max(1, oline.length);
-      const mobility = Math.min(0.05, ((qb.agi || 75) - 75) / 250);
-      const receiverControl = offenseIsUser() && G.controlled && G.controlled.team === "off" && G.controlled !== qb;
-      // The old pre-roll was high enough to make CPU QB / user-WR mode feel
-      // predetermined. Protection can still lose, but an AI quarterback now
-      // has time to identify and throw the available outlet.
-      let sackChance = clamp(0.085 + (rushStr - olStr) / 300 - mobility, 0.035, 0.13);
-      if (receiverControl) sackChance *= 0.58;
+      const mobility = ((qb.agi || 75) - 75) / 200;
+      let sackChance = clamp(0.075 + (rushStr - olStr) / 200 - mobility, 0.02, 0.15);
       qb.sackDoom = Math.random() < sackChance;
-      qb.sackAt = rnd(1.42, 2.7);
+      qb.sackAt = rnd(1.1, 2.4);
     }
     if (G.curPlay.type === "run" && !G.curPlay.qbKeep) {
       G.phase = "handoff";
@@ -2590,7 +1701,6 @@
   }
 
   function becomeCarrier(e) {
-    e.carryT = 0;   // fresh legs through the hole (short burst)
     G.carrier = e; G.ball.holder = e; G.ball.mode = "held";
     G.phase = "carry"; e.state = "carry";
     // teammates stop running routes and block for the man with the ball
@@ -2610,13 +1720,8 @@
         const qb = G.players.find((p) => p.role === "QB");
         if (qb && qb !== e) {
           qb.routeEligible = true;
-          qb.path = [{ x: qb.x + 14 * YPX, y: clamp(qb.y - 70, TOP + 12, BOT - 12) }];
+          qb.path = [{ x: qb.x + 12 * YPX, y: clamp(qb.y - 60, TOP + 12, BOT - 12) }];
           qb.pathI = 0; qb.endMode = "go"; qb.state = "route";
-          // nobody covers the quarterback on a handoff — the defense needs a
-          // beat to even realize he's a receiver now
-          for (const d2 of G.players) {
-            if (d2.team === "def" && dist(d2, qb) < 110 && d2.staggerT <= 0 && d2.soarT <= 0) d2.staggerT = 0.5;
-          }
         }
       }
     }
@@ -2626,10 +1731,7 @@
     // apex passives that trigger on becoming the ball carrier
     if (e.apex && e.carrierPassived !== G.playT) {
       e.carrierPassived = G.playT;
-      // Truckstick gets two *attempts* to power through a tackler, not two
-      // automatic escapes.  Keeping the attempts on the carrier also makes
-      // the ability readable and prevents a single back from being invincible.
-      if (e.passive === "truck") e.truckCharges = (e.truckCharges || 0) + 2;
+      if (e.passive === "truck") e.shedCharges = (e.shedCharges || 0) + 2;
       if (e.passive === "yac") e.yacCharge = 1;   // first tackler whiffs
     }
     if (offenseIsUser() && e.team === "off") setControlled(e);
@@ -2647,87 +1749,30 @@
 
   // ------------------------------------------------------------ throw logic
   function maxRange() {
-    const qb = G.ball.holder || G.players.find((e) => e.role === "QB");
-    const arm = qb ? (qb.arm || 75) : 80;
-    // Range is measured from the passer's CURRENT position, never the LOS.
-    // CPU howitzers can reach 40 yards. A user-controlled QB tops out 10
-    // yards shorter (30), so neither the aim preview nor final scatter lets a
-    // player launch an unrealistic 40-yard bomb from a deep drop.
-    const userQB = !!(qb && qb.controlled && qb.team === "off" && offenseIsUser());
-    const cap = userQB ? 30 : 40;
-    let yds = clamp(12 + (arm - 60) * 0.8, 12, cap);
-    // throwing on the run bleeds distance — set your feet for the deep ball
-    if (qb && Math.hypot(qb.vx, qb.vy) > qb.spd * 0.35) yds *= 0.72;
-    return yds * YPX;
-  }
-  function clampThrowRange(qb, to) {
-    const range = maxRange();
-    const d = dist(qb, to);
-    if (d > range) {
-      const scale = range / d;
-      to.x = qb.x + (to.x - qb.x) * scale;
-      to.y = qb.y + (to.y - qb.y) * scale;
-    }
-    return to;
+    const qb = G.players.find((e) => e.role === "QB");
+    return (28 + ((qb ? qb.arm : 80) - 60) * 0.55) * YPX;
   }
   // non-QBs (a halfback on a trick play / sneak pitch) throw wobblers
   const passScatter = (p) => (p && p.role !== "QB") ? (G.curPlay && G.curPlay.sweepPass ? 10 : 26) : 0;
   // bad weather shakes the ball loose from the intended spot a little
   const weatherScatter = () => G.weather.type === "SNOW" ? 9 : G.weather.type === "RAIN" ? 7 : 0;
-  // Passing has an explicit, player-visible read.  The target is chosen when
-  // the throw is released (not retroactively at arrival), and its window is
-  // judged from separation, ball placement, and a defender actually sitting
-  // in the lane.  This is the core fairness contract: OPEN is dependable;
-  // TIGHT is a choice; DANGER is a mistake the player can see before release.
-  function pickPassTarget(to) {
-    return eligible().slice().sort((a, b) => dist(a, to) - dist(b, to))[0] || null;
-  }
-  function assessPassWindow(qb, rec, spot, flight) {
-    if (!rec) return { risk: 1, label: "NO TARGET", separation: 0, placement: 999, defender: null };
-    const projected = { x: rec.x + rec.vx * flight, y: rec.y + rec.vy * flight };
-    const placement = dist(projected, spot);
-    let defender = null, separation = 999, laneGap = 999;
-    const dx = spot.x - qb.x, dy = spot.y - qb.y, lineLen2 = dx * dx + dy * dy || 1;
-    for (const d of G.players) {
-      if (d.team !== "def") continue;
-      const future = { x: d.x + d.vx * flight, y: d.y + d.vy * flight };
-      const sep = dist(future, projected);
-      if (sep < separation) { separation = sep; defender = d; }
-      const along = clamp(((future.x - qb.x) * dx + (future.y - qb.y) * dy) / lineLen2, 0, 1);
-      const lanePoint = { x: qb.x + dx * along, y: qb.y + dy * along };
-      laneGap = Math.min(laneGap, dist(future, lanePoint));
-    }
-    // A nearby defender matters most; a defender sitting directly in the
-    // throwing lane is the second cue.  Bad placement turns an otherwise
-    // open receiver into a lower-percentage throw without inventing drops.
-    const risk = clamp(0.56 - separation / 125 + Math.max(0, 34 - laneGap) / 110 + placement / 150, 0, 1);
-    return {
-      risk, separation, placement, defender,
-      label: risk < 0.24 ? "OPEN WINDOW" : risk < 0.56 ? "TIGHT WINDOW" : "DANGER — DEFENDER"
-    };
-  }
   function throwLob() {
     const qb = G.ball.holder; if (!qb || !G.aim) return;
     const to = { x: G.aim.x, y: G.aim.y };
-    const rec = pickPassTarget(to);
     const d = dist(qb, to);
-    let T = 0.55 + d / 470;
+    const T = 0.5 + d / 620;
     // wind pushes the landing spot
     to.x += G.weather.wind.x * T * 1.6; to.y += G.weather.wind.y * T * 1.6;
     // accuracy scatter: throws land close to where they were aimed — a weak
     // arm or ugly weather widens the cone, but never wildly
-    let err = (100 - qb.acc) * 0.3 + weatherScatter() + passScatter(qb);
-    err += (d / Math.max(1, maxRange())) * (99 - qb.acc) * 0.18;   // deep = harder
+    const err = (100 - qb.acc) * 0.3 + weatherScatter() + passScatter(qb);
     to.x += rnd(-err, err); to.y += rnd(-err, err);
     // even a wild throw stays over the field of play (only ~1-in-100 sails OOB)
     if (Math.random() > 0.01) to.y = clamp(to.y, TOP + 10, BOT - 10);
     to.x = clamp(to.x, xAtYd(-8), xAtYd(108));
-    clampThrowRange(qb, to); // wind/scatter cannot turn a legal throw into a bomb
-    T = 0.55 + dist(qb, to) / 470;
-    const read = assessPassWindow(qb, rec, to, T);
-    G.ball = { mode: "air", kind: "lob", from: { x: qb.x, y: qb.y }, to, t: 0, T, x: qb.x, y: qb.y, z: 12, holder: null, target: rec, read };
-    G.phase = "air"; G.aim = null; G.slingAnchor = null; qb.state = "idle"; qb.throwT = 0.3; playPose(qb, "throw", 0.32);
-    controlIntendedReceiver(to, rec);
+    G.ball = { mode: "air", kind: "lob", from: { x: qb.x, y: qb.y }, to, t: 0, T, x: qb.x, y: qb.y, z: 12, holder: null };
+    G.phase = "air"; G.aim = null; qb.state = "idle"; qb.throwT = 0.3;
+    controlIntendedReceiver(to);
     if (G.carrier === qb) { G.carrier = null; qb.canPass = false; qb.hasThrown = true; }
     G.playPass = { passer: qb }; addStat(qb, "att");
     sfx.throw();
@@ -2735,19 +1780,16 @@
   function throwBullet() {
     const qb = G.ball.holder; if (!qb || !G.aim) return;
     // bullet locks onto the receiver nearest the aim point
-    const rec = pickPassTarget(G.aim);
+    const rec = eligible().sort((a, b) => dist(a, G.aim) - dist(b, G.aim))[0];
     const tgt = rec ? { x: rec.x + rec.vx * 0.35, y: rec.y + rec.vy * 0.35 } : { x: G.aim.x, y: G.aim.y };
-    let err = (100 - qb.acc) * 0.18 + weatherScatter() * 0.6 + passScatter(qb);
-    err += (dist(qb, tgt) / Math.max(1, maxRange())) * (99 - qb.acc) * 0.12;
+    const err = (100 - qb.acc) * 0.18 + weatherScatter() * 0.6 + passScatter(qb);
     tgt.x += rnd(-err, err); tgt.y += rnd(-err, err);
     if (Math.random() > 0.01) tgt.y = clamp(tgt.y, TOP + 10, BOT - 10);   // stays in play
     tgt.x = clamp(tgt.x, xAtYd(-8), xAtYd(108));
-    clampThrowRange(qb, tgt);
-    const d = dist(qb, tgt), T = d / 430;
-    const read = assessPassWindow(qb, rec, tgt, T);
-    G.ball = { mode: "air", kind: "bullet", from: { x: qb.x, y: qb.y }, to: tgt, t: 0, T, x: qb.x, y: qb.y, z: 14, holder: null, target: rec, read };
-    G.phase = "air"; G.aim = null; G.slingAnchor = null; qb.state = "idle"; qb.throwT = 0.3; playPose(qb, "throw", 0.32);
-    controlIntendedReceiver(tgt, rec);
+    const d = dist(qb, tgt), T = d / 560;
+    G.ball = { mode: "air", kind: "bullet", from: { x: qb.x, y: qb.y }, to: tgt, t: 0, T, x: qb.x, y: qb.y, z: 14, holder: null, target: rec };
+    G.phase = "air"; G.aim = null; qb.state = "idle"; qb.throwT = 0.3;
+    controlIntendedReceiver(tgt);
     if (G.carrier === qb) { G.carrier = null; qb.canPass = false; qb.hasThrown = true; }
     G.playPass = { passer: qb }; addStat(qb, "att");
     sfx.bullet();
@@ -2756,17 +1798,16 @@
 
   // hand the sticks to the receiver the throw is meant for — move him under
   // the ball and TIME THE JUMP (space/click as it arrives)
-  function controlIntendedReceiver(to, intended) {
+  function controlIntendedReceiver(to) {
     if (!offenseIsUser() || G.ball.away) return;
-    const rec = intended || pickPassTarget(to);
+    const rec = eligible().sort((a, b) => dist(a, to) - dist(b, to))[0];
     if (rec && dist(rec, to) < 320) {
-      G.players.forEach((p2) => { p2.jumpTimed = false; p2.jumpMistimed = false; p2.autoJumped = false; });
+      G.players.forEach((p2) => { p2.jumpTimed = false; p2.jumpMistimed = false; });
       setControlled(rec);
     }
   }
   function timedJump(e) {
-    if (e.jumpT > 0) return;
-    if (G.ball.mode !== "air") { e.jumpT = 0.45; sfx.juke(); return; }   // plain hop
+    if (e.jumpT > 0 || G.ball.mode !== "air") return;
     e.jumpT = 0.4;
     const untilLanding = G.ball.T - G.ball.t;
     if (untilLanding <= 0.35 && untilLanding >= 0.02) e.jumpTimed = true;   // perfect
@@ -2781,8 +1822,8 @@
     if (!c || G.state !== "live" || G.phase !== "carry") return;
     const back = (c.team === "off") ? Math.min(to.x, c.x - 6) : Math.max(to.x, c.x + 6);
     to = { x: back, y: clamp(to.y, TOP + 4, BOT - 4) };
-    G.ball = { mode: "air", kind: "lateral", from: { x: c.x, y: c.y }, to, t: 0, T: 0.16 + dist(c, to) / 320, x: c.x, y: c.y, z: 14, holder: null };
-    c.state = "idle"; c.throwT = 0.22; playPose(c, "throw", 0.26); G.carrier = null; G.phase = "air";
+    G.ball = { mode: "air", kind: "lateral", from: { x: c.x, y: c.y }, to, t: 0, T: 0.16 + dist(c, to) / 420, x: c.x, y: c.y, z: 14, holder: null };
+    c.state = "idle"; c.throwT = 0.22; G.carrier = null; G.phase = "air";
     sfx.throw();
   }
   // user lateral — aimed at the mouse like a throw, but the ball must go
@@ -2791,7 +1832,7 @@
     const c = G.carrier;
     if (!c || G.state !== "live" || G.phase !== "carry") return;
     let to = { x: mouse.x + G.camX, y: clamp(mouse.y, TOP + 6, BOT - 6) };
-    const moving = Math.hypot(c.vx, c.vy) > 18;
+    const moving = Math.hypot(c.vx, c.vy) > 30;
     const err = moving ? 46 : 15;              // throwing on the run is a gamble
     to.x += rnd(-err, err); to.y += rnd(-err, err);
     doLateral(to);
@@ -2811,53 +1852,19 @@
       becomeCarrier(e);
       banner("RECOVERED!", lastName(e.name) + " falls on it", 0.9);
     } else {
-      // A defense that falls on a fumble in the offense's own end zone has
-      // scored six, not merely changed possession at the one-yard line.
-      if (!G.patMode && ydAtX(e.x) <= 0) { defensiveTouchdown(e); return; }
       sfx.pick();
       G.ball.mode = "dead";
       playDead("TURNOVER!", { turnover: true, spotYd: clamp(ydAtX(e.x), 1, 99), by: e.name, fumbleRec: true });
     }
   }
 
-  function defensiveTouchdown(recoverer) {
-    if (G.state !== "live") return;
-    const scoringSide = other(G.drive);
-    recordAiPlayResult("FUMBLE RETURN TD!", { turnover: true }, false, 0);
-    G.state = "dead"; G.phase = "dead"; G.deadRecT = 0.7;
-    G.aim = null; G.soarAim = null; G.slingAnchor = null;
-    G.carrier = recoverer;
-    G.ball = { mode: "held", holder: recoverer, x: recoverer.x, y: recoverer.y, z: 12 };
-    G.score[scoringSide] += 6;
-    G.rampage[scoringSide] = clamp(G.rampage[scoringSide] + 25, 0, 100);
-    banner("FUMBLE RETURN TD!", lastName(recoverer.name) + " falls on it for six", 2.4);
-    announce("td", recoverer.name); sfx.td(); crowdCheer(scoringSide === "A" ? 1 : 0.5);
-    startCelebration(scoringSide, Math.random() < 0.5 ? "spike" : "hop", recoverer);
-    G.deadT = 2.6;
-    // Keep the current offense/defense entity labels through the celebration,
-    // then make the scoring team the kicking side for the conversion/kickoff.
-    G.deadNext = () => startReplay(() => {
-      G.drive = scoringSide; G.losYd = 25; G.down = 1; G.toGain = 10;
-      if (isHuman(scoringSide)) G.state = "ptchoice";
-      else enterKick("XP");
-    });
-  }
-
   // ------------------------------------------------------------- catch logic
   function resolveArrival() {
     const b = G.ball;
     const spot = { x: b.to.x, y: b.to.y };
-    const riskyMoonBall = b.kind === "lob" && b.from && Math.hypot(b.to.x - b.from.x, b.to.y - b.from.y) >= 22 * YPX;
-    if (riskyMoonBall && G.drive === "A" && !G.humanB && G.aiPlay) G.aiPlay.risky = true;
-    const learnedPick = cpuRiskPickBoost(riskyMoonBall);
     const recs = eligible().map((e) => ({ e, d: dist(e, spot) })).sort((a, b2) => a.d - b2.d);
     const defs = G.players.filter((e) => e.team === "def").map((e) => ({ e, d: dist(e, spot) })).sort((a, b2) => a.d - b2.d);
-    const nearestRec = recs[0];
-    const intendedRec = b.target ? recs.find((r2) => r2.e === b.target) : null;
-    // The player chose a receiver at release.  Preserve that intent unless a
-    // teammate has genuinely arrived much closer to the bad ball placement.
-    const rec = intendedRec && (!nearestRec || intendedRec.d <= nearestRec.d + 14) ? intendedRec : nearestRec;
-    const df = defs[0];
+    const rec = recs[0], df = defs[0];
     const BASE_CATCH_R = b.kind === "bullet" ? 30 : 34;
     // catch radius reflects the ATHLETE: sure hands extend a receiver's
     // range, a leaper's hops extend a defender's — plus the control bonus
@@ -2869,119 +1876,57 @@
     if (df && df.d < 52) df.e.jumpT = Math.max(df.e.jumpT || 0, 0.4);
 
     const completeCatch = (who) => {
-      // Do not snap a dino to the landing dot.  Reaching the ball inside his
-      // catch radius is what earns the catch; the authored cel then puts the
-      // football at his claws, preserving the approach he just ran on screen.
-      const throwDepth = b.from ? Math.hypot(b.to.x - b.from.x, b.to.y - b.from.y) : 0;
-      const stretch = rec && rec.e === who && rec.d > recR * 0.46;
-      const highPoint = b.kind === "lob" && (throwDepth > 9 * YPX || who.jumpT > 0);
-      const catchPose = highPoint ? "catchHigh" : (b.kind === "bullet" ? "catchLow" : "catch");
-      // Every completion gets a readable secure-the-ball moment; the extended
-      // action lasts just long enough to show dives and high points without
-      // interrupting a clean catch-and-run.
-      continuePose(who, catchPose, (who.diveT > 0 || stretch || highPoint) ? 0.56 : 0.42);
-      if (who.diveT > 0 || stretch) who.catchDiveT = 0.56;
+      who.x = spot.x; who.y = spot.y;
       who.catchT = G.playT;   // fresh catches are vulnerable to a big hit
       becomeCarrier(who);
       if (G.playPass) { G.playPass.receiver = who; addStat(G.playPass.passer, "cmp"); addStat(who, "rec"); }
       sfx.catch();
     };
     // --- TRUE 50/50 BALL: receiver and defender both in range → they go up
-    // together and the better leap comes down with it (your timed jump counts;
-    // a receiver left on autopilot leaps late and loses leverage)
+    // together and the better leap comes down with it (your timed jump counts)
     if (rec && df && rec.d < recR && df.d < dfR) {
-      const timing = (e) => e.jumpTimed ? 24 : (e.jumpMistimed ? -14 : (e.autoJumped ? -9 : 0));
+      const timing = (e) => e.jumpTimed ? 24 : (e.jumpMistimed ? -14 : 0);
       const posScore = (x) => (BASE_CATCH_R - x.d) * 1.5 + ((x.e.jump || 70) - 70) * 0.9 +
         ((x.e.hands || 70) - 70) * 0.6 + timing(x.e) + rnd(0, 16);
-      // A safety/DB attacking the catch point from the other direction has
-      // leverage that a trailing defender does not.  This is deliberately a
-      // contest-only effect: a cleanly separated receiver is still open, but
-      // repeated moon balls into a closing defender become a real turnover
-      // risk even when both players have comparable ratings and jump timing.
-      const dx = rec.e.x - df.e.x, dy = rec.e.y - df.e.y;
-      const gap = Math.hypot(dx, dy) || 1;
-      const closing = ((df.e.vx - rec.e.vx) * dx + (df.e.vy - rec.e.vy) * dy) / gap;
-      const headOn = df.e.vx * rec.e.vx + df.e.vy * rec.e.vy < -300;
-      const defenderCrash = headOn ? clamp((closing - 28) / 90, 0, 1) : 0;
-      // The defender earns leverage by recognizing the throw early and
-      // getting into the passing lane.  This is intentionally separate from
-      // ratings: an aware safety who arrives from in front has a real play on
-      // a floated ball, while a trailing DB does not magically gain the same
-      // advantage at the final frame.
-      const passDir = b.from ? Math.sign(b.to.x - b.from.x) || 1 : 1;
-      const inPassingLane = b.from && (df.e.x - rec.e.x) * passDir < -2;
-      const defenderLeverage = (df.e.ballAttack ? 3 : 0) + (df.e.catchLeverage || 0) +
-        (inPassingLane ? 2.5 : 0) + defenderCrash * 3;
-      const rs = posScore(rec);       // a true 50/50 has no built-in WR edge
-      const ds = posScore(df) + (df.e.apex && df.e.passive === "ballhawk" ? 6 : 0) + defenderCrash * 8 + defenderLeverage * 2 + learnedPick * 36;
+      const rs = posScore(rec) + 6;   // receiver ran the route — small edge
+      const ds = posScore(df) + (df.e.apex && df.e.passive === "ballhawk" ? 12 : 0);
       if (rs >= ds) {
         let pc = 0.9 - (99 - (rec.e.hands || 75)) * 0.003 + G.weather.catchMod - 0.1 +
           (offenseIsUser() ? 1 : -1) * diff().catchBonus;
         if (rec.e.controlled) pc += 0.10; // +10% catch rate for controlled player
-        if (b.read && b.read.risk >= 0.56) pc -= (b.read.risk - 0.48) * 0.16;
         if (Math.random() < pc) {
           completeCatch(rec.e);
-          // If the receiver wins the ball but a defender drives through him
-          // from the opposite direction, the catch is not automatically safe.
-          // The ball stays live after the forced fumble, so either team can
-          // still recover it instead of turning this into a scripted pick.
-          const crashFumbleP = defenderCrash > 0 ? 0.05 + defenderCrash * 0.15 + defenderLeverage * 0.01 +
-            (G.drive === "A" && !G.humanB ? 0.05 : 0) : 0;
-          if (Math.random() < crashFumbleP) { fumble(rec.e, df.e); return; }
           banner("MOSSED!", lastName(rec.e.name) + " wins the jump ball!", 0.8);
           announce("catch", rec.e.name);
           return;
         }
-        // even an offense "win" can pop loose to a leaping DB — much more so
-        // when YOUR jump was mistimed and HIS was perfect
-        let slopP = 0.26 + defenderCrash * 0.15 + (rec.e.jumpMistimed ? 0.10 : 0) + (df.e.jumpTimed ? 0.07 : 0);
-        if (ds > rs - 10 && Math.random() < slopP) { intercepted(df.e, spot); return; }
+        if (ds > rs - 10 && Math.random() < 0.3) { intercepted(df.e, spot); return; }
         incomplete(spot, "BROKEN UP!"); return;
       } else {
-        // the DEFENDER won the leap: his jump talent + the receiver's weak
-        // hands decide whether it's a pick or just a swat
-        let intP = 0.65 + ((df.e.jump || 75) - 75) * 0.004 + (75 - (rec.e.hands || 75)) * 0.003 +
-          ((df.e.hands || 75) - 75) * 0.003 +
-          (df.e.jumpTimed && rec.e.jumpMistimed ? 0.10 : 0);
-        intP += defenderCrash * 0.14 + defenderLeverage * 0.018 + learnedPick;
-        if (G.drive === "A" && !G.humanB) intP += 0.06; // risky user throws punish harder
-        if (Math.random() < clamp(intP, 0.35, 0.9)) { intercepted(df.e, spot); return; }
+        if (ds - rs > 12 && Math.random() < 0.5) { intercepted(df.e, spot); return; }
         incomplete(spot, "SWATTED AWAY!"); return;
       }
     }
     // --- solo defender in range: pick odds from closeness (slightly softened)
     if (df && df.d < dfR) {
       const closeness = 1 - df.d / dfR;
-      let pickP = (b.kind === "bullet" ? 0.33 : 0.27) * closeness + (df.e.controlled ? 0.14 : 0);
+      let pickP = (b.kind === "bullet" ? 0.32 : 0.26) * closeness + (df.e.controlled ? 0.14 : 0);
       if (!rec || df.d < rec.d) pickP += 0.15;
       if (df.e.jumpTimed) pickP += 0.22;      // a perfectly timed leap steals it
       if (df.e.jumpMistimed) pickP -= 0.08;
-      if (df.e.apex && df.e.passive === "ballhawk") pickP += 0.10;
-      if (G.drive === "A" && !G.humanB && rec && df.d <= rec.d + 8) pickP += 0.08;
-      if (df.e.ballAttack) pickP += 0.06 + (df.e.catchLeverage || 0) * 0.012;
-      if (b.read && b.read.risk >= 0.56) pickP += 0.10 + (b.read.risk - 0.56) * 0.18;
-      pickP += learnedPick;
-      pickP += ((df.e.jump || 75) - 75) * 0.002 + ((df.e.hands || 75) - 75) * 0.002;
+      if (df.e.apex && df.e.passive === "ballhawk") pickP += 0.18;
       if (Math.random() < pickP) { intercepted(df.e, spot); return; }
       if (!rec || df.d < rec.d - 4) { incomplete(spot); return; }
     }
-    // --- solo receiver: clean reads should feel like catches, not dice rolls.
-    // Ratings and timing still matter, but drops mostly come from pressure,
-    // weather, mistiming, or visibly poor ball placement.
+    // --- solo receiver: low, hands-dependent drop rate (a touch friendlier now)
     if (rec && rec.d < recR) {
-      const closeDefender = df && df.d < Math.max(dfR * 1.35, 46);
-      const cleanRead = !closeDefender && (!b.read || b.read.risk < 0.24) && rec.d < recR * 0.82;
-      let p = 0.80 + ((rec.e.hands || 75) - 75) * 0.003 + G.weather.catchMod +
-        (offenseIsUser() ? 1 : -1) * diff().catchBonus;
-      if (cleanRead) p += 0.10;
-      if (rec.e.jumpTimed) p += 0.06;      // the timing skill closes a tight catch
-      if (rec.e.jumpMistimed) p -= 0.09;   // an early leap is visibly costly
-      if (rec.e.controlled && rec.e.autoJumped) p -= 0.035;
-      if (b.kind === "bullet") p += 0.02;
-      if (rec.e.apex && rec.e.passive === "redzone" && G.losYd >= 80) p += 0.08;
-      if (rec.e.controlled) p += 0.055;
-      if (b.read) p -= Math.max(0, b.read.risk - 0.24) * 0.14;
-      if (Math.random() < clamp(p, 0.42, 0.985)) {
+      let p = 0.82 - (99 - (rec.e.hands || 75)) * 0.005 + G.weather.catchMod + (offenseIsUser() ? 1 : -1) * diff().catchBonus;
+      if (rec.e.jumpTimed) p += 0.14;      // a well-timed leap secures it
+      if (rec.e.jumpMistimed) p -= 0.10;   // jumping way early bobbles it
+      if (b.kind === "bullet") p += 0.03;
+      if (rec.e.apex && rec.e.passive === "redzone" && G.losYd >= 80) p += 0.15;
+      if (rec.e.controlled) p += 0.10; // +10% catch rate for controlled player
+      if (Math.random() < p) {
         completeCatch(rec.e);
         return;
       }
@@ -2998,16 +1943,7 @@
   function intercepted(defender, spot) {
     announce("int", defender.name);
     sfx.pick();
-    // A pick needs a visible secure/landing beat before the possession card.
-    // Keep the defender at the position he earned instead of teleporting him
-    // to the destination, and let the high-point cel own the ball image.
-    const prior = G.ball || {};
-    const throwDepth = prior.from ? Math.hypot(spot.x - prior.from.x, spot.y - prior.from.y) : 0;
-    defender.jumpT = Math.max(defender.jumpT || 0, 0.4);
-    playPose(defender, prior.kind === "bullet" ? "catchLow" : (throwDepth > 8 * YPX ? "catchHigh" : "catch"), 0.62);
-    defender.catchT = G.playT;
-    G.carrier = defender;
-    G.ball = { mode: "held", holder: defender, x: defender.x, y: defender.y, z: 12 };
+    G.ball.mode = "dead";
     if (G.playPass) addStat(G.playPass.passer, "passInt");
     addStat(defender, "defInt");
     playDead("INTERCEPTED!", { turnover: true, spotYd: clamp(ydAtX(spot.x), 1, 99), by: defender.name });
@@ -3017,7 +1953,7 @@
   function playDead(reason, info, noSpot) {
     if (G.state !== "live") return;
     G.state = "dead"; G.phase = "dead"; sfx.whistle();
-    G.aim = null; G.soarAim = null; G.slingAnchor = null;
+    G.aim = null; G.soarAim = null;
     info = info || {};
     // the replay tape keeps rolling briefly past the whistle so the actual
     // TACKLE / landing is on film, and the tackled dino hits the deck
@@ -3035,7 +1971,6 @@
     if (G.clock <= 60 && (reason === "OUT OF BOUNDS" || noSpot)) G.clockStopped = true;
     const spotYd = info.spotYd != null ? info.spotYd :
       (noSpot ? G.losYd : clamp(ydAtX(G.carrier ? G.carrier.x : G.ball.x), 0, 100));
-    recordAiPlayResult(reason, info, noSpot, spotYd);
 
     // practice mode: no downs/scoring bookkeeping — just show the result and reset
     if (G.practice) {
@@ -3052,8 +1987,7 @@
       const good = !info.turnover && !noSpot && spotYd >= 100;
       if (good) { G.score[G.drive] += 2; banner("TWO-POINT GOOD!", "", 1.6); sfx.td(); }
       else banner("CONVERSION FAILED", "", 1.6);
-      const scoringSide = G.drive;
-      G.deadT = 1.7; G.deadNext = () => startKickoff(other(scoringSide));
+      G.deadT = 1.7; G.deadNext = () => { changePossession(25); enterPlaycall(); };
       return;
     }
 
@@ -3066,23 +2000,11 @@
     if (!info.turnover && !noSpot && spotYd >= 100) { touchdown(); return; }
     // safety? only a real takedown in the end zone counts — a catch there is live
     if (!info.turnover && !noSpot && spotYd <= 0 &&
-      ["TACKLED", "SACKED!", "FLATTENED!", "DIVE", "OUT OF END ZONE"].includes(reason)) {
+      ["TACKLED", "SACKED!", "FLATTENED!", "DIVE"].includes(reason)) {
       const defT = G.drive === "A" ? "B" : "A";
       G.score[defT] += 2;
       banner("SAFETY!", "Two points!", 2);
       G.deadT = 2; G.deadNext = () => { changePossession(30); enterPlaycall(); };
-      return;
-    }
-
-    // A return ends at its own spot and begins a fresh possession. It is not
-    // a regular down that accidentally awards a "first down" mid-return.
-    if (G.returnPlay && !info.turnover) {
-      const returnKind = G.returnPlay.kind;
-      const returnYd = clamp(Math.round(spotYd), 1, 99);
-      G.returnPlay = null;
-      G.losYd = returnYd; G.down = 1; G.toGain = Math.min(10, 100 - returnYd);
-      banner(returnKind + " RETURN", "TO THE " + returnYd, 1.25);
-      G.deadT = 1.25; G.deadNext = enterPlaycall;
       return;
     }
 
@@ -3107,7 +2029,6 @@
     }
 
     if (info.turnover) {
-      G.returnPlay = null;
       banner(reason, info.by ? (info.fumbleRec ? "Recovered by " : "Picked off by ") + lastName(info.by) : "", 1.8);
       G.deadT = 1.8;
       G.deadNext = () => startReplay(() => { changePossession(100 - spotYd); enterPlaycall(); });
@@ -3124,10 +2045,7 @@
       // and throws the first-down signal (arm out), the fresh line of gain
       // flashes, and the home crowd roars
       const fdGuy = G.carrier || G.players.find((e) => (e.team === "off") === (G.drive === "A") && e.role === "QB");
-      if (fdGuy) {
-        fdGuy.proneT = 0; fdGuy.jumpT = 0.45; fdGuy.fdCeleb = 1.3;
-        playPose(fdGuy, "celebrate", 1.3);
-      }
+      if (fdGuy) { fdGuy.proneT = 0; fdGuy.jumpT = 0.45; fdGuy.fdCeleb = 1.3; }
       G.fdCelebEnt = fdGuy;
       G.fdFlash = 1.1;
       announce("firstdown", fdGuy && fdGuy.name);
@@ -3143,11 +2061,7 @@
       }
       banner(reason, sub + "  ·  " + downText(), 1.2);
     }
-    G.deadT = 1.3;
-    // sacks and tackles-for-loss earn the instant-replay treatment
-    const tfl = !noSpot && !info.turnover && gained <= -1 &&
-      ["TACKLED", "SACKED!", "FLATTENED!"].includes(reason);
-    G.deadNext = (reason === "SACKED!" || tfl) ? () => startReplay(enterPlaycall) : enterPlaycall;
+    G.deadT = 1.3; G.deadNext = enterPlaycall;
   }
 
   function downText() {
@@ -3214,7 +2128,6 @@
 
   function touchdown() {
     const t = G.drive;
-    G.returnPlay = null;
     G.score[t] += 6;
     G.rampage[t] = clamp(G.rampage[t] + 25, 0, 100);
     // stat attribution for the score
@@ -3227,10 +2140,8 @@
     }
     const scoringAbbr = t === "A" ? G.my : G.opp;
     const rainParty = G.weather.type === "RAIN";
-    const story = G.driveStory && G.driveStory.side === t ? G.driveStory : null;
-    const drivePayoff = story ? story.plays + " PLAY DRIVE · " + Math.max(1, Math.round(100 - story.startYd)) + " YDS" : "DRIVE COMPLETE";
     banner("TOUCHDOWN " + TEAMS[scoringAbbr][0].toUpperCase() + "!",
-      (rainParty ? "💦 PUDDLE PARTY! · " : "") + drivePayoff, 2);
+      rainParty ? "💦 PUDDLE PARTY!" : "", 2);
     announce("td", G.carrier && G.carrier.name);
     sfx.td();
     crowdSpike = t === "A" ? 0.14 : 0.05;
@@ -3263,17 +2174,9 @@
     if (isHuman(t)) {   // the human who scored chooses XP or 2 (either player in 2-player)
       G.deadNext = () => startReplay(() => { G.state = "ptchoice"; });
     } else {
-      // CPU: use the actual scoring side, not a hard-coded team B.  Being
-      // down two after the touchdown means it was down eight before it, so a
-      // two-point try ties the game and is always the right call.
-      const deficit = G.score[other(t)] - G.score[t]; // after its 6
-      let wantTwo = deficit === 2;
-      if (!wantTwo && G.quarter >= 4) {
-        if (deficit === 1) wantTwo = Math.random() < (G.clock <= 120 ? 0.95 : 0.78);
-        else if ([5, 8, 11, 14].includes(deficit)) wantTwo = Math.random() < (G.clock <= 120 ? 0.86 : 0.68);
-      } else if (!wantTwo && G.quarter >= 3 && [2, 5, 10, 16, 18].includes(deficit)) {
-        wantTwo = Math.random() < 0.75;
-      }
+      // CPU: chase the two when the score calls for it late
+      const deficit = G.score.A - G.score.B; // after its 6
+      const wantTwo = G.quarter >= 3 && [2, 5, 10, 16, 18].includes(deficit) && Math.random() < 0.75;
       G.deadNext = () => startReplay(() => { if (wantTwo) goForTwo(); else enterKick("XP"); });
     }
   }
@@ -3318,7 +2221,6 @@
     G.drive = G.drive === "A" ? "B" : "A";
     G.losYd = Math.round(clamp(newLosYd, 1, 99));
     G.down = 1; G.toGain = Math.min(10, 100 - G.losYd);
-    G.driveStory = { side: G.drive, startYd: G.losYd, plays: 0 };
     G.ramp = null;
   }
 
@@ -3327,85 +2229,28 @@
   // the stands while ACTUAL METEORS rain down. Catch = +7 rampage. Meteor
   // hit = stunned and -1. Spawns ramp up, so the last seconds get frantic.
   // Everything lands on one screen — nothing is ever out of reach.
-  // ---- FOUR halftime shows, never the same one twice in a row ----
-  //  meteor : dodge meteors, catch footballs        (steer)
-  //  fg     : FIELD GOAL FRENZY, 5 kicks, wind      (timing meters)
-  //  dash   : DINO DASH hurdles sprint              (jump timing)
-  //  snack  : SNACK SCRAMBLE, falling stadium food  (steer, combo)
-  const HALF_GAMES = ["meteor", "fg", "dash", "snack"];
   function startHalftimeShow(cont) {
-    const last = localStorage.getItem("dinobowl_lasthalf");
-    const pool = HALF_GAMES.filter((k) => k !== last);
-    const kind = pool[(Math.random() * pool.length) | 0];
-    try { localStorage.setItem("dinobowl_lasthalf", kind); } catch (_) { }
-    const camX = clamp(xAtYd(50) - W / 2, 0, FIELD_LEN - W);
     G.half = {
-      kind, t: 22, cont, score: 0, hits: 0,
-      px: camX + W / 2, py: MID, stun: 0, drops: [], spawnT: 0.5, camX,
+      t: 22, cont, score: 0, hits: 0, best: 0,
+      px: W / 2 + clamp(xAtYd(50) - W / 2, 0, FIELD_LEN - W), py: MID, stun: 0,
+      drops: [], spawnT: 0.5,
+      camX: clamp(xAtYd(50) - W / 2, 0, FIELD_LEN - W),
     };
-    const h = G.half;
-    if (kind === "fg") {
-      Object.assign(h, { t: 30, kickNo: 1, kicks: 5, stage: 0, kt: 0, val: 0, power: 0, fgd: 30, wind: rnd(-24, 24), fly: null, camX: clamp(xAtYd(78) - W / 2, 0, FIELD_LEN - W) });
-    } else if (kind === "dash") {
-      const hurdles = [];
-      for (let x = 420; x < FIELD_LEN - 300; x += rnd(170, 300)) hurdles.push({ x, hit: false });
-      Object.assign(h, { t: 18, px: 240, py: MID, runV: 150, jumpZ: 0, jumpV: 0, hurdles, stumbles: 0, camX: 0 });
-    } else if (kind === "snack") {
-      Object.assign(h, { spawnT: 0.3, combo: 0 });
-    }
     G.state = "halftime";
-  }
-  // one press/space handler for every show
-  // halftime rewards: in 2-player versus, BOTH meters get fed
-  function halfReward(x) {
-    G.rampage.A = clamp(G.rampage.A + x, 0, 100);
-    if (G.humanB) G.rampage.B = clamp(G.rampage.B + x, 0, 100);
-  }
-  function halftimePress() {
-    const h = G.half; if (!h) return;
-    if (h.kind === "fg" && !h.fly) {
-      if (h.stage === 0) { h.power = h.val; h.stage = 1; h.kt = 0; sfx.kick(); }
-      else if (h.stage === 1) {
-        const acc = h.val - 50;
-        const windPush = h.wind * 0.35;
-        const window2 = 16 - h.fgd * 0.12;
-        const good = Math.abs(acc + windPush) < Math.max(7, window2) && h.power > 35 + h.fgd * 0.5;
-        h.fly = { t: 0, T: 0.85, good, acc: acc + windPush };
-        sfx.kick();
-      }
-    } else if (h.kind === "dash" && h.jumpZ <= 0) {
-      h.jumpV = 235; h.jumpZ = 0.01; sfx.juke();
-    }
   }
   function updateHalftime(dt) {
     const h = G.half;
     h.t -= dt;
-    if (h.kind === "fg") { updateHalfFG(dt); return; }
-    if (h.kind === "dash") { updateHalfDash(dt); return; }
-    // meteor + snack share the falling-object engine
+    // spawn rate ramps as the clock runs down
     const ramp = 1 + (22 - h.t) / 9;
     h.spawnT -= dt * ramp;
     if (h.spawnT <= 0) {
-      if (h.kind === "snack") {
-        h.spawnT = rnd(0.3, 0.55);
-        const gold = Math.random() < 0.14;
-        h.drops.push({
-          fx: h.camX + rnd(60, W - 60), fy: rnd(TOP + 30, BOT - 30),
-          hgt: 340, fall: rnd(170, 260), kind: gold ? "g" : "s",
-          driftX: rnd(-40, 40),
-        });
-      } else {
-        h.spawnT = rnd(0.6, 0.95);
-        const meteor = Math.random() < 0.42;
-        h.drops.push({
-          fx: h.camX + rnd(60, W - 60), fy: rnd(TOP + 30, BOT - 30),
-          hgt: 340, fall: meteor ? rnd(300, 380) : rnd(160, 215), kind: meteor ? "m" : "b",
-        });
-      }
-    }
-    // snacks drift on the breeze — track the marker, not where it started
-    if (h.kind === "snack") for (const dr of h.drops) if (!dr.done && dr.driftX) {
-      dr.fx = clamp(dr.fx + dr.driftX * dt, h.camX + 30, h.camX + W - 30);
+      h.spawnT = rnd(0.6, 0.95);
+      const meteor = Math.random() < 0.42;
+      h.drops.push({
+        fx: h.camX + rnd(60, W - 60), fy: rnd(TOP + 30, BOT - 30),
+        hgt: 340, fall: meteor ? rnd(300, 380) : rnd(160, 215), kind: meteor ? "m" : "b",
+      });
     }
     // steer: WASD/joystick or chase the cursor
     if (h.stun > 0) h.stun -= dt;
@@ -3429,14 +2274,11 @@
       if (dr.hgt <= 0) {
         dr.done = true;
         const dd = Math.hypot(h.px - dr.fx, h.py - dr.fy);
-        if (dr.kind === "b" || dr.kind === "s" || dr.kind === "g") {
+        if (dr.kind === "b") {
           if (dd < 30 && h.stun <= 0) {
-            const pts = dr.kind === "g" ? 3 : 1;
-            h.combo = (h.combo || 0) + 1;
-            h.score += pts;
-            halfReward(5 + pts * 2 + Math.min(4, h.combo));
-            sfx.catch(); crowdCheer(dr.kind === "g" ? 0.6 : 0.3);
-          } else if (dr.kind !== "b") h.combo = 0;
+            h.score++; G.rampage.A = clamp(G.rampage.A + 7, 0, 100);
+            sfx.catch(); crowdCheer(0.3);
+          }
         } else {
           G.shake = Math.max(G.shake, 0.35); sfx.tackle();
           if (dd < 40) { h.stun = 1.0; h.hits++; h.score = Math.max(0, h.score - 1); sfx.roar(); }
@@ -3446,59 +2288,10 @@
     h.drops = h.drops.filter((dr) => !dr.done || dr.doneT == null || dr.doneT < 0.35);
     if (h.t <= 0) endHalftime();
   }
-  function updateHalfFG(dt) {
-    const h = G.half;
-    if (h.fly) {
-      h.fly.t += dt;
-      if (h.fly.t >= h.fly.T) {
-        if (h.fly.good) { h.score++; halfReward(9); sfx.td(); crowdCheer(0.5); }
-        else sfx.tackle();
-        h.kickNo++;
-        if (h.kickNo > h.kicks) { endHalftime(); return; }
-        h.stage = 0; h.kt = 0; h.fly = null;
-        h.fgd = 30 + (h.kickNo - 1) * 7;              // 30 → 58 yards
-        h.wind = rnd(-30, 30);
-      }
-      return;
-    }
-    h.kt += dt;
-    if (h.stage === 0) h.val = 50 + 50 * Math.sin(h.kt * 4.4);
-    else h.val = 50 + 50 * Math.sin(h.kt * (5.4 + h.kickNo * 0.35) + Math.PI / 2);
-    if (h.t <= 0) endHalftime();
-  }
-  function updateHalfDash(dt) {
-    const h = G.half;
-    // the sprint: constant burn with a stumble tax
-    h.runV = Math.min(300, h.runV + dt * 26);
-    if (h.stun > 0) { h.stun -= dt; }
-    else h.px += h.runV * dt;
-    // jump physics
-    if (h.jumpZ > 0 || h.jumpV > 0) {
-      h.jumpZ += h.jumpV * dt; h.jumpV -= 620 * dt;
-      if (h.jumpZ <= 0) { h.jumpZ = 0; h.jumpV = 0; }
-    }
-    for (const hu of h.hurdles) {
-      if (!hu.hit && Math.abs(h.px - hu.x) < 10 && h.jumpZ < 16) {
-        hu.hit = true; h.stumbles++; h.stun = 0.7; h.runV = 120;
-        G.shake = Math.max(G.shake, 0.25); sfx.tackle();
-      } else if (!hu.hit && h.px > hu.x + 12) { hu.hit = true; h.score++; sfx.juke(); }
-    }
-    h.camX = clamp(h.px - 300, 0, FIELD_LEN - W);
-    if (h.t <= 0 || h.px > FIELD_LEN - 260) {
-      halfReward(Math.round(ydAtX(h.px) * 0.55));
-      endHalftime();
-    }
-  }
-  const HALF_TITLES = {
-    meteor: (h) => ["METEOR MADNESS: " + h.score + " CAUGHT!", (h.hits ? "clonked by " + h.hits + " meteor" + (h.hits > 1 ? "s" : "") + " · " : "") + "rampage meter fed for the second half!"],
-    fg: (h) => ["FIELD GOAL FRENZY: " + h.score + "/" + h.kicks + "!", (h.score >= 4 ? "ICE IN THE VEINS — " : "") + "every make fed the rampage meter!"],
-    dash: (h) => ["DINO DASH: " + Math.max(0, Math.round(ydAtX(h.px))) + " YARDS!", h.stumbles ? h.stumbles + " faceplant" + (h.stumbles > 1 ? "s" : "") + " — hurdles are undefeated" : "CLEAN RUN! The crowd is losing it!"],
-    snack: (h) => ["SNACK SCRAMBLE: " + h.score + " SNACKS!", "golden drumsticks are 3 · the rampage meter thanks you"],
-  };
   function endHalftime() {
     const h = G.half; G.half = null;
-    const [t1, t2] = (HALF_TITLES[h.kind] || HALF_TITLES.meteor)(h);
-    banner(t1, t2, 2.2);
+    banner("METEOR MADNESS: " + h.score + " CAUGHT!",
+      (h.hits ? "clonked by " + h.hits + " meteor" + (h.hits > 1 ? "s" : "") + " · " : "") + "rampage meter fed for the second half!", 2.2);
     G.state = "dead"; G.deadT = 2.2; G.deadNext = h.cont;
   }
   function drawHalftime() {
@@ -3536,94 +2329,16 @@
       cx.fillRect(h.px - G.camX - 8, h.py + 2, 16, 4);
       cx.drawImage(spr.R[fi], h.px - G.camX - spr.w / 2, h.py - spr.h + 6);
     }
-    const title = h.kind === "snack"
-      ? "🌭 SNACK SCRAMBLE — " + Math.ceil(Math.max(0, h.t)) + "s — " + h.score + " SNACKS"
-      : "☄ METEOR MADNESS — " + Math.ceil(Math.max(0, h.t)) + "s — " + h.score + " CAUGHT";
-    const hint = h.kind === "snack"
-      ? "CATCH THE FLYING FOOD · GOLD DRUMSTICK = 3 · COMBOS FEED RAMPAGE FASTER"
-      : "CATCH 🏈 (+7 RAMPAGE) · DODGE METEORS (-1 & STUN) · MOUSE/WASD · ENTER TO SKIP";
-    drawHalfFrame(title, hint);
-  }
-  function drawHalfFrame(title, hint) {
     cx.font = PF(12); cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
-    cx.fillText(title, W / 2, 52);
-    cx.fillStyle = "rgba(5,12,8,.8)"; cx.fillRect(W - 122, 10, 108, 30);
-    cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(W - 122, 10, 108, 30);
-    cx.font = PF(9); cx.fillStyle = "#ffd23f"; cx.fillText("SKIP ▶", W - 68, 30);
+    cx.fillText("☄ METEOR MADNESS — " + Math.ceil(Math.max(0, h.t)) + "s — " + h.score + " CAUGHT", W / 2, 52);
     cx.font = PF(8); cx.fillStyle = "#9db0a4";
-    cx.fillText(hint, W / 2, 72);
-  }
-  function drawHalfFG() {
-    const h = G.half;
-    G.camX = h.camX;
-    drawField();
-    const postX = xAtYd(108) - G.camX;
-    // the kicking tee dino
-    const sheet = G.sheets.A;
-    const kx = xAtYd(78 - h.fgd + 61) - G.camX;   // spot scales with distance
-    const sx = xAtYd(108 - h.fgd) - G.camX;
-    if (sheet && sheet.troodon) cx.drawImage(sheet.troodon.R[0], sx - 16, MID - 26);
-    cx.drawImage(G.ballSpr, sx + 4, MID - 6);
-    // ball flight
-    if (h.fly) {
-      const k = h.fly.t / h.fly.T;
-      const bx = sx + (postX - sx) * k;
-      const by = MID + h.fly.acc * 1.6 * k;
-      cx.drawImage(G.ballSpr, bx - 8, by - (10 + 200 * k * (1 - k)) - 5);
-      if (k > 0.9) {
-        cx.font = PF(16); cx.textAlign = "center";
-        cx.fillStyle = h.fly.good ? "#69be28" : "#ff5533";
-        cx.fillText(h.fly.good ? "GOOD!" : "NO GOOD", postX - 60, MID - 90);
-      }
-    } else {
-      // meters
-      cx.fillStyle = "rgba(5,12,8,.75)"; cx.fillRect(W / 2 - 190, H - 118, 380, 92);
-      cx.strokeStyle = "#ffd23f"; cx.strokeRect(W / 2 - 190, H - 118, 380, 92);
-      cx.font = PF(9); cx.textAlign = "center"; cx.fillStyle = "#f4f6f1";
-      cx.fillText("KICK " + h.kickNo + "/" + h.kicks + " — " + h.fgd + " YDS", W / 2, H - 98);
-      cx.fillStyle = "#0d2519"; cx.fillRect(W / 2 - 160, H - 86, 320, 16);
-      cx.fillStyle = h.stage === 0 ? "#e8622c" : "#3a4441";
-      cx.fillRect(W / 2 - 160, H - 86, 320 * ((h.stage === 0 ? h.val : h.power) / 100), 16);
-      if (h.stage === 1) {
-        cx.fillStyle = "#0d2519"; cx.fillRect(W / 2 - 160, H - 62, 320, 16);
-        cx.fillStyle = "#1d4030"; cx.fillRect(W / 2 - 26, H - 62, 52, 16);
-        const vx = W / 2 - 160 + 320 * (h.val / 100);
-        cx.fillStyle = "#ffd23f"; cx.fillRect(vx - 3, H - 66, 6, 24);
-      }
-      cx.font = PF(8); cx.fillStyle = "#8ecafc";
-      cx.fillText("WIND " + (h.wind > 0 ? "↓ " : "↑ ") + Math.abs(Math.round(h.wind / 4)), W / 2 + 140, H - 98);
-    }
-    drawHalfFrame("🦶 FIELD GOAL FRENZY — " + h.score + "/" + h.kicks + " — " + Math.ceil(Math.max(0, h.t)) + "s",
-      "TAP/SPACE: LOCK POWER, THEN ACCURACY · WATCH THE WIND · LONGER EVERY KICK");
-  }
-  function drawHalfDash() {
-    const h = G.half;
-    G.camX = h.camX;
-    drawField();
-    // hurdles: pixel boulders
-    for (const hu of h.hurdles) {
-      const x = hu.x - G.camX;
-      if (x < -30 || x > W + 30) continue;
-      cx.fillStyle = hu.hit ? "rgba(122,138,153,.4)" : "#7a8a99";
-      cx.fillRect(x - 9, MID - 14, 18, 14);
-      cx.fillStyle = hu.hit ? "rgba(90,106,120,.4)" : "#5a6a78";
-      cx.fillRect(x - 6, MID - 20, 12, 7);
-    }
-    const sheet = G.sheets.A;
-    if (sheet && sheet.carno && !(h.stun > 0 && ((performance.now() / 90) | 0) % 2)) {
-      const spr = sheet.carno, fi = ((performance.now() / 100) | 0) % 2;
-      cx.fillStyle = "rgba(0,0,0,.28)";
-      cx.fillRect(h.px - G.camX - 8, MID + 2, 16 - h.jumpZ * 0.1, 4);
-      cx.drawImage(spr.R[fi], h.px - G.camX - spr.w / 2, MID - spr.h + 6 - h.jumpZ);
-    }
-    drawHalfFrame("🏃 DINO DASH — " + Math.max(0, Math.round(ydAtX(h.px))) + " YDS — " + Math.ceil(Math.max(0, h.t)) + "s",
-      "TAP/SPACE = HURDLE THE ROCKS · FACEPLANTS KILL YOUR SPEED · GO GO GO");
+    cx.fillText("CATCH 🏈 (+7 RAMPAGE) · DODGE METEORS (-1 & STUN) · MOUSE/WASD · ENTER TO SKIP", W / 2, 72);
   }
 
   function endQuarter() {
     if (G.quarter === 2) {
       G.quarter = 3; G.clock = 180;
-      banner("HALFTIME", "Mascot minigame time — four shows in the rotation!", 2.0);
+      banner("HALFTIME", "METEOR MADNESS! Catch footballs, dodge the sky!", 2.0);
       G.state = "dead"; G.deadT = 2.0;
       G.deadNext = () => startHalftimeShow(() => {
         G.drive = G.openingDrive === "A" ? "B" : "A"; G.losYd = 25; G.down = 1; G.toGain = 10; enterPlaycall();
@@ -3650,7 +2365,6 @@
       if (win === G.my) G.record.w++; else if (win === G.opp) G.record.l++; else G.record.t++;
       saveRecord();
     }
-    recordCpuGameResult();
     banner(win ? TEAMS[win][0].toUpperCase() + " WIN!" : "TIE GAME", "", 99);
     sfx.td();
     // Player of the Game — biggest stat line on the field
@@ -3679,108 +2393,7 @@
   function enterKick(kind) {
     G.state = "kick"; G.aim = null;
     const kicker = roster(G.drive === "A" ? G.my : G.opp).kicker;
-    G.kick = {
-      kind, stage: 0, t: 0, power: 0, acc: 0, kicker, cpu: !isHuman(G.drive),
-      // Kickoffs are launched from the kicking side's 35, independent of the
-      // previous drive's final spot.  That is important after touchdowns.
-      originYd: kind === "KO" ? 35 : G.losYd,
-    };
-    buildKickFormation(kind);
-  }
-
-  function startKickoff(receivingSide) {
-    if (receivingSide == null) receivingSide = other(G.drive);
-    // For the kick sequence G.drive names the kicking team; it flips once the
-    // returner fields it, exactly once, in startKickReturn / touchback.
-    G.drive = other(receivingSide);
-    G.kickoffReceiving = receivingSide;
-    G.losYd = 35; G.down = 1; G.toGain = 10;
-    enterKick("KO");
-  }
-  // The kick meter deliberately has a clear makeable lane instead of making
-  // players infer it from a percentage.  It is still a two-beat Dino Bowl
-  // kick (range, then aim), but each beat uses the easy-to-read timing bar
-  // that makes a Retro Bowl field goal feel fair at a glance.
-  function kickMeterPlan(k) {
-    if (k.kind === "KO") {
-      return { fgDist: 65, powerMin: 46, accCenter: clamp(50 - G.weather.wind.y * 0.35, 8, 92), accHalf: 32 };
-    }
-    const leg = k.kicker.leg || 84;
-    const fgDist = k.kind === "XP" ? 33 : Math.round(100 - G.losYd + 17);
-    // This is the power value at which the existing range calculation first
-    // reaches the posts.  Everything to its right is green: more leg never
-    // punishes a kick, but a short kick does.
-    const powerMin = clamp(55 + (fgDist - (28 + leg * 0.32)) * 5, 4, 94);
-    const kacc = k.kicker.kacc || kickAccOf(k.kicker.name);
-    const accHalf = (k.kind === "XP" ? 24 : 16) + (kacc - 80) * 0.25;
-    // Crosswind shifts the aiming lane, so the UI and make calculation always
-    // agree about where a true kick is headed.
-    const accCenter = clamp(50 - G.weather.wind.y * 0.5, 2, 98);
-    return { fgDist, powerMin, accCenter, accHalf };
-  }
-  // RETRO-BOWL-STYLE LIVE KICKS: the snap is real. Six rushers claw through
-  // the protection while you work the meter — dawdle and the kick gets
-  // BLOCKED (live ball!). Made kicks then FLY downfield in real time.
-  function buildKickFormation(kind) {
-    const losX = xAtYd(G.kick && G.kick.originYd != null ? G.kick.originYd : G.losYd);
-    const defAb = G.drive === "A" ? G.opp : G.my;
-    const defR = roster(defAb);
-    const P = [];
-    for (let i = 0; i < 5; i++) {
-      const e = mkEnt("off", "trike", "", "OL", 60, { str: 82 });
-      e.x = losX - 10; e.y = MID - 56 + i * 28; e.state = "idle";
-      P.push(e);
-    }
-    const kk = mkEnt("off", "troodon", G.kick.kicker.name, "K", 68, {});
-    kk.x = losX - (kind === "PUNT" ? 240 : kind === "KO" ? 0 : 140); kk.y = MID; kk.state = "idle";
-    P.push(kk); G.kick.kickerEnt = kk;
-    if (kind === "KO") {
-      // A kickoff unit fans across the field instead of pretending it is a
-      // field-goal protection play.  The actual coverage is built for the
-      // live return when the ball lands.
-      for (let i = 0; i < 5; i++) {
-        const e = mkEnt("off", i % 2 ? "deinony" : "allo", "", "GUN", 82, { str: 72, tkl: 78 });
-        e.x = losX - 8; e.y = MID - 96 + i * 48; e.state = "idle"; P.push(e);
-      }
-      G.players = P;
-      G.ball = { mode: "held", holder: kk, x: kk.x, y: kk.y, z: 10 };
-      G.carrier = null; G.controlled = null; G.selCard = null;
-      resolvePlayerContacts();
-      G.ball.x = kk.x + kk.dir * 8; G.ball.y = kk.y;
-      G.camX = clamp(kk.x - W * 0.35, 0, FIELD_LEN - W);
-      return;
-    }
-    const pool = (defR.defense || []).slice(0, 6);
-    for (let i = 0; i < 6; i++) {
-      const d = pool[i] || { name: "", spd: 78 };
-      const e = mkEnt("def", i % 2 ? "allo" : "stego", d.name, "EDGE", d.spd || 78, { str: d.str || 80 });
-      e.x = losX + 14; e.y = MID - 70 + i * 28; e.state = "kickrush";
-      // how long the protection holds THIS rusher — decisive kicks are safe
-      e.holdT = rnd(1.5, 2.6) + (kind === "PUNT" ? 0.2 : 0);
-      P.push(e);
-    }
-    G.players = P;
-    G.ball = { mode: "held", holder: kk, x: kk.x, y: kk.y, z: 10 };
-    G.carrier = null; G.controlled = null; G.selCard = null;
-    resolvePlayerContacts();
-    G.ball.x = kk.x + kk.dir * 8; G.ball.y = kk.y;
-    G.camX = clamp(kk.x - W * 0.35, 0, FIELD_LEN - W);
-  }
-  function blockedKick(rusher) {
-    sfx.tackle(); sfx.roar();
-    G.shake = 0.5;
-    announce("fumble", rusher && rusher.name);
-    G.state = "live"; G.phase = "loose"; G.playT = 0;
-    // a blocked EXTRA POINT is still a conversion try: one live play, worth
-    // at most 2, and the kickoff possession change happens no matter what
-    if (G.kick && G.kick.kind === "XP") G.patMode = true;
-    G.curPlay = { name: "KICK", type: "run", tags: [] };
-    for (const e of G.players) if (e.state === "kickrush") e.state = "rush";
-    const kk = G.kick.kickerEnt;
-    G.ball = { mode: "loose", x: kk.x + 14, y: kk.y, z: 8, vx: rnd(40, 120), vy: rnd(-60, 60), t: 0, holder: null };
-    banner("BLOCKED KICK!!", "LIVE BALL -- dive on it!", 1.4);
-    crowdCheer(0.8);
-    G.kick = null;
+    G.kick = { kind, stage: 0, t: 0, power: 0, acc: 0, kicker, cpu: !isHuman(G.drive) };
   }
   function kickLocked() {
     const k = G.kick;
@@ -3789,166 +2402,38 @@
     k.stage = 2; k.t = 0;
     resolveKick();
   }
-  function launchKick(toX, toY, after) {
-    const kk = (G.kick && G.kick.kickerEnt) || { x: xAtYd(G.losYd) - 140, y: MID };
-    sfx.kick();
-    const d = Math.abs(toX - kk.x);
-    G.kickFly = { from: { x: kk.x, y: kk.y }, to: { x: toX, y: toY }, t: 0, T: 0.8 + d / 640, arc: clamp(d * 0.45, 80, 300), after };
-    G.ball = { mode: "kickfly", x: kk.x, y: kk.y, z: 10, holder: null };
-    G.state = "kickfly";
-  }
   function resolveKick() {
     const k = G.kick;
     const leg = k.kicker.leg || 84;
-    if (k.kind === "KO") {
-      // Kickoffs usually reach the goal line, but weather/leg/aim decide
-      // whether there is a returnable ball, a short kick, or a touchback.
-      const origin = k.originYd == null ? 35 : k.originYd;
-      let d = 47 + (k.power / 100) * (18 + leg * 0.16) + G.weather.wind.x / YPX;
-      let land = origin + d;
-      const err = Math.abs(k.acc + G.weather.wind.y * 0.35);
-      const directional = clamp(MID + k.acc * 2.6 + G.weather.wind.y * 3, TOP + 20, BOT - 20);
-      if (err > 26) land -= (err - 26) * 0.34;       // badly aimed balls hang shorter
-      land = clamp(land, 74, 106);
-      const returnYd = clamp(100 - land, 1, 26);
-      // Returns should be part of normal play, not a once-a-game novelty.
-      // Deep kicks still earn touchbacks, but a large share are fielded.
-      const touchback = land >= 100 && Math.random() < 0.45;
-      launchKick(xAtYd(Math.min(100, land)), directional, () => {
-        if (touchback) {
-          banner("TOUCHBACK", "Return team starts at the 25", 1.35);
-          G.deadT = 1.35;
-          G.deadNext = () => finishKickTouchback(25);
-          G.state = "dead";
-        } else {
-          startKickReturn("KICKOFF", returnYd, Math.round(d));
-        }
-      });
-      return;
-    }
     if (k.kind === "PUNT") {
-      let d = Math.round((22 + (k.power / 100) * (26 + leg * 0.22)) + G.weather.wind.x / YPX * 1.2);
+      const d = Math.round((22 + (k.power / 100) * (26 + leg * 0.22)) + G.weather.wind.x / YPX * 1.2);
       let land = G.losYd + d;
       let sub;
-      // CPU punters deliberately take a little off to leave the ball around
-      // the 5-14 instead of blindly booming it through the end zone.
-      const pinTarget = k.cpu ? clamp(92 + rnd(-5, 3), 86, 96) : null;
-      if (pinTarget != null && land > pinTarget) {
-        land = pinTarget;
-        d = Math.round(land - G.losYd);
-      }
-      if (land >= 100) { land = 100; sub = "Touchback."; }
-      else if (k.cpu && land >= 86) sub = d + " yard coffin-corner punt — pinned at the " + Math.round(100 - land) + ".";
-      else sub = d + " yard punt";
-      const targetY = clamp(MID + G.weather.wind.y * 2 + rnd(-60, 60), TOP + 20, BOT - 20);
-      launchKick(xAtYd(Math.min(100, land)), targetY, () => {
-        if (land >= 100) {
-          banner("PUNT", sub, 1.4);
-          G.deadT = 1.4; G.deadNext = () => finishKickTouchback(25); G.state = "dead";
-        } else {
-          startKickReturn("PUNT", clamp(100 - land, 1, 26), d, targetY);
-        }
-      });
+      if (land >= 100) { land = 80; sub = "Touchback."; } else { sub = d + " yard punt"; }
+      banner("PUNT", sub, 1.6);
+      G.deadT = 1.6; G.deadNext = () => { changePossession(100 - land); enterPlaycall(); };
+      G.state = "dead";
       return;
     }
     const fgDist = k.kind === "XP" ? 33 : Math.round(100 - G.losYd + 17);
-    // the kicker's three tools: RANGE (leg), ACCURACY (his own talent — sets
-    // how wide the make-window is), STAMINA (a weak motor fades in the 4th)
-    const kacc = k.kicker.kacc || kickAccOf(k.kicker.name);
-    const kstam = stamOf(k.kicker.name, "K");
-    let range = 28 + leg * 0.32 + (k.power - 55) * 0.2;
-    if (G.quarter >= 4) range -= (99 - kstam) * 0.05;
-    const meter = kickMeterPlan(k);
-    const accError = Math.abs(k.acc + G.weather.wind.y * 0.5);
-    const accOk = accError < meter.accHalf;
+    const range = 28 + leg * 0.32 + (k.power - 55) * 0.2;
+    const accOk = Math.abs(k.acc + G.weather.wind.y * 0.5) < (k.kind === "XP" ? 24 : 16) + (leg - 80) * 0.2;
     const good = fgDist <= range && accOk && Math.random() > 0.04 + (G.weather.kickMod ? Math.abs(G.weather.kickMod) : 0);
-    const short = fgDist > range;                          // out of gas vs shanked
-    // A ball that barely has enough leg or clips the edge of the aiming lane
-    // can ping an upright and still tumble through.  It gives close kicks a
-    // memorable result without turning misses into makes.
-    const edgeKick = Math.abs(accError - meter.accHalf) < 2.5 || Math.abs(range - fgDist) < 1.2;
-    const doink = good && edgeKick && Math.random() < 0.55;
-    const postX = xAtYd(108);
-    const toX = good ? postX + 30 : (short ? postX - rnd(60, 140) : postX + rnd(0, 30));
-    const toY = good ? MID + rnd(-14, 14) : (short ? MID + rnd(-20, 20) : MID + (Math.random() < 0.5 ? -1 : 1) * rnd(48, 80));
-    const drive0 = G.drive, losYd0 = G.losYd;
-    launchKick(toX, clamp(toY, TOP + 12, BOT - 12), () => {
-      if (k.kind === "XP") {
-        if (good) { if (doink) sfx.doink(); G.score[drive0] += 1; banner(doink ? "DOINK!  EXTRA POINT GOOD" : "EXTRA POINT GOOD", doink ? "Off the upright and through!" : "", 1.4); }
-        else banner("XP MISSED!", "The ptero shanks it!", 1.4);
-        G.deadT = 1.5; G.deadNext = () => startKickoff(other(drive0));
-      } else if (good) {
-        if (doink) sfx.doink(); G.score[drive0] += 3; sfx.td(); crowdCheer(0.6);
-        banner(doink ? "DOINK!  IT'S GOOD!" : "FIELD GOAL GOOD!", (doink ? "Off the upright — " : "") + fgDist + " yards by " + lastName(k.kicker.name), 1.8);
-        G.deadT = 1.8; G.deadNext = () => startKickoff(other(drive0));
+    if (k.kind === "XP") {
+      if (good) { G.score[G.drive] += 1; banner("EXTRA POINT GOOD", "", 1.4); }
+      else banner("XP MISSED!", "The ptero shanks it!", 1.4);
+      G.deadT = 1.5; G.deadNext = () => { changePossession(25); enterPlaycall(); };
+    } else {
+      if (good) {
+        G.score[G.drive] += 3; sfx.td();
+        banner("FIELD GOAL GOOD!", fgDist + " yards by " + lastName(k.kicker.name), 1.8);
+        G.deadT = 1.8; G.deadNext = () => { changePossession(25); enterPlaycall(); };
       } else {
-        banner("FIELD GOAL MISSED", short ? "...it dies at the doorstep!" : fgDist + " yard attempt sails wide", 1.8);
-        G.deadT = 1.8; G.deadNext = () => { changePossession(100 - losYd0); enterPlaycall(); };
+        banner("FIELD GOAL MISSED", fgDist + " yard attempt", 1.8);
+        G.deadT = 1.8; G.deadNext = () => { changePossession(100 - G.losYd); enterPlaycall(); };
       }
-      G.state = "dead";
-    });
-  }
-
-  function finishKickTouchback(spot) {
-    G.kick = null; G.kickFly = null; G.returnPlay = null;
-    changePossession(spot == null ? 25 : spot);
-    enterPlaycall();
-  }
-
-  function startKickReturn(kind, startYd, kickY) {
-    const kickingSide = G.drive;
-    const receivingSide = other(kickingSide);
-    const returnAb = teamAbbrOf(receivingSide);
-    const kickAb = teamAbbrOf(kickingSide);
-    const returnRoster = roster(returnAb);
-    const kickRoster = roster(kickAb);
-    const cleanYd = clamp(Math.round(startYd), 1, 26);
-    // Flip the possession before building entities so the existing movement,
-    // tackle, weather and player-control systems all understand who is
-    // advancing.  Camera orientation remains consistent for the receiver.
-    G.drive = receivingSide; G.losYd = cleanYd; G.down = 1; G.toGain = 10;
-    G.driveStory = { side: G.drive, startYd: cleanYd, plays: 0 };
-    const x0 = xAtYd(cleanYd);
-    const y0 = clamp(kickY == null ? MID + rnd(-72, 72) : kickY, TOP + 24, BOT - 24);
-    const P = [];
-    const skill = (returnRoster.offense || []).filter((p) => p.role === "WR" || p.role === "RB" || p.role === "TE");
-    const retP = skill.slice().sort((a, b) => ((b.spd || 75) + (b.agi || 75) * 0.35 + (b.hands || 75) * 0.2) - ((a.spd || 75) + (a.agi || 75) * 0.35 + (a.hands || 75) * 0.2))[0] || { name: "Return Dino", spd: 80, agi: 78, hands: 76, str: 72, stam: 84 };
-    const ret = mkEnt("off", retP.role === "RB" ? "carno" : "veloci", retP.name, "RET", retP.spd || 80,
-      { agi: retP.agi || 78, hands: retP.hands || 76, str: retP.str || 72, jump: retP.jump || 74, stam: retP.stam, stiff: retP.stiff });
-    ret.x = x0; ret.y = y0; ret.state = "carry"; ret.returner = true; P.push(ret);
-    const line = returnRoster.oline || [];
-    const lanes = [[26, -100], [36, -60], [42, -20], [42, 20], [36, 60], [26, 100], [104, -112], [112, -56], [118, 0], [112, 56]];
-    for (let i = 0; i < lanes.length; i++) {
-      const [dx, dy] = lanes[i];
-      const lp = line[i % Math.max(1, line.length)] || skill[i % Math.max(1, skill.length)] || { name: "Block Dino", spd: 72, str: 74, tkl: 74 };
-      const species = i < 5 ? "trike" : (i % 2 ? "pachy" : "deino");
-      const b = mkEnt("off", species, lp.name || "Block Dino", "BLK", Math.max(64, lp.spd || 70),
-        { str: lp.str || 74, tkl: lp.tkl || 74, agi: lp.agi || 70, stam: lp.stam, blk: lp.blk || lp.str || 74 });
-      b.x = x0 + dx; b.y = clamp(y0 + dy, TOP + 16, BOT - 16); b.state = "returnblock"; P.push(b);
     }
-    const coverPool = (kickRoster.defense || []).concat(kickRoster.offense || []);
-    for (let i = 0; i < 11; i++) {
-      const dp = coverPool[i % Math.max(1, coverPool.length)] || { name: "Coverage Dino", spd: 80, tkl: 78, str: 76 };
-      const d = mkEnt("def", i % 3 === 0 ? "allo" : i % 3 === 1 ? "deinony" : "spino", dp.name || "Coverage Dino", "COV", dp.spd || 80,
-        { tkl: dp.tkl || 78, str: dp.str || 76, agi: dp.agi || 76, jump: dp.jump || 72, hands: dp.hands || 72, stam: dp.stam });
-      d.x = x0 + 178 + (i % 3) * 18;
-      d.y = clamp(TOP + 22 + i * ((BOT - TOP - 44) / 10), TOP + 16, BOT - 16);
-      d.state = "returncover"; P.push(d);
-    }
-    G.players = P;
-    G.ball = { mode: "held", holder: ret, x: ret.x, y: ret.y, z: 12 };
-    G.carrier = null; G.controlled = null; G.kick = null; G.kickFly = null;
-    // This happens before becomeCarrier so the returner is also contained
-    // during setup; once the whistle starts, the carrier may still run out of
-    // bounds and let checkBounds spot the ball correctly.
-    resolvePlayerContacts();
-    G.ball.x = ret.x + ret.dir * 8; G.ball.y = ret.y;
-    G.curPlay = { name: kind + " RETURN", type: "return", tags: ["return"] };
-    G.playPass = null; G.returnPlay = { kind, startYd: cleanYd, kickY: y0 };
-    G.state = "live"; G.phase = "carry"; G.playT = 0;
-    becomeCarrier(ret);
-    banner(kind + " RETURN", "FIELD IT AT THE " + cleanYd + " — FIND A LANE", 1.1);
-    G.camX = clamp(ret.x - W * 0.38, 0, FIELD_LEN - W);
+    G.state = "dead";
   }
 
   // ----------------------------------------------------------- stat tracking
@@ -3981,12 +2466,6 @@
         jmp: e.jumpT > 0 ? e.jumpT : 0, soar: e.soarT > 0, dive: e.diveT > 0,
         spin: e.spinT > 0 ? e.spinT : 0, thr: e.throwT > 0 ? e.throwT : 0,
         swing: e.swingT > 0 ? e.swingT : 0, jr: e.jump || 70,
-        // Preserve the actual authored cel and its normalized progression so
-        // replay GIFs do not regress into a rotated running sprite.
-        pose: e.poseT > 0 ? e.pose : "",
-        poseP: e.poseT > 0 ? clamp(1 - e.poseT / Math.max(0.01, e.poseDur || e.poseT || 0.5), 0, 0.999) : 0,
-        diveCatch: e.catchDiveT > 0,
-        impact: e.impactT > 0 ? e.impactT : 0, impactLead: !!e.impactLead,
       })),
     });
     if (G.tape.length > 340) G.tape.shift();
@@ -4089,14 +2568,10 @@
     out.push(0x3B);
     return new Uint8Array(out);
   }
-  // Replays are shareable proof of the action art.  Preserve a clean half-
-  // resolution of the 960×540 canvas instead of reducing the cel work to a
-  // postage-stamp 240×135 export.
-  const GIF_W = 480, GIF_H = 270, GIF_MAX_FRAMES = 120;
+  const GIF_W = 240, GIF_H = 135;
   function gifGrabFrame() {
     if (!G.gifCv) { G.gifCv = document.createElement("canvas"); G.gifCv.width = GIF_W; G.gifCv.height = GIF_H; }
     const g2 = G.gifCv.getContext("2d");
-    g2.imageSmoothingEnabled = false;
     g2.drawImage(cv, 0, 0, GIF_W, GIF_H);
     const d = g2.getImageData(0, 0, GIF_W, GIF_H).data;
     const idx = new Uint8Array(GIF_W * GIF_H);
@@ -4108,12 +2583,8 @@
   function gifStart() {
     if (!G.replay) return;
     G.gifFrames = []; G.gifRec = true; G.gifSkip = 0;
-    // Replays run in slow motion.  Starting on the final 2.5 seconds of the
-    // live tape guarantees that the tackle/catch/turnover is actually inside
-    // the finite, shareable GIF rather than spending its frame budget on a
-    // routine route release.
-    G.replay.i = Math.max(0, G.replay.frames.length - 150);
-    banner("🎥 RECORDING…", "capturing the finish in crisp pixel art", 1.2);
+    G.replay.i = 0;                        // roll it back and record the whole thing
+    banner("🎥 RECORDING…", "the GIF saves when the replay ends", 1.2);
   }
   function gifFinish() {
     if (!G.gifRec || !G.gifFrames.length) { G.gifRec = false; return; }
@@ -4137,83 +2608,6 @@
     G.replay = null;
     if (c) c(); else G.state = "playcall";
   }
-  // Quetzalcoatlus packs deliberately contain two grounded walk frames
-  // followed by two wings-open soar frames.  Keeping that split here prevents
-  // an ordinary safety stride from ever sampling aerial art. The flight frames
-  // are selected only while a real soar is active (or while the player is
-  // explicitly holding the soar aim control).
-  function selectGameplaySpriteFrame(spr, species, animT, soaring) {
-    const count = Math.max(1, spr.n || 1);
-    if (species === "quetz") {
-      const groundCount = Math.min(2, count);
-      if (soaring && spr.flight && spr.flight.n) {
-        return { pack: spr.flight, fi: (animT * 8 | 0) % spr.flight.n };
-      }
-      if (soaring && count > groundCount) {
-        return { pack: spr, fi: groundCount + ((animT * 8 | 0) % (count - groundCount)) };
-      }
-      return { pack: spr, fi: (animT * 7 | 0) % groundCount };
-    }
-    return { pack: spr, fi: (animT * 7 | 0) % count };
-  }
-  // Action art stays in the exact same compact 16×16 / 2px-grid language as
-  // the run cycle.  Keeping the choice in one place is important: the player
-  // renderer, replay renderer, ball anchor, and opaque-pixel collision pass
-  // must all agree on the cel that is actually on screen.
-  function poseState(e) {
-    const pose = e && e.poseT > 0 ? e.pose : "";
-    const duration = Math.max(0.01, e && (e.poseDur || e.poseT) || 0.5);
-    return { pose, progress: pose ? clamp(1 - e.poseT / duration, 0, 0.999) : 0 };
-  }
-  function renderedPose(e, pose) {
-    // A stretched reception owns a distinct forward-dive cel.  It is still
-    // the same dinosaur body and grid, not a loose arm painted over a runner.
-    if (e && e.catchDiveT > 0 && ["catch", "catchHigh", "catchLow"].includes(pose)) return "diveCatch";
-    return pose;
-  }
-  function selectActionSpriteFrame(e, spr, wingsOpen) {
-    const state = poseState(e);
-    const pose = renderedPose(e, state.pose);
-    // An intentional soar retains flight art. A normal safety jump is not a
-    // soar, so its grounded high-point cel is allowed to take priority here.
-    const action = !e.soarT && spr.actions && pose && spr.actions[pose];
-    if (action && action.n) {
-      return {
-        pack: action,
-        fi: Math.min(action.n - 1, Math.floor(state.progress * action.n)),
-        pose,
-        progress: state.progress,
-        action: true,
-      };
-    }
-    const base = selectGameplaySpriteFrame(spr, e.species, e.animT, wingsOpen);
-    return Object.assign(base, { pose: state.pose, progress: state.progress, action: false });
-  }
-  function selectReplayActionFrame(spr, e) {
-    const basePose = e.pose || "";
-    const pose = e.diveCatch && ["catch", "catchHigh", "catchLow"].includes(basePose) ? "diveCatch" : basePose;
-    const action = !e.soar && spr.actions && pose && spr.actions[pose];
-    if (action && action.n) {
-      return {
-        pack: action,
-        fi: Math.min(action.n - 1, Math.floor(clamp(e.poseP || 0, 0, 0.999) * action.n)),
-        pose,
-        progress: e.poseP || 0,
-        action: true,
-      };
-    }
-    const base = selectGameplaySpriteFrame(spr, e.sp, e.anim, !!e.soar);
-    return Object.assign(base, { pose, progress: e.poseP || 0, action: false });
-  }
-  function spriteBallAnchor(pack, dir, fi, originX, originY, fallbackX, fallbackY) {
-    const tracks = pack && pack.anchor && (pack.anchor[dir] || pack.anchor.R);
-    const point = tracks && tracks.length ? tracks[fi % tracks.length] : null;
-    const ball = point && point.ball;
-    const ax = Array.isArray(ball) ? ball[0] : ball && ball.x;
-    const ay = Array.isArray(ball) ? ball[1] : ball && ball.y;
-    if (Number.isFinite(ax) && Number.isFinite(ay)) return { x: originX + ax, y: originY + ay };
-    return { x: fallbackX, y: fallbackY };
-  }
   function drawReplay() {
     const r2 = G.replay;
     const f = r2.frames[Math.min(r2.frames.length - 1, r2.i | 0)];
@@ -4225,55 +2619,44 @@
       if (!sheet) continue;
       const spr = e.ramp ? sheet.rampage : sheet[e.sp];
       if (!spr) continue;
-      const spriteFrame = selectReplayActionFrame(spr, e);
-      const pose = spriteFrame.pose;
-      const poseProgress = spriteFrame.progress;
-      const artPack = spriteFrame.pack;
-      const img = (e.dir >= 0 ? artPack.R : artPack.L)[spriteFrame.fi];
-      const drawW = artPack.w, drawH = artPack.h;
+      let fi = (e.anim * 4 | 0) % 2;
+      if (e.soar && spr.n > 2) fi = 2 + ((e.anim * 6 | 0) % 2);   // wings open
+      const img = (e.dir >= 0 ? spr.R : spr.L)[fi];
       const jumpAmp = 5 + Math.max(0, (e.jr || 60) - 55) * 0.2;
       const jump = e.jmp > 0 ? Math.sin((1 - e.jmp / 0.4) * Math.PI) * jumpAmp : 0;
-      let poseX = 0, poseY = 0;
-      if (!spriteFrame.action && (pose === "tackle" || pose === "dive")) {
-        poseX = (e.dir >= 0 ? 1 : -1) * Math.round(6 * Math.min(1, poseProgress * 1.35));
-        poseY = Math.round(3 * poseProgress);
-      } else if (!spriteFrame.action && (pose === "tackled" || pose === "shoved")) {
-        poseX = (e.dir >= 0 ? -1 : 1) * Math.round(4 * poseProgress);
-        poseY = Math.round(4 * poseProgress);
-      } else if (!spriteFrame.action && pose === "catchLow") poseY = 2;
-      else if (!spriteFrame.action && pose === "stiff") poseX = (e.dir >= 0 ? 1 : -1) * 3;
-      else if (!spriteFrame.action && pose === "throw") poseX = (e.dir >= 0 ? 1 : -1) * Math.round(2 * poseProgress);
       cx.fillStyle = "rgba(0,0,0,.28)";
       cx.fillRect(e.x - G.camX - 8, e.y + 2, 16, 4);
-      const artX = Math.round(e.x - G.camX - drawW / 2 + poseX);
-      const artY = Math.round(e.y - drawH + 6 - jump + poseY);
-      if (e.prone && !["tackled", "shoved", "prone"].includes(pose)) { // laid-out aftermath
+      if (e.prone) {           // laid out on the turf (the tackle's aftermath)
         cx.save(); cx.translate(e.x - G.camX, e.y); cx.rotate((e.dir >= 0 ? 1 : -1) * Math.PI / 2);
-        cx.drawImage(img, -drawW / 2, -drawH + 6); cx.restore();
+        cx.drawImage(img, -spr.w / 2, -spr.h + 6); cx.restore();
       } else if (e.spin > 0) { // mid spin-move / juke rotation
-        cx.save(); cx.translate(e.x - G.camX, e.y - drawH / 2 + 3 - jump);
+        cx.save(); cx.translate(e.x - G.camX, e.y - spr.h / 2 + 3 - jump);
         cx.rotate((1 - e.spin / 0.32) * Math.PI * 2 * (e.dir >= 0 ? 1 : -1));
-        cx.drawImage(img, -drawW / 2, -drawH / 2); cx.restore();
+        cx.drawImage(img, -spr.w / 2, -spr.h / 2); cx.restore();
+      } else if (e.dive) {     // horizontal layout mid-dive
+        cx.save(); cx.translate(e.x - G.camX, e.y - 8 - jump); cx.rotate((e.dir >= 0 ? 1 : -1) * Math.PI / 2.6);
+        cx.drawImage(img, -spr.w / 2, -spr.h + 6); cx.restore();
       } else {
-        cx.drawImage(img, artX, artY);
-      }
-      if (f.ball.held && pose && Math.abs(f.ball.x - (e.x + (e.dir >= 0 ? 8 : -8))) < 18 && Math.abs(f.ball.y - e.y) < 12) {
-        let bx = e.x - G.camX + (e.dir >= 0 ? 9 : -9), by = e.y - 15 - jump;
-        if (pose === "catchHigh") by = e.y - 28 - jump;
-        else if (pose === "catchLow") by = e.y - 8;
-        else if (pose === "tackled" || pose === "shoved") { bx = e.x - G.camX + (e.dir >= 0 ? 5 : -5); by = e.y - 11; }
-        const anchor = spriteBallAnchor(artPack, e.dir >= 0 ? "R" : "L", spriteFrame.fi,
-          artX, artY, bx, by);
-        bx = anchor.x; by = anchor.y;
-        drawFootballAt(bx, by);
-      }
-      if (e.impact && e.impactLead) {
-        drawPixelImpactBurst(e.x - G.camX + (e.dir >= 0 ? 7 : -7), e.y - 22, clamp(e.impact / 0.5, 0, 1));
+        cx.drawImage(img, e.x - G.camX - spr.w / 2, e.y - spr.h + 6 - jump);
+        if (e.thr > 0) {       // the throwing arm swing
+          const prog = 1 - e.thr / 0.3;
+          const sx = e.x - G.camX, sy = e.y - jump - 20;
+          cx.strokeStyle = "#f4f6f1"; cx.lineWidth = 3;
+          cx.beginPath(); cx.moveTo(sx, sy);
+          cx.lineTo(sx + (e.dir >= 0 ? 1 : -1) * (-8 + prog * 22), sy - 6 + prog * 8); cx.stroke();
+        }
+        if (e.swing > 0) {     // the peanut-punch swat
+          const pr = 1 - e.swing / 0.3;
+          const sx0 = e.x - G.camX, sy0 = e.y - jump - 16;
+          cx.strokeStyle = "#ff8a5c"; cx.lineWidth = 3;
+          cx.beginPath(); cx.moveTo(sx0, sy0);
+          cx.lineTo(sx0 + (e.dir >= 0 ? 1 : -1) * (4 + pr * 16), sy0 - 2 + pr * 4); cx.stroke();
+        }
       }
     }
     if (!f.ball.held) {
       cx.fillStyle = "rgba(0,0,0,.3)"; cx.fillRect(f.ball.x - G.camX - 5, f.ball.y - 2, 10, 4);
-      drawFootballAt(f.ball.x - G.camX, f.ball.y - f.ball.z);
+      cx.drawImage(G.ballSpr, f.ball.x - G.camX - 8, f.ball.y - f.ball.z - 5);
     }
     // letterbox + flashing tag
     cx.fillStyle = "#050c08"; cx.fillRect(0, 0, W, 52); cx.fillRect(0, H - 52, W, 52);
@@ -4289,21 +2672,12 @@
   // Only each franchise's APEX dino can rampage. If the apex plays defense,
   // the rampage is a defensive one — an unblockable, ball-punching monster.
   function sideOf(e) { return (e.team === "off") === (G.drive === "A") ? "A" : "B"; }
-  const rampAvail = (side) => G.rampage[side] >= 100 &&
-    (G.practice || !G.rampUsed || G.rampUsed[side] !== (G.quarter <= 2 ? 1 : 2));
   function tryRampage(cpu) {
     const side = cpu ? "B" : "A";
     if (G.rampage[side] < 100 || G.ramp || G.state !== "live") return;
-    // ONE rampage per half, per team (practice field excepted)
-    const half = G.quarter <= 2 ? 1 : 2;
-    if (!G.practice && G.rampUsed && G.rampUsed[side] === half) {
-      if (!cpu && !G.banner) banner("RAMPAGE SPENT", half === 1 ? "One per half — it recharges at halftime" : "One per half — that was it for today", 1.0);
-      return;
-    }
     const apex = G.players.find((e) => e.apex && sideOf(e) === side);
     if (!apex) return;
     if (apex.team === "off" && (G.carrier !== apex || G.phase !== "carry")) return;
-    if (G.rampUsed) G.rampUsed[side] = half;
     G.rampage[side] = 0;
     G.ramp = { team: side, t: 4.0, ent: apex };
     apex.staggerT = 0; apex.proneT = 0;
@@ -4325,27 +2699,16 @@
   function onPress() {
     const S = G.state;
     if (S === "title") { G.state = "menu"; G.menuIdx = 0; return; }
-    if (S === "online_wait") { if (!G.online || G.online.phase !== "found") cancelMatch(); return; }
     if (S === "replay") { endReplay(); return; }   // tap anywhere skips the replay
-    if (S === "halftime") {
-      // corner chip skips; anywhere else acts (kick lock / dash jump)
-      if (mouse.x > W - 130 && mouse.y < 46) { endHalftime(); return; }
-      halftimePress();
-      return;
-    }
+    if (S === "halftime") { return; }
     if (S === "menu") { menuTapAt(mouse.x, mouse.y); return; }
     if (S === "qbs") { G.state = "menu"; return; }
     if (S === "tutorial") { G.tut = Math.min(TUT_PAGES.length - 1, (G.tut || 0) + 1); return; }
     if (S === "scout") { scoutClick(); return; }
     if (S === "editor") { editorClick(); return; }
     if (S === "offseason") { offseasonClick(); return; }
-    if (S === "intro") { G.intro = null; G.state = "pregame"; return; }   // tap skips
     if (S === "pregame") { kickoffAfterPregame(); return; }
-    if (S === "hub") {
-      if (G.szn && G.szn.phase !== "done" && mouse.x > W / 2 - 90 && mouse.x < W / 2 + 90 && mouse.y > 448 && mouse.y < 482) { openUpgrade(); return; }
-      if (G.szn && G.szn.phase === "done") hubKey("enter"); else startSeasonGame(); return;
-    }
-    if (S === "upgrade") { upgradeClick(); return; }
+    if (S === "hub") { if (G.szn && G.szn.phase === "done") hubKey("enter"); else startSeasonGame(); return; }
     if (S === "standings" || S === "sznstats") { G.state = "hub"; return; }
     if (S === "select") { selectClick(); return; }
     if (S === "playcall" || S === "defcall") { playcallClick(); return; }
@@ -4370,19 +2733,13 @@
       snap(); return;
     }
     if (S === "kick" && !G.kick.cpu) { kickLocked(); return; }
-    if (S === "over") {   // tap = continue (box score first if it's open)
-      if (G.showBox) { G.showBox = false; return; }
-      onKey("enter"); return;
-    }
-    if (["career_create", "career_quiz", "career_draft"].includes(S)) { careerClick(S); return; }
+    if (S === "over") return;
     if (S === "live") {
       if (G.phase === "drop" && offenseIsUser() && G.ball.holder && G.ball.holder.role === "QB") {
-        // slingshot passing: the press only plants your grip — you have to
-        // PULL BACKWARD (bring the ball behind your head) to load the throw
-        G.slingAnchor = { x: mouse.x, y: mouse.y }; G.aim = null;
+        G.aim = worldMouse();
       } else if (G.phase === "carry" && offenseIsUser() && G.carrier && G.carrier.canPass &&
         G.carrier.x < xAtYd(G.losYd)) {
-        G.slingAnchor = { x: mouse.x, y: mouse.y }; G.aim = null; // halfback pass!
+        G.aim = worldMouse(); // halfback pass!
       } else if (G.phase === "carry" && G.controlled === G.carrier) {
         // click = juke toward mouse
         doJuke(G.carrier);
@@ -4402,27 +2759,6 @@
   function soarMouse() {
     return { x: mouse.x + G.camX, y: clamp(mouse.y, TOP + 6, BOT - 6) };
   }
-  // tap-through for the keyboard-first career screens (mobile parity)
-  function careerClick(S) {
-    if (S === "career_draft") { careerKey("enter"); return; }
-    if (S === "career_quiz") {
-      for (let i = 0; i < 4; i++) {
-        if (Math.abs(mouse.y - (250 + i * 40 - 8)) < 20) { careerKey(String(i + 1)); return; }
-      }
-      return;
-    }
-    // career_create: tap a row to select it, tap the ◀/▶ side to cycle it,
-    // tap the bottom prompt to move on to the DINOLICK
-    if (mouse.y > 460) { careerKey("enter"); return; }
-    for (let i = 0; i < 4; i++) {
-      if (Math.abs(mouse.y - (150 + i * 50 - 8)) < 25) {
-        const c = G.cflow;
-        if (c.row !== i) { c.row = i; return; }        // first tap selects
-        careerKey(mouse.x < W / 2 + 120 ? "arrowleft" : "arrowright");
-        return;
-      }
-    }
-  }
 
   // ---------------------------------------------------- snowball fight (V key)
   function throwSnowball() {
@@ -4440,21 +2776,11 @@
     });
     sfx.juke();
   }
-  // A snowball makes its victim cold, blue, and slower for a few seconds.
+  // a thrown snowball that lands near a dino staggers them for a beat
   function snowballSplat(p) {
+    if (!p.thrown) return;
     for (const e of G.players) {
-      if (dist(e, p) >= 15 || e.proneT > 0) continue;
-      // Caleb Williams is the Iceman: snowballs bounce off his frozen visor.
-      if (e.name === "Caleb Williams") {
-        banner("ICEMAN!", "Caleb Williams shrugs off the snowball", 0.7);
-        sfx.juke();
-        break;
-      }
-      e.staggerT = Math.max(e.staggerT || 0, 0.28);
-      e.coldT = Math.max(e.coldT || 0, 4.5);
-      e.stamNow = Math.max(0, (e.stamNow == null ? 1 : e.stamNow) - 0.18);
-      sfx.tackle();
-      break;
+      if (dist(e, p) < 15 && e.staggerT <= 0 && e.proneT <= 0) { e.staggerT = 0.45; sfx.tackle(); break; }
     }
   }
 
@@ -4467,14 +2793,11 @@
       b.push({ id: "snap", label: "SNAP", key: " ", x: W / 2, y: H - 46, r: 38 });
       add("audR", "AUD▶", "e"); add("audL", "◀AUD", "q");
     } else if (G.state === "live") {
-      // ball in the air: ONE button matters — time the leap
-      if (G.phase === "air" && G.ball.mode === "air" && !G.ball.away) {
-        b.push({ id: "jump", label: "JUMP!", key: " ", x: W - 64, y: H - 84, r: 40 });
-      } else if (offenseIsUser()) {
+      if (offenseIsUser()) {
         if (G.phase === "drop") { add("bullet", "BULLET", " "); add("away", "THRWAWY", "x"); }
-        else if (G.phase === "carry") { add("juke", "JUKE", "shift"); add("stiff", "STIFF", "f"); add("dive", "DIVE", "e"); add("lat", "LATRL", "q"); if (rampAvail("A")) add("ramp", "🦖", "r"); }
+        else if (G.phase === "carry") { add("juke", "JUKE", "shift"); add("dive", "DIVE", "e"); add("lat", "LATRL", "q"); if (G.rampage.A >= 100) add("ramp", "🦖", "r"); }
       } else {
-        add("switch", "SWITCH", "tab"); add("jump", "JUMP", " "); add("dive", "DIVE", "e"); add("punch", "PUNCH", "f"); add("soar", "SOAR", "shift"); if (rampAvail("A")) add("ramp", "🦖", "r");
+        add("switch", "SWITCH", "tab"); add("dive", "DIVE", " "); add("punch", "PUNCH", "f"); add("soar", "SOAR", "shift"); if (G.rampage.A >= 100) add("ramp", "🦖", "r");
       }
       if (G.weather && G.weather.type === "SNOW") add("snow", "☃THROW", "v");
     } else if (G.state === "kick" && !G.kick.cpu) {
@@ -4511,19 +2834,13 @@
     }
   }
   function onRelease() {
-    if (G.state !== "live") { G.slingAnchor = null; return; }
-    if (G.soarAim && G.controlled) {
-      const cq = G.controlled;
-      if (dist(cq, G.soarAim) < 34) doDive(cq);       // tap = tackle, not takeoff
-      else startSoar(cq, G.soarAim);
-      G.soarAim = null; return;
-    }
+    if (G.state !== "live") return;
+    if (G.soarAim && G.controlled) { startSoar(G.controlled, G.soarAim); G.soarAim = null; return; }
     if (G.aim && (G.phase === "drop" || (G.phase === "carry" && G.carrier && G.carrier.canPass))) throwLob();
-    G.slingAnchor = null;
   }
   function onAltFire() {
-    // a bullet needs a loaded arm too: right-click only fires while pulled back
-    if (G.state === "live" && G.phase === "drop" && offenseIsUser() && G.aim) {
+    if (G.state === "live" && G.phase === "drop" && offenseIsUser()) {
+      if (!G.aim) G.aim = worldMouse();
       throwBullet();
     }
   }
@@ -4537,35 +2854,12 @@
     p.y = clamp(p.y, TOP + 6, BOT - 6);
     return p;
   }
-  // pull-back passing: drag AWAY from where you pressed (behind your head)
-  // and the ball launches the OPPOSITE way — farther pull = deeper throw.
-  function slingAim() {
-    const qb = G.ball.holder;
-    if (!qb || !G.slingAnchor) return null;
-    const dx = G.slingAnchor.x - mouse.x, dy = G.slingAnchor.y - mouse.y;
-    const pull = Math.hypot(dx, dy);
-    if (pull < 14) return null;                    // a twitch isn't a windup
-    const mr = maxRange();
-    const k = Math.min(1, (pull - 14) / 150);      // ~165px pull = full range
-    const len = 46 + k * (mr - 46);
-    const p = { x: qb.x + (dx / pull) * len, y: clamp(qb.y + (dy / pull) * len, TOP + 6, BOT - 6) };
-    p.x = clamp(p.x, xAtYd(-8), xAtYd(108));
-    return p;
-  }
 
   function onKey(k) {
     if (k === "m") { muted = !muted; return; }
     if (k === "h") { G.help = !G.help; return; }
-    // Local visual-review shortcuts.  They are inert in normal play because
-    // `qaMode` exists only when the URL explicitly asks for it.
-    if (G.qaMode && ({ "1": "tackle", "2": "firstdown", "3": "catch", "4": "interception" }[k])) {
-      stageHighlight({ "1": "tackle", "2": "firstdown", "3": "catch", "4": "interception" }[k]);
-      return;
-    }
-    if (G.qaMode && k === "5") { qaExportFrame(); return; }
     if (k === "g" && G.state === "title") { G.gallery = !G.gallery; return; }
     if (G.state === "halftime" && (k === "enter" || k === "escape")) { endHalftime(); return; }
-    if (G.state === "halftime" && k === " ") { halftimePress(); return; }
     if (G.state === "replay") {
       if (k === "g" && !G.gifRec) { gifStart(); return; }
       endReplay(); return;
@@ -4574,7 +2868,6 @@
     if (k === "b" && !["title", "select", "live"].includes(G.state)) { G.showBox = !G.showBox; return; }
     if (k === "c" && G.state === "dead" && !G.challengeUsed) { throwChallenge(); return; }
     const S = G.state;
-    if (S === "online_wait") { if (k === "escape") cancelMatch(); return; }
     if (S === "title" && (k === "enter" || k === " ")) { G.state = "menu"; G.menuIdx = 0; return; }
     if (S === "menu") { menuKey(k); return; }
     if (S === "qbs") { if (k === "escape" || k === "enter" || k === " ") { G.state = "menu"; } return; }
@@ -4587,11 +2880,9 @@
     if (S === "scout") { scoutKey(k); return; }
     if (S === "editor") { editorKey(k); return; }
     if (S === "offseason") { offseasonKey(k); return; }
-    if (S === "intro" && (k === "enter" || k === " " || k === "escape")) { G.intro = null; G.state = "pregame"; return; }
     if (S === "pregame" && (k === "enter" || k === " ")) { kickoffAfterPregame(); return; }
     if (S === "hub") { hubKey(k); return; }
     if (S === "standings" || S === "sznstats") { if (k === "enter" || k === "escape" || k === "b" || k === "s") G.state = "hub"; return; }
-    if (S === "upgrade") { if (k === "escape" || k === "enter" || k === "u") G.state = "hub"; return; }
     if (S === "select") { selectKey(k); return; }
     if (["career_create", "career_quiz", "career_drill", "career_draft"].includes(S)) { careerKey(k); return; }
     // practice: P switches between offense and defense drills, ESC quits
@@ -4638,22 +2929,17 @@
         }
       }
       if ((k === "e" || k === "control") && G.carrier && G.controlled === G.carrier) doDive(G.carrier);
-      // E is the dive button on defense too (click also dives)
-      if (k === "e" && !offenseIsUser() && G.controlled) doDive(G.controlled);
       if (k === "q" && offenseIsUser() && G.carrier && G.controlled === G.carrier) lateral();
-      // F — peanut punch (defense, near the carrier). It is an airborne swat:
-      // jump or soar first, then time the strike at the ball.
+      // F — peanut punch (defense, near the carrier). TIME IT: press as you
+      // arrive on the carrier for the best odds of jarring it loose.
       if (k === "f" && !offenseIsUser() && G.controlled) startPunch(G.controlled);
-      // F with the ball = STIFF-ARM: a strength-vs-strength shove (0.35s window)
-      if (k === "f" && offenseIsUser() && G.carrier && G.controlled === G.carrier) startStiffArm(G.carrier);
       if (k === " ") {
         if (G.aim && (G.phase === "drop" || (G.phase === "carry" && G.carrier && G.carrier.canPass))) { throwBullet(); }
         // ball in the air: SPACE is a TIMED JUMP for receivers AND defenders —
         // a defender who times the leap can pick the pass off (dive still
         // works any other time)
         else if (G.ball.mode === "air" && G.controlled && (G.controlled.routeEligible || G.controlled.team === "def")) timedJump(G.controlled);
-        // defense: SPACE is ALWAYS a jump (tackling lives on click / E)
-        else if (!offenseIsUser() && G.controlled) timedJump(G.controlled);
+        else if (!offenseIsUser() && G.controlled) doDive(G.controlled);
       }
       if (k === "x" && G.phase === "drop" && offenseIsUser()) { // throwaway
         G.ball = { mode: "air", kind: "lob", away: true, from: { x: G.ball.holder.x, y: G.ball.holder.y }, to: { x: G.ball.holder.x + 160, y: TOP - 40 }, t: 0, T: 0.8, x: G.ball.holder.x, y: G.ball.holder.y, z: 12, holder: null };
@@ -4681,7 +2967,7 @@
       if (d.team === e.team || d.staggerT > 0 || d.soarT > 0) continue;
       const dd = dist(d, e);
       const closing = (d.vx * (e.x - d.x) + d.vy * (e.y - d.y)) / Math.max(1, dd);
-      if (dd < 24 && closing > 33) {
+      if (dd < 24 && closing > 55) {
         d.staggerT = 0.38 + Math.max(0, (e.agi - d.agi)) / 260;
       }
     }
@@ -4689,19 +2975,6 @@
   function doDive(e) {
     if (e.diveT > 0 || e.proneT > 0) return;
     e.diveT = 0.3;
-    // A dive is a short launch, not a faster walk sprite.  It lands before
-    // the prone aftermath, while the compact action map keeps the dinosaur's
-    // head, tail, torso, and hind legs anatomically intact.
-    e.jumpT = Math.max(e.jumpT || 0, 0.34);
-    playPose(e, "dive", 0.50);
-  }
-  // STIFF-ARM: the STRENGTH move. A short window where an incoming tackler
-  // must win a muscle contest or eat turf. Timing it beats spamming it.
-  function startStiffArm(e) {
-    if (e.stiffCd > 0 || e.proneT > 0 || e !== G.carrier) return;
-    e.stiffT = 0.35; e.stiffCd = 1.5; e.swingT = 0.3;
-    playPose(e, "stiff", 0.52);
-    sfx.juke();
   }
   function switchDefender() {
     const defs = G.players.filter((e) => e.team === "def" && e.role !== "DL");
@@ -4716,10 +2989,7 @@
   function menuOptions() {
     const opts = [["EXHIBITION", "one game, any matchup"]];
     opts.push(["2-PLAYER VERSUS", "you vs a friend on one screen"]);
-    if (window.DINO_BOWL_FIREBASE_CONFIG) {
-      opts.push(["QUICK MATCH", "auto-queue — get paired with a random player online"]);
-      opts.push(["ONLINE (LINK)", "host a private game, share the link with a friend"]);
-    }
+    if (window.DINO_BOWL_FIREBASE_CONFIG) opts.push(["ONLINE VERSUS", "host a link — remote friend controls Team B"]);
     opts.push(["PRACTICE", "free reps: passing, running, punch, flight, RAMPAGE"]);
     const sz = loadSeason(), cr = loadCareer();
     if (sz && cr) opts.push(["CONTINUE CAREER", cr.name + " · " + cr.pos + " · " + TEAMS[cr.team][0]]);
@@ -4748,10 +3018,7 @@
     } else if (pick === "2-PLAYER VERSUS") {
       G.mode = "versus"; G.selectFor = "exh"; G.career = null; G.humanB = true;
       G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
-    } else if (pick === "QUICK MATCH") {
-      G.mode = "online"; G.selectFor = "exh"; G.career = null; G.humanB = true;
-      startQuickMatch();     // sets G.state = "online_wait" and queues us
-    } else if (pick === "ONLINE (LINK)") {
+    } else if (pick === "ONLINE VERSUS") {
       G.mode = "online"; G.selectFor = "exh"; G.career = null; G.humanB = true;
       startOnlineHost();
       G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
@@ -4797,7 +3064,6 @@
     if (k === "enter" || k === " " || k === "p") { startSeasonGame(); }
     if (k === "s") G.state = "standings";
     if (k === "t") G.state = "sznstats";
-    if (k === "u") openUpgrade();
     if (k === "escape") { saveSeason(); G.state = "menu"; G.menuIdx = 0; }
   }
 
@@ -4875,10 +3141,10 @@
     const dt = Math.min(0.033, (t - lastT) / 1000 || 0.016);
     lastT = t;
     try {
-      if (!G.qaStill) update(dt);
+      update(dt);
       // 12 fps state replication is smooth for this pixel-art game while
       // leaving enough database headroom for player input.
-      if (Net.role === "host" && Net.db && Net.room && G.state !== "online_wait" && t - Net.lastFrame > 83) {
+      if (Net.role === "host" && Net.db && t - Net.lastFrame > 83) {
         Net.lastFrame = t;
         Net.db.ref("dinobowl/rooms/" + Net.room + "/frame").set(netFrame());
       }
@@ -4935,25 +3201,10 @@
         if (e.spinT > 0) e.spinT -= dt;
         if (e.throwT > 0) e.throwT -= dt;
         if (e.swingT > 0) e.swingT -= dt;
-        if (e.catchDiveT > 0) e.catchDiveT -= dt;
-        tickTackleImpact(e, dt);
-        if (e.poseT > 0) {
-          e.poseT -= dt;
-          if (e.poseT <= 0) { e.poseT = 0; e.pose = ""; }
-        }
-        // After the impact cel has shown the actual shoulder wrap, keep a
-        // made-tackle carrier in the authored backward-fall cel. This avoids
-        // dropping straight from contact into a rotated running sprite.
-        if (e.tackleFallPending && e.proneT > 0 && e.poseT <= 0) {
-          e.tackleFallPending = false;
-          playPose(e, "prone", Math.max(0.14, Math.min(0.38, G.deadRecT + dt)));
-        }
         // first-down celebration: pop back up and keep hopping while signalling
         if (e.fdCeleb > 0) {
           e.fdCeleb -= dt; e.proneT = 0;
           if (e.jumpT <= 0) e.jumpT = 0.45;
-          if (e.pose !== "celebrate") playPose(e, "celebrate", e.fdCeleb);
-          else e.poseT = Math.max(e.poseT || 0, e.fdCeleb);
           if (e.fdCeleb <= 0) e.fdCeleb = 0;
         }
       }
@@ -4962,49 +3213,29 @@
       updateCamera(dt);
       return;
     }
-    if (S === "intro") { G.intro.t += dt; if (G.intro.t > 6.4) { G.intro = null; G.state = "pregame"; } return; }
     if (S === "kick") { updateKick(dt); return; }
-    if (S === "kickfly") { updateKickFly(dt); return; }
     if (S === "halftime") { updateHalftime(dt); return; }
     if (S === "replay") { updateReplay(dt); return; }
-    if (S === "qa") { updateHighlight(dt); return; }
     if (S === "career_quiz" || S === "career_drill") { updateCareer(dt); return; }
     if (S !== "live") return;
 
     G.playT += dt;
     if (!G.practice && !G.patMode) G.clock = Math.max(0, G.clock - dt * 2.2);
-    if (G.slingAnchor && mouse.down && (G.phase === "drop" || (G.phase === "carry" && G.carrier && G.carrier.canPass))) G.aim = slingAim();
+    if (G.aim && mouse.down && (G.phase === "drop" || (G.phase === "carry" && G.carrier && G.carrier.canPass))) G.aim = worldMouse();
     if (G.soarAim && mouse.down && !offenseIsUser()) G.soarAim = soarMouse();
     if (G.ramp) { G.ramp.t -= dt; if (G.ramp.t <= 0) G.ramp = null; }
 
     updateBall(dt);
     for (const e of G.players) updateEntity(e, dt);
-    // All movement for this tick is now chosen.  Resolve physical body contact
-    // before tackling so a hit happens shoulder-to-shoulder rather than after
-    // two sprites have passed through one another.
-    resolvePlayerContacts();
     checkTackles(dt);
     checkBounds();
-    if (G.state !== "live") return;
-    // No live play may silently run forever. At this point the ball has had
-    // sixteen real seconds to cross a boundary, score, be caught, recovered,
-    // or tackled; whistle its current spot and keep the game flowing.
-    if (G.playT >= MAX_LIVE_PLAY_T) { playDead("WHISTLE", null, false); return; }
     updateCamera(dt);
     snapshotFrame();
 
     // handoff moment
-    if (G.phase === "handoff" && G.playT > 0.35) {
+    if (G.phase === "handoff" && G.playT > 0.45) {
       const rb = G.players.find((e) => e.role === "RB");
       becomeCarrier(rb);
-      // the double-team: nearest interior defender to the lane gets washed
-      const laneY = MID + ((G.curPlay && G.curPlay.lane) || 0) * 44;
-      const dt2 = G.players.filter((e) => e.team === "def" && (e.role === "DL" || e.role === "EDGE"))
-        .sort((a, b) => Math.abs(a.y - laneY) - Math.abs(b.y - laneY))[0];
-      if (dt2 && dt2.staggerT <= 0) {
-        dt2.staggerT = 0.55;
-        dt2.y += dt2.y > laneY ? 12 : -12;
-      }
     }
     // CPU QB (also throws for YOUR team when you chose to play as a receiver)
     const userIsReceiver = offenseIsUser() && G.controlled && G.controlled !== G.ball.holder &&
@@ -5017,7 +3248,7 @@
         const d = kdir();
         const sp = qb.spd * 0.9 * G.weather.speedMod;
         if (d.x || d.y) { qb.x += d.x * sp * dt; qb.y += d.y * sp * dt; }
-        else if (G.playT < 0.7) qb.x -= 42 * dt;
+        else if (G.playT < 0.7) qb.x -= 70 * dt;
         qb.y = clamp(qb.y, TOP + 8, BOT - 8);
         // QB crosses LOS -> becomes a runner
         if (qb.x > xAtYd(G.losYd) + 6) { becomeCarrier(qb); G.aim = null; }
@@ -5025,17 +3256,13 @@
       }
     }
     // CPU rampage (offensive or defensive apex)
-    if (rampAvail("B")) tryRampage(true);
+    if (G.rampage.B >= 100) tryRampage(true);
     // flea flicker: the back auto-pitches it home to the QB
     if (G.curPlay && G.curPlay.flicker && !G.flickerDone && G.phase === "carry" &&
       G.carrier && G.carrier.role === "RB" && G.playT > 1.15) {
       const qb = G.players.find((p) => p.role === "QB");
       if (qb) doLateral({ x: qb.x, y: qb.y });
     }
-    // QB dropbacks and a few scripted exchanges happen after the main AI pass.
-    // Run the same solve once more so the state that is actually rendered at
-    // the end of this tick cannot reintroduce a backfield overlap.
-    if (G.state === "live") resolvePlayerContacts();
     // clock expiry mid-drive
     if (G.clock <= 0 && G.phase === "idle") endQuarter();
   }
@@ -5044,7 +3271,7 @@
     const b = G.ball;
     // the camera stays glued to the football — including a LOOSE fumble
     // bouncing on the turf — so you always see who actually falls on it
-    const target = G.carrier || (b && (b.mode === "air" || b.mode === "loose" || b.mode === "kickfly") ? b : b && b.holder) || { x: xAtYd(G.losYd) };
+    const target = G.carrier || (b && (b.mode === "air" || b.mode === "loose") ? b : b && b.holder) || { x: xAtYd(G.losYd) };
     const want = clamp(target.x - W * 0.45, 0, FIELD_LEN - W);
     G.camX += (want - G.camX) * Math.min(1, dt * (b && b.mode === "loose" ? 8 : 5));
   }
@@ -5115,10 +3342,7 @@
       }
       if (b.kind === "lob") {
         const d = dist(b.from, b.to);
-        // A throw still clears defenders, but no longer climbs into a
-        // moon-ball.  Lower apex + quicker descent make the receiver/DB race
-        // legible and reward leading a route rather than floating it forever.
-        const h = clamp(d * 0.17, 20, 74);
+        const h = clamp(d * 0.28, 26, 120);
         b.z = 12 + h * 4 * k * (1 - k);
       } else {
         b.z = 14 + 10 * Math.sin(Math.PI * k) - 6 * k;
@@ -5131,21 +3355,6 @@
           }
         }
       }
-      // Start the catch read before the hop.  This gives a dino time to load
-      // its hind legs and raise its claws toward a descending pass, while the
-      // existing jump timing below remains the gameplay authority.  In other
-      // words: the animation anticipates the ball; it never grants a catch.
-      if ((b.kind === "lob" || b.kind === "bullet") && !b.catchCue && k >= 0.52 &&
-        !b.away && b.to.y > TOP + 4 && b.to.y < BOT - 4) {
-        b.catchCue = true;
-        const recCue = eligible().map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
-        const defCue = G.players.filter((e) => e.team === "def")
-          .map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
-        const cuePose = b.kind === "lob" ? "catchHigh" : "catchLow";
-        const cueDur = clamp((b.T - b.t) + 0.18, 0.40, 0.72);
-        if (recCue && recCue.d < 60) playPose(recCue.e, cuePose, cueDur);
-        if (defCue && defCue.d < 60) playPose(defCue.e, cuePose, cueDur);
-      }
       // as the pass arrives, the nearest receiver and nearest defender both leap
       // (nobody leaps for a throwaway or a ball landing out of bounds)
       if ((b.kind === "lob" || b.kind === "bullet") && !b.contested && k > 0.8 &&
@@ -5154,20 +3363,8 @@
         const rec = eligible().map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
         const df = G.players.filter((e) => e.team === "def")
           .map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
-        // YOUR receiver waits for YOU: no reflex jump here for the controlled
-        // dino — his late autopilot hop happens just before the ball lands
-        if (rec && rec.d < 44 && !rec.e.controlled) rec.e.jumpT = 0.4;
-        if (df && df.d < 44 && !df.e.controlled) df.e.jumpT = 0.4;
-      }
-      // controlled receiver never pressed JUMP → a late, slightly-off
-      // autopilot hop (worse odds than timing it yourself with SPACE)
-      if (k > 0.93 && !b.autoJumpDone && !b.away) {
-        b.autoJumpDone = true;
-        const cc2 = G.controlled;
-        if (cc2 && cc2.routeEligible && cc2.jumpT <= 0 && !cc2.jumpTimed && !cc2.jumpMistimed &&
-          dist(cc2, b.to) < 44) {
-          cc2.jumpT = 0.4; cc2.autoJumped = true;
-        }
+        if (rec && rec.d < 44) rec.e.jumpT = 0.4;
+        if (df && df.d < 44) df.e.jumpT = 0.4;
       }
       if (k >= 1) {
         if (b.to.y <= TOP || b.to.y >= BOT) { incomplete(b.to); return; } // throwaway OOB
@@ -5178,27 +3375,18 @@
 
   // -------------------------------------------------------------- entity AI
   function updateEntity(e, dt) {
-    e.prevX = e.x;
     e.animT += dt * (Math.hypot(e.vx, e.vy) > 10 ? 7 : 2);
     if (e.throwT > 0) e.throwT -= dt;   // cosmetic timers always tick
     if (e.spinT > 0) e.spinT -= dt;
     if (e.swingT > 0) e.swingT -= dt;
-    if (e.catchDiveT > 0) e.catchDiveT -= dt;
     if (e.jumpT > 0) e.jumpT -= dt;
-    if (e.poseT > 0) {
-      e.poseT -= dt;
-      if (e.poseT <= 0) { e.poseT = 0; e.pose = ""; }
-    }
-    if (e.impactT > 0) e.impactT -= dt;
-    tickTackleImpact(e, dt);
-    if (e.coldT > 0) e.coldT = Math.max(0, e.coldT - dt);
     // a soaring quetzalcoatlus is UNSTOPPABLE mid-flight: blocks, jukes and
     // shoves don't ground it — it tackles from the air. Checked before
     // stagger/prone so contact can never freeze a flight in place.
     if (e.soarT > 0) {
       e.staggerT = 0; e.proneT = 0;
       e.soarT -= dt;
-      const fsp = e.spd * 1.9 * (G.weather ? G.weather.speedMod : 1) * (e.coldT > 0 ? 0.78 : 1);
+      const fsp = e.spd * 1.9 * (G.weather ? G.weather.speedMod : 1);
       e.vx = e.soarDir.x * fsp; e.vy = e.soarDir.y * fsp;
       e.x += e.vx * dt; e.y += e.vy * dt;
       e.y = clamp(e.y, TOP - 4, BOT + 4);
@@ -5211,26 +3399,14 @@
     if (e.tackleCd > 0) e.tackleCd -= dt;
     if (e.spinCd > 0) e.spinCd -= dt;
     if (e.punchCd > 0) e.punchCd -= dt;
-    if (e.stiffT > 0) e.stiffT -= dt;
-    if (e.stiffCd > 0) e.stiffCd -= dt;
 
     let passMod = 1;
     if (e.apex) {
-      if (e.passive === "escape" && e === G.carrier) passMod = 1.08;         // scrambling QB
-      if ((e.passive === "sack" || e.passive === "wall") && e.state === "rush") passMod = 1.12;
+      if (e.passive === "escape" && e === G.carrier) passMod = 1.18;         // scrambling QB
+      if ((e.passive === "sack" || e.passive === "wall") && e.state === "rush") passMod = 1.2;
     }
-    // STAMINA: long carries burn noticeably harder than routes. A back or WR
-    // who has run 20+ yards with the ball loses top-end speed before a fresh
-    // defender does, while high-stamina players merely fade more gradually.
-    const vNow = Math.hypot(e.vx, e.vy);
-    if (vNow > e.spd * 0.82) e.stamNow = Math.max(0, (e.stamNow == null ? 1 : e.stamNow) - dt / (3.2 + ((e.stam || 80) - 60) * 0.1));
-    else e.stamNow = Math.min(1, (e.stamNow == null ? 1 : e.stamNow) + dt * 0.45);
-    if (e === G.carrier) e.carryT = (e.carryT || 0) + dt;
-    const tired = e.stamNow < 0.55 ? (0.92 - (0.55 - e.stamNow) * 0.32) : 1;
-    const longCarryFade = e === G.carrier ? clamp(((e.carryT || 0) - 2.2) * 0.05, 0, 0.18) : 0;
-    const burst = (e === G.carrier && !G.playPass && (e.carryT || 0) < 1.2) ? 1.12 : 1;   // hitting the hole
     const speedMod = G.weather.speedMod * (e.jukeT > 0 ? 0.92 : 1) * (e.diveT > 0 ? 1.9 : 1) *
-      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - longCarryFade) * (e.coldT > 0 ? 0.78 : 1) * burst;
+      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod;
     if (e.jukeT > 0) e.jukeT -= dt;
     if (e.diveT > 0) {
       e.diveT -= dt;
@@ -5284,18 +3460,6 @@
       return;
     }
 
-    // --- offense plays the ball like it matters: the nearest teammate works
-    // toward a lateral in flight, and skill players fall on a loose ball
-    if (e.team === "off" && e.role !== "OL" && e !== G.ball.holder) {
-      if (G.ball.mode === "air" && G.ball.kind === "lateral") {
-        const near2 = G.players.filter((p) => p.team === "off" && p.role !== "OL" && p.proneT <= 0)
-          .sort((a, b) => dist(a, G.ball.to) - dist(b, G.ball.to))[0];
-        if (near2 === e) { moveToward(e, G.ball.to, sp, dt); return; }
-      }
-      if (G.ball.mode === "loose" && dist(e, G.ball) < 170 && e.proneT <= 0) {
-        moveToward(e, G.ball, sp, dt); return;
-      }
-    }
     // --- AI by state
     switch (e.state) {
       case "route": {
@@ -5304,8 +3468,7 @@
         // off the snap, only near the line, never once the ball is gone.
         if (G.playT < 0.45 && !e.pressDone && G.ball.mode === "held" &&
           Math.abs(e.x - xAtYd(G.losYd)) < 34) {
-          const jam = G.players.find((p) => p.team === "def" && p.coverSlot === e.role &&
-            dist(p, e) < bodyContactRange(p, e, 3));
+          const jam = G.players.find((p) => p.team === "def" && p.coverSlot === e.role && dist(p, e) < 22);
           if (jam) {
             e.pressDone = true;
             e.swingT = 0.3; jam.swingT = 0.3;      // visible hand-fighting
@@ -5344,55 +3507,35 @@
           if (r2.staggerT > 0 || (r2.state !== "rush" && !r2.controlled)) { e.engaged = null; break; }
           if (dist(e, r2) > 42) { r2.blockedBy = null; e.engaged = null; e.staggerT = 0.3; break; } // beaten clean
           // stay latched onto the rusher (mirror his fight)
-          const gap = bodyContactRange(e, r2, 1);
-          moveToward(e, { x: r2.x + (e.team === "off" ? -gap : gap), y: r2.y }, sp * 1.05, dt);
+          moveToward(e, { x: r2.x + (e.team === "off" ? -8 : 8), y: r2.y }, sp * 1.05, dt);
           break;
         }
         if (e.engaged && G.ramp && G.ramp.ent === e.engaged) { e.engaged.blockedBy = null; e.engaged = null; e.staggerT = 0.8; }
         const rushers = G.players.filter((p) => p.team !== e.team && p.state === "rush" && !p.blockedBy && !(p.freeT > 0) && !(G.ramp && G.ramp.ent === p));
         rushers.sort((a, b) => dist(a, e) - dist(b, e));
         if (!rushers[0] || dist(rushers[0], e) > 120) {
-          // Nothing is immediately in the gap: the five blockers move as a
-          // *unit*.  On a pass they keep a clean U-shaped pocket around the
-          // QB; on a run they climb in staggered lanes ahead of the carrier
-          // instead of becoming five unrelated homing missiles.
+          // nothing to block: climb to the second level / escort the carrier
           const esc = G.carrier && G.carrier.team === e.team ? G.carrier : G.ball.holder;
-          if (esc) {
-            const slot = e.lineSlot == null ? 2 : e.lineSlot;
-            const offset = e.lineOffset == null ? (slot - 2) * 32 : e.lineOffset;
-            if (G.phase === "carry" && esc === G.carrier) {
-              const laneX = 26 + Math.abs(slot - 2) * 9;
-              const laneY = clamp(esc.y + offset * 0.72, TOP + 18, BOT - 18);
-              moveToward(e, { x: esc.x + laneX, y: laneY }, sp * 0.84, dt);
-            } else {
-              moveToward(e, { x: esc.x + 34, y: clamp(esc.y + offset, TOP + 18, BOT - 18) }, sp * 0.72, dt);
-            }
-          }
+          if (esc) moveToward(e, { x: esc.x + (e.team === "off" ? 24 : -24), y: e.y }, sp * 0.7, dt);
           break;
         }
         if (rushers[0] && dist(rushers[0], e) < 120) {
           const qb = G.ball.holder || e;
           const mid = { x: (rushers[0].x + qb.x) / 2, y: (rushers[0].y + qb.y) / 2 };
           moveToward(e, mid, sp * 0.9, dt);
-          if (dist(e, rushers[0]) < bodyContactRange(e, rushers[0], 2)) {
+          if (dist(e, rushers[0]) < 16) {
             const r0 = rushers[0];
             e.engaged = r0; r0.blockedBy = e;
             // trench battle: blocker STRENGTH vs rusher STRENGTH decides how
             // long the block holds — but no block survives past 1.7s, and an
             // elite rusher occasionally wins the rep instantly and runs free
-            const diff2 = ((e.blk || e.str || 75) - (r0.str || 75)) / 40;
-            // A block needs a readable beat before a shed.  The added base
-            // duration offsets the wider physical bodies without returning to
-            // the old frozen-pocket behavior; ratings and elite rush moves
-            // still decide the quick wins below.
-            let hold = clamp(0.45 + rnd(0.45, 0.9) * (1 + diff2), 0.70, 2.0);
-            // drive blocking: on a RUN play the line stays latched longer
-            if (G.curPlay && G.curPlay.type === "run") hold = clamp(hold + 0.9, 1.4, 2.0);
-            const eliteEdge = (r0.str || 75) - (e.blk || e.str || 75);
+            const diff2 = ((e.str || 75) - (r0.str || 75)) / 40;
+            let hold = clamp(rnd(0.45, 0.9) * (1 + diff2), 0.3, 1.7);
+            const eliteEdge = (r0.str || 75) - (e.str || 75);
             // every rusher can occasionally win his rep quickly; elites do it often
-            if (Math.random() < 0.08) hold = Math.min(hold, rnd(0.6, 1.0));
-            if (eliteEdge > 4 && Math.random() < 0.22 + eliteEdge * 0.014) hold = rnd(0.5, 0.8);
-            if (r0.apex && (r0.passive === "sack" || r0.passive === "wall") && Math.random() < 0.25) hold = Math.min(hold, rnd(0.55, 0.85));
+            if (Math.random() < 0.08) hold = Math.min(hold, rnd(0.3, 0.7));
+            if (eliteEdge > 4 && Math.random() < 0.22 + eliteEdge * 0.014) hold = rnd(0.2, 0.5);
+            if (r0.apex && (r0.passive === "sack" || r0.passive === "wall") && Math.random() < 0.4) hold = Math.min(hold, rnd(0.25, 0.55));
             r0.engageT = hold;
           }
         }
@@ -5402,16 +3545,6 @@
         const tgt = G.carrier || G.ball.holder;
         if (e.freeT > 0) e.freeT -= dt;
         if (e.blockedBy) {
-          // A stationary human QB cannot keep a five-man pocket pristine
-          // forever.  After a real coverage beat, a rusher visibly sheds and
-          // gets a clean lane instead of repeatedly re-engaging in place.
-          // The freeT cooldown below prevents an immediate re-block.
-          const pocketCollapsing = G.drive === "A" && !G.humanB &&
-            // Let a cleanly won block breathe before pocket compression
-            // begins.  A quarterback who holds the ball too long still gets
-            // pressure, but no rusher sheds on the same beat he engages.
-            G.phase === "drop" && G.playT > 2.85;
-          if (pocketCollapsing) e.engageT = Math.min(e.engageT, 0.18);
           e.engageT -= dt;
           // the pair FIGHTS: a stronger rusher walks his blocker back into the
           // pocket (bull rush doubles down), a stronger blocker stonewalls
@@ -5425,16 +3558,7 @@
           e.x += rnd(-8, 6) * dt; e.y += rnd(-8, 8) * dt;
           if (e.engageT <= 0) {
             if (e.rushTech === "spin") e.spinT = 0.3;   // spins off the block
-            e.blockedBy.engaged = null; e.blockedBy = null;
-            e.freeT = pocketCollapsing ? 3.2 : 2.5;
-            // Once free, bend around the pocket rather than repeatedly
-            // walking straight into the nearest lineman. This is a real
-            // pursuit lane, not a pass-through: the contact solver still
-            // keeps the rusher outside every body.
-            if (qb2 && G.phase === "drop") {
-              e.rushBypass = true;
-              e.rushLane = e.y <= qb2.y ? -1 : 1;
-            }
+            e.blockedBy.engaged = null; e.blockedBy = null; e.freeT = 2.5;
           }
           break;
         }
@@ -5452,41 +3576,17 @@
         }
         // a rusher who has beaten his block closes on the QB with urgency
         if (tgt && tgt === G.carrier) pursue(e, tgt, sp * 1.0, dt);
-        else if (tgt) {
-          // Winning a physical rep creates a short clean-lane burst.  Without
-          // it, the new body solver can make a freed rusher drift beside the
-          // pocket instead of closing it, even though no blocker remains.
-          const rushSp = G.phase === "drop" ? (e.freeT > 0 ? 1.40 : 1.16) : 0.82;
-          let rushTgt = tgt;
-          if (e.freeT > 0 && e.rushBypass && tgt.role === "QB") {
-            const laneY = clamp(tgt.y + (e.rushLane || 1) * 72, TOP + bodyRadius(e), BOT - bodyRadius(e));
-            // Cross the QB's outside shoulder before turning upfield.  Targeting
-            // a point just behind him makes the curve clear the U-shaped pocket
-            // while retaining an honest, visible approach to the sack.
-            if (e.x > tgt.x + 8 || Math.abs(e.y - laneY) > 10) {
-              rushTgt = { x: tgt.x - 8, y: laneY };
-            } else {
-              e.rushBypass = false;
-            }
-          }
-          moveToward(e, rushTgt, sp * rushSp, dt);
-        }
+        else if (tgt) moveToward(e, tgt, sp * (G.phase === "drop" ? 1.16 : 0.92), dt);
         break;
       }
       case "read": { // linebackers: read-and-react — crash the run, wall the pass
         const tgt = G.carrier;
         if (tgt) {
           // run fit: trigger DOWNHILL hard while the back is still in the box
-          // (a run-stuff call sends them downhill even harder)
-          const qbSneak = tgt.role === "QB" && G.curPlay && G.curPlay.qbKeep;
-          // The QB has shown the keep now, so a prepared front can trigger
-          // immediately.  This is intentionally after the visual commitment,
-          // never a pre-snap read of a fake-pass card.
-          const crash = (qbSneak ? 1.12 : (tgt.x < xAtYd(G.losYd) + 30 ? 0.9 : 0.87)) *
-            (e.runStuff ? (qbSneak ? 1.22 : 1.12) : 1);
+          const crash = tgt.x < xAtYd(G.losYd) + 30 ? 1.03 : 0.95;
           pursue(e, tgt, sp * crash, dt);
         }
-        else if (G.ball.mode === "air" && breakOnBall(e, sp, dt)) { /* playing the ball */ }
+        else if (G.ball.mode === "air") breakOnBall(e, sp, dt);
         else if (G.ball.mode === "loose") moveToward(e, G.ball, sp, dt);
         else if (G.phase === "drop" && G.playT > 0.5) {
           // pass shows: sink into the hook window and wall off the crossers
@@ -5506,7 +3606,7 @@
         break;
       }
       case "cover": { // man coverage
-        if (G.ball.mode === "air" && breakOnBall(e, sp, dt)) break;
+        if (G.ball.mode === "air") { breakOnBall(e, sp, dt); break; }
         if (G.ball.mode === "loose") { moveToward(e, G.ball, sp, dt); break; }
         if (G.carrier) { pursue(e, G.carrier, sp * 1.0, dt); break; }
         let tgt = null;
@@ -5517,13 +3617,12 @@
           tgt = rec ? { x: Math.max(minDepth, rec.x + 34), y: (rec.y + MID) / 2 } : { x: xAtYd(G.losYd) + 220, y: MID };
           moveToward(e, tgt, sp * 0.95, dt); break;
         }
-        // trail technique: near-hip leverage, but human — a step slow to
-        // mirror, so a crisp route break buys the receiver real separation
-        moveToward(e, { x: tgt.x + bodyContactRange(e, tgt, 1), y: tgt.y }, sp * 0.99, dt);
+        // tight trail technique: sit on the receiver's near hip, matching speed
+        moveToward(e, { x: tgt.x + 6, y: tgt.y }, sp * 1.0, dt);
         break;
       }
       case "zone": {
-        if (G.ball.mode === "air" && breakOnBall(e, sp, dt)) break;
+        if (G.ball.mode === "air") { breakOnBall(e, sp, dt); break; }
         if (G.ball.mode === "loose") { moveToward(e, G.ball, sp, dt); break; }
         if (G.carrier) { pursue(e, G.carrier, sp * 1.0, dt); break; }
         if (e.zone) {
@@ -5539,35 +3638,6 @@
         }
         break;
       }
-      case "returncover": {
-        const c = G.carrier;
-        if (!c) { moveToward(e, { x: e.x - 55, y: e.y }, sp, dt); break; }
-        // Coverage keeps its lane until the returner declares, then folds in
-        // at an angle.  Eleven separate lanes prevent the old one-at-a-time
-        // chase that made special teams look like a regular offensive snap.
-        const laneY = TOP + 22 + (e.y - TOP) * 0.92;
-        const depth = c.x < e.x - 52 ? e.x - 34 : c.x + 8;
-        const target = { x: depth, y: c.y * 0.62 + laneY * 0.38, vx: c.vx, vy: c.vy };
-        pursue(e, target, sp * (c.x > e.x - 80 ? 1.08 : 0.91), dt);
-        break;
-      }
-      case "returnblock": {
-        const c = G.carrier;
-        if (!c) { moveToward(e, { x: e.x + 42, y: e.y }, sp * 0.85, dt); break; }
-        const cover = G.players.filter((p) => p.team !== e.team && p.state === "returncover" && p.staggerT <= 0)
-          .sort((a, b) => (dist(a, c) + Math.max(0, c.x - a.x) * 0.35) - (dist(b, c) + Math.max(0, c.x - b.x) * 0.35))[0];
-        if (cover && cover.x > c.x - 20 && dist(cover, c) < 175) {
-          const shield = { x: cover.x - bodyContactRange(e, cover, 1), y: cover.y };
-          moveToward(e, shield, sp * 1.02, dt);
-          if (dist(e, cover) < bodyContactRange(e, cover, 2)) {
-            cover.staggerT = Math.max(cover.staggerT || 0, 0.16);
-            cover.vx *= 0.34; cover.vy *= 0.34;
-          }
-        } else {
-          moveToward(e, { x: c.x + 48, y: c.y + (e.y - c.y) * 0.58 }, sp * 0.9, dt);
-        }
-        break;
-      }
       case "leadblock": { // fullback: escort the carrier, flatten the first threat
         const c = G.carrier;
         if (!c) { moveToward(e, { x: e.x + 60, y: e.y }, sp * 0.9, dt); break; }
@@ -5575,7 +3645,7 @@
           .sort((p, q2) => dist(p, c) - dist(q2, c))[0];
         if (threat && dist(threat, c) < 140) {
           moveToward(e, threat, sp, dt);
-          if (dist(e, threat) < bodyContactRange(e, threat, 2)) { threat.staggerT = 0.9; e.staggerT = 0.35; sfx.tackle(); }
+          if (dist(e, threat) < 14) { threat.staggerT = 0.9; e.staggerT = 0.35; sfx.tackle(); }
         } else moveToward(e, { x: c.x + 40, y: c.y }, sp * 0.98, dt);
         break;
       }
@@ -5585,11 +3655,6 @@
           e.leaked = true; e.state = "route";
           e.path = [{ x: e.x + 10 * YPX, y: clamp(e.y + (e.y < MID ? -40 : 40), TOP + 12, BOT - 12) }];
           e.pathI = 0; e.endMode = "go";
-          // the sold block WORKED: nearby DBs bit on the run and freeze a beat
-          for (const d2 of G.players) {
-            if (d2.team !== e.team && ["CB", "S", "LB"].includes(d2.role) &&
-              dist(d2, e) < 95 && d2.staggerT <= 0 && d2.soarT <= 0) d2.staggerT = 0.55;
-          }
           break;
         }
         if (!e.block) {
@@ -5602,14 +3667,14 @@
           if (b2.soarT > 0) { e.block = null; break; }   // you can't stalk-block a flying dino
           // shadow the defender on the side between him and the ball carrier
           const ref = G.carrier || { x: xAtYd(G.losYd), y: MID };
-          const side = b2.x > ref.x ? -bodyContactRange(e, b2, 1) : bodyContactRange(e, b2, 1);
+          const side = b2.x > ref.x ? -6 : 6;
           moveToward(e, { x: b2.x + side, y: b2.y }, sp * 0.95, dt);
-          if (dist(e, b2) < bodyContactRange(e, b2, 2)) {
+          if (dist(e, b2) < 16) {
             b2.vx *= 0.5; b2.vy *= 0.5; if (b2.staggerT <= 0) b2.staggerT = 0.12;
             // stalk blocks obey the trench rules too: strength decides how long
             // the pin lasts, and nothing stays blocked past 1.7 seconds
             e.blockHold = (e.blockHold || 0) + dt;
-            const cap = clamp(0.9 + ((e.str || 68) - (b2.str || 70)) / 40, 0.45, 1.7);
+            const cap = clamp(0.7 + ((e.str || 68) - (b2.str || 70)) / 40, 0.35, 1.7);
             if (e.blockHold > cap) {
               e.blockHold = 0; e.block = null; e.staggerT = 0.5;
               b2.staggerT = 0; b2.freeT = 1.0;   // the defender sheds and runs free
@@ -5630,275 +3695,6 @@
         else if (G.carrier) { pursue(e, G.carrier, sp * 0.95, dt); }
         else { e.vx *= 0.85; e.vy *= 0.85; e.x += e.vx * dt; e.y += e.vy * dt; }
       }
-    }
-  }
-
-  // ---------------------------------------------------------------- contact physics
-  // Movement AI deliberately only chooses a desired velocity.  After every
-  // entity has moved, this small position-based solve separates every pair of
-  // bodies.  Doing it as a shared pass (rather than in the individual AI
-  // branches) prevents update-order bias: a DB cannot slip through a WR just
-  // because he happened to update first this frame.
-  function bodyRadius(e) {
-    let r = e.bodyR || BODY_PROFILES.default.r;
-    // A rampaging dino swaps to the double-size T-rex art, so its physical
-    // footprint must grow with it.  A prone dino still occupies turf, but its
-    // laid-out body is a shallower obstacle than an upright one.
-    if (G.ramp && G.ramp.ent === e) r *= 1.34;
-    if (e.proneT > 0) r *= 0.72;
-    return r;
-  }
-  function bodyMass(e) {
-    let m = e.bodyMass || BODY_PROFILES.default.mass;
-    if (G.ramp && G.ramp.ent === e) m *= 1.45;
-    if (e.staggerT > 0) m *= 1.18;
-    if (e.proneT > 0) m *= 1.35;
-    if (e.soarT > 0) m *= 1.16;
-    return m;
-  }
-  // `pad` is reach beyond actual body-to-body contact (hands, a diving
-  // shoulder, etc.).  The default is true physical contact with no overlap.
-  function bodyContactRange(a, b, pad) {
-    // The two extra pixels are visual clearance: a valid collision must not
-    // look like two complete sprite silhouettes are occupying the same turf.
-    return bodyRadius(a) + bodyRadius(b) + 2 + (pad || 0);
-  }
-  // The physical solver owns torsos and momentum; this compact-mask pass
-  // owns the art. A circle alone can be correct for a raptor's hips while a
-  // diagonal tail or horn still clips another painted sprite. Keeping the
-  // two stages separate preserves natural football spacing in formations and
-  // adds a one-pixel visual seam only where the actual opaque maps touch.
-  function compactVisualPlacement(e, spr, actionArt) {
-    const state = poseState(e);
-    const pose = renderedPose(e, state.pose);
-    const poseProgress = state.progress;
-    const jumpAmp = 5 + Math.max(0, (e.jump || 60) - 55) * 0.2 + (pose === "catchHigh" ? 6 : 0);
-    const jump = e.jumpT > 0 ? Math.sin((1 - e.jumpT / 0.4) * Math.PI) * jumpAmp : 0;
-    let poseX = 0, poseY = 0;
-    // The authored compact cels already contain a planted shoulder, tail
-    // counterbalance, reaching claws, and a real fall. Retain the old small
-    // offsets only as a compatibility fallback for a missing cel; otherwise
-    // do not slide a running sprite under the new action art.
-    if (!actionArt && (pose === "tackle" || pose === "dive")) {
-      poseX = e.dir * Math.round(6 * Math.min(1, poseProgress * 1.35));
-      poseY = Math.round(3 * poseProgress);
-    } else if (!actionArt && (pose === "tackled" || pose === "shoved")) {
-      poseX = -e.dir * Math.round(4 * poseProgress);
-      poseY = Math.round(4 * poseProgress);
-    } else if (!actionArt && pose === "catchLow") {
-      poseY = 2;
-    } else if (!actionArt && pose === "stiff") {
-      poseX = e.dir * 3;
-    } else if (!actionArt && pose === "throw") {
-      poseX = e.dir * Math.round(2 * poseProgress);
-    }
-    return {
-      pose, jump, poseX, poseY,
-      x: Math.round(e.x - spr.w / 2 + poseX),
-      y: Math.round(e.y - spr.h + 6 - jump + poseY),
-    };
-  }
-  function visualFootprint(e) {
-    const sheet = G.sheets && G.sheets[teamOf(e)];
-    if (!sheet) return null;
-    const ramping = G.ramp && G.ramp.ent === e;
-    const spr = ramping ? sheet.rampage : sheet[e.species];
-    if (!spr || !spr.mask) return null;
-    const wingsOpen = e.species === "quetz" &&
-      (e.soarT > 0 || (G.soarAim && e === G.controlled));
-    const spriteFrame = selectActionSpriteFrame(e, spr, wingsOpen);
-    const artPack = spriteFrame.pack || spr;
-    const p = compactVisualPlacement(e, artPack, spriteFrame.action);
-    // The 90-degree whistle fall and spin are intentionally short-lived.
-    // Their conservative boxes are only a fallback; upright dinos use their
-    // exact per-frame opaque pixel maps below.
-    if (e.proneT > 0 && !["tackled", "shoved", "prone"].includes(p.pose)) {
-      return { e, x: Math.round(e.x - spr.h / 2), y: Math.round(e.y - spr.w / 2), w: spr.h, h: spr.w, box: true };
-    }
-    if (e.spinT > 0) {
-      const side = Math.ceil(Math.hypot(spr.w, spr.h));
-      return { e, x: Math.round(e.x - side / 2), y: Math.round(e.y - side / 2), w: side, h: side, box: true };
-    }
-    const dir = e.dir >= 0 ? "R" : "L";
-    const maskPack = artPack && artPack.mask ? artPack : spr;
-    const frames = maskPack.mask[dir] || maskPack.mask.R;
-    const mask = frames && frames[spriteFrame.fi % frames.length];
-    if (!mask) return null;
-    return { e, x: p.x, y: p.y, w: mask.w, h: mask.h, rows: mask.rows, box: false };
-  }
-  function footprintSpansAt(f, y, pad) {
-    pad = pad || 0;
-    if (f.box) return [[f.x - pad, f.x + f.w + pad]];
-    const local = y - f.y;
-    const spans = [];
-    for (let sy = local - pad; sy <= local + pad; sy++) {
-      if (sy < 0 || sy >= f.h) continue;
-      for (const [a, b] of f.rows[sy]) spans.push([f.x + a - pad, f.x + b + pad]);
-    }
-    return spans;
-  }
-  function footprintsOverlap(a, b, pad) {
-    pad = pad || 0;
-    if (a.x + a.w + pad <= b.x - pad || b.x + b.w + pad <= a.x - pad ||
-      a.y + a.h + pad <= b.y - pad || b.y + b.h + pad <= a.y - pad) return false;
-    const top = Math.max(a.y - pad, b.y - pad), bot = Math.min(a.y + a.h + pad, b.y + b.h + pad);
-    for (let y = top; y < bot; y++) {
-      const ar = footprintSpansAt(a, y, pad), br = footprintSpansAt(b, y, pad);
-      for (const [as, ae] of ar) for (const [bs, be] of br) if (as < be && bs < ae) return true;
-    }
-    return false;
-  }
-  function visualMasksOverlap(a, b, pad) {
-    const fa = visualFootprint(a), fb = visualFootprint(b);
-    return !!(fa && fb && footprintsOverlap(fa, fb, pad));
-  }
-  function shiftedFootprint(f, dx, dy) {
-    return Object.assign({}, f, { x: f.x + dx, y: f.y + dy });
-  }
-  function visualSeparation(a, b, fa, fb) {
-    const sx = b.x >= a.x ? 1 : -1, sy = b.y >= a.y ? 1 : -1;
-    const dirs = [{ x: sx, y: 0 }, { x: -sx, y: 0 }, { x: 0, y: sy }, { x: 0, y: -sy }];
-    let best = null;
-    const maxStep = Math.max(fa.w + fb.w, fa.h + fb.h) + 4;
-    for (const dir of dirs) {
-      for (let n = 1; n <= maxStep; n++) {
-        if (!footprintsOverlap(fa, shiftedFootprint(fb, dir.x * n, dir.y * n), 1)) {
-          if (!best || n < best.n) best = { x: dir.x, y: dir.y, n };
-          break;
-        }
-      }
-    }
-    return best;
-  }
-  function resolveVisualSpriteContacts() {
-    if (!G.sheets || !G.players || G.players.length < 2) return;
-    // A few passes are enough because the torso solve already removed the
-    // large overlap. This only nudges the rare diagonal horn/tail collision.
-    let corrected = false;
-    for (let pass = 0; pass < 4; pass++) {
-      let moved = false;
-      for (let i = 0; i < G.players.length; i++) {
-        const a = G.players[i]; if (!a) continue;
-        for (let j = i + 1; j < G.players.length; j++) {
-          const b = G.players[j]; if (!b) continue;
-          // Match the torso solver's narrowly scoped tackle exception. The
-          // exact opaque-pixel pass still protects every non-tackle pair.
-          if (isIntentionalTacklePair(a, b)) continue;
-          const fa = visualFootprint(a), fb = visualFootprint(b);
-          // Only enter the corrective pass for a real opaque-pixel collision.
-          // The chosen separation still leaves a one-pixel seam, but dinos
-          // that are already cleanly adjacent do not get needlessly pushed
-          // into another formation partner.
-          if (!fa || !fb || !footprintsOverlap(fa, fb, 0)) continue;
-          const sep = visualSeparation(a, b, fa, fb);
-          if (!sep) continue;
-          const ia = 1 / Math.max(0.01, bodyMass(a)), ib = 1 / Math.max(0.01, bodyMass(b));
-          const total = ia + ib;
-          // Whole-pixel correction keeps the exact same placement used by the
-          // renderer from flickering between a clear seam and a one-pixel clip.
-          const da = Math.max(1, Math.ceil(sep.n * ia / total));
-          const db = Math.max(1, Math.ceil(sep.n * ib / total));
-          a.x -= sep.x * da; a.y -= sep.y * da;
-          b.x += sep.x * db; b.y += sep.y * db;
-          constrainBodyToField(a); constrainBodyToField(b);
-          moved = true; corrected = true;
-        }
-      }
-      if (!moved) break;
-    }
-    return corrected;
-  }
-  function constrainBodyToField(e) {
-    // A ball carrier is intentionally allowed to cross a sideline/end line so
-    // checkBounds can whistle the play dead.  Everyone else stays physically
-    // inside the painted field instead of being displaced into the stands.
-    if (e === G.carrier) return;
-    const r = bodyRadius(e);
-    e.x = clamp(e.x, r, FIELD_LEN - r);
-    e.y = clamp(e.y, TOP + r, BOT - r);
-  }
-  function settleContactVelocity(a, b, nx, ny) {
-    // Keep positional correction from turning into a visible frame-by-frame
-    // buzz.  We only erase the component moving INTO the other body; tangential
-    // motion remains, so route releases and pursuit angles still feel alive.
-    const rvx = b.vx - a.vx, rvy = b.vy - a.vy;
-    const closing = rvx * nx + rvy * ny;
-    if (closing >= 0) return;
-    const ia = 1 / Math.max(0.01, bodyMass(a));
-    const ib = 1 / Math.max(0.01, bodyMass(b));
-    const impulse = (-closing * 0.72) / (ia + ib);
-    a.vx -= nx * impulse * ia; a.vy -= ny * impulse * ia;
-    b.vx += nx * impulse * ib; b.vy += ny * impulse * ib;
-  }
-  function resolveBodyContacts(players, iterations, settleVelocity) {
-    for (let pass = 0; pass < iterations; pass++) {
-      for (let i = 0; i < players.length; i++) {
-        const a = players[i];
-        if (!a) continue;
-        for (let j = i + 1; j < players.length; j++) {
-          const b = players[j];
-          if (!b) continue;
-          // Only the named driver/carrier pair of an active completed tackle
-          // may share space. Formation traffic, loose-ball scrums, and every
-          // other player pair continue through the full physical solver.
-          if (isIntentionalTacklePair(a, b)) continue;
-          const minD = bodyContactRange(a, b);
-          let dx = b.x - a.x, dy = b.y - a.y;
-          const d2 = dx * dx + dy * dy;
-          if (d2 >= minD * minD) continue;
-          const qb = G.phase === "drop" && G.ball && G.ball.holder;
-          if (qb === a && b.team === "def") {
-            b.qbContact = true; b.qbContactAt = G.playT;
-          }
-          if (qb === b && a.team === "def") {
-            a.qbContact = true; a.qbContactAt = G.playT;
-          }
-          // The same latch applies to a ball carrier. A clean shoulder-to-
-          // shoulder arrival must still become a tackle after separation.
-          if (G.carrier === a && b.team !== a.team) {
-            b.carrierContact = true; b.carrierContactAt = G.playT;
-          }
-          if (G.carrier === b && a.team !== b.team) {
-            a.carrierContact = true; a.carrierContactAt = G.playT;
-          }
-          let d = Math.sqrt(d2), nx, ny;
-          if (d > 0.0001) {
-            nx = dx / d; ny = dy / d;
-          } else {
-            // Exact coincident centers occur on scripted catches/recoveries.
-            // Choose a stable, deterministic normal rather than injecting a
-            // random visual pop every replay.
-            nx = ((a.bodyId + b.bodyId) & 1) ? 1 : -1; ny = 0; d = 0;
-          }
-          const overlap = minD - d;
-          const ia = 1 / Math.max(0.01, bodyMass(a));
-          const ib = 1 / Math.max(0.01, bodyMass(b));
-          const total = ia + ib;
-          a.x -= nx * overlap * (ia / total); a.y -= ny * overlap * (ia / total);
-          b.x += nx * overlap * (ib / total); b.y += ny * overlap * (ib / total);
-          if (settleVelocity && pass === 0) settleContactVelocity(a, b, nx, ny);
-        }
-      }
-      for (const e of players) constrainBodyToField(e);
-    }
-  }
-  function resolvePlayerContacts() {
-    const players = G.players || [];
-    if (players.length < 2) return;
-    // Preserve the pre-solve velocity for tackle momentum. Contact response
-    // correctly slows bodies, but a defender should still receive credit for
-    // the speed with which he actually arrived at the hit.
-    for (const e of players) {
-      e.contactVx = e.vx; e.contactVy = e.vy;
-      e.qbContact = false; e.carrierContact = false;
-    }
-    // The torso solve and the exact-sprite solve are deliberately alternated.
-    // A tail/horn correction can move a third dino a fraction of a pixel into
-    // its physical radius; the next small torso pass repairs that before the
-    // renderer sees it. The ordinary case exits after the first mask check.
-    for (let cycle = 0; cycle < 6; cycle++) {
-      resolveBodyContacts(players, cycle === 0 ? 16 : 6, cycle === 0);
-      if (!resolveVisualSpriteContacts()) break;
     }
   }
 
@@ -5924,9 +3720,13 @@
       for (const p of G.players) { if (p.team === e.team && p.staggerT <= 0 && p.proneT <= 0) { const dd = dist(p, c); if (dd < nd) { nd = dd; nearest = p; } } }
       if (nearest === e) sp *= 1.08;
     }
-    // A safety pursues on foot by default. Straight-line flight is an
-    // explicit player-controlled soar (hold/release or SHIFT), never an AI
-    // breakaway shortcut that turns ordinary coverage into hovering.
+    // breakaway: nobody between the carrier and the endzone
+    const defs = G.players.filter((p) => p.team === e.team);
+    const breakaway = c.vx > 20 && !defs.some((p) => p.x > c.x + 12 && Math.abs(p.y - c.y) < 120);
+    // an AI quetzalcoatlus safety answers a breakaway by taking flight
+    if (breakaway && e.species === "quetz" && !e.controlled && soarReady(e) && d > 70 && d < 460) {
+      startSoar(e, lead);
+    }
     moveToward(e, lead, sp, dt);
   }
 
@@ -5937,7 +3737,6 @@
     return e.soarCd <= 0 && e.soarT <= 0 && (e.soarCharge || 0) >= 0.3;
   }
   function startSoar(e, tgt) {
-    if (!e || e.species !== "quetz" || !soarReady(e)) return false;
     const dx = tgt.x - e.x, dy = tgt.y - e.y;
     const m = Math.hypot(dx, dy) || 1;
     e.soarDir = { x: dx / m, y: dy / m };
@@ -5950,41 +3749,11 @@
     e.staggerT = 0; e.proneT = 0;         // takeoff shrugs off any contact
     G.soarSpent = { side: sideOf(e), play: G.playNo };
     sfx.juke(); sfx.roar();
-    return true;
   }
-  // returns TRUE only if this defender actually has a play on the ball;
-  // everyone else must KEEP COVERING (standing statue-still while the offense
-  // runs a go route was embarrassing and is now impossible)
   function breakOnBall(e, sp, dt) {
     const b = G.ball;
-    if (b.away) { e.ballAttack = false; return false; } // nobody bites on a throwaway
-    const flightLeft = Math.max(0, (b.T || 0) - (b.t || 0));
-    const spot = { x: b.to.x, y: clamp(b.to.y, TOP + 8, BOT - 8) };
-    const defenders = G.players.filter((p) => p.team === "def" && p.proneT <= 0)
-      .sort((a, b2) => dist(a, spot) / Math.max(1, a.spd || 1) - dist(b2, spot) / Math.max(1, b2.spd || 1));
-    const rank = defenders.indexOf(e);
-    const nearestRec = eligible().sort((a, b2) => dist(a, spot) - dist(b2, spot))[0];
-    const roleBonus = e.role === "S" ? 52 : e.role === "CB" ? 30 : e.role === "LB" ? 16 : 0;
-    // Only the two best-positioned defenders (plus a nearby safety) are
-    // allowed to abandon their assignment.  Their range scales with remaining
-    // air time, so a deep lob lets a safety read it early while a bullet still
-    // rewards tight man coverage rather than a teleporting defender.
-    const readRange = 118 + roleBonus + sp * flightLeft * 1.45;
-    const canJoin = rank <= 1 || (e.role === "S" && rank === 2 && dist(e, spot) < readRange * 0.82);
-    if (!canJoin || dist(e, spot) > readRange) { e.ballAttack = false; return false; }
-
-    const passDir = b.from ? Math.sign(b.to.x - b.from.x) || 1 : 1;
-    const alreadyInLane = nearestRec && (e.x - nearestRec.x) * passDir < 10;
-    // Meet the receiver slightly between him and the passer when the defender
-    // has inside/front leverage.  That creates the converging, contested
-    // catch point seen in good football games instead of two dinos arriving
-    // independently at the last pixel.
-    const lead = alreadyInLane ? 14 + (e.role === "S" ? 5 : 0) : 0;
-    const target = { x: spot.x - passDir * lead, y: spot.y };
-    e.ballAttack = true;
-    e.catchLeverage = lead ? 2 + (e.role === "S" ? 1 : 0) : 1;
-    moveToward(e, target, sp * (e.role === "S" ? 1.08 : 1.02), dt);
-    return true;
+    if (b.away) return;   // nobody bites on a throwaway
+    if (dist(e, b.to) < 240) moveToward(e, { x: b.to.x, y: clamp(b.to.y, TOP + 8, BOT - 8) }, sp, dt);
   }
 
   function cpuCarrier(e, sp, dt) {
@@ -5998,100 +3767,98 @@
       // jukes are a gamble, not a reflex — a good back only breaks one now and
       // then, and elite agility makes it more likely to land
       if (dist(n, e) < 28 && e.jukeCd <= 0 && Math.random() < 0.018 + Math.max(0, (e.agi - 75)) / 900) doJuke(e);
-      // …and only a true STIFF-ARM artist (85+) throws the paw, rarely
-      else if (dist(n, e) < 26 && e.stiffCd <= 0 && (e.stiff || e.str || 75) >= 85 && Math.random() < 0.02) startStiffArm(e);
     }
-    // A goal-line dive can score before contact.  Do not auto-dive at the
-    // sticks: that used to whistle an untouched CPU carrier dead the instant
-    // it earned a first down, taking away any chance to keep running.
+    // situational smarts: lay out for the goal line or the sticks when a
+    // tackler is about to arrive
     if (e.diveT <= 0 && n && dist(n, e) < 42) {
-      const goalX = xAtYd(100);
+      const goalX = xAtYd(100), fdX2 = xAtYd(Math.min(100, G.losYd + G.toGain));
       if (goalX - e.x < 70 && goalX - e.x > 8) doDive(e);
+      else if (fdX2 - e.x < 40 && fdX2 - e.x > 6 && Math.random() < 0.5) doDive(e);
     }
     ty = clamp(ty, TOP + 14, BOT - 14);
     moveToward(e, { x: e.x + 120, y: ty }, sp, dt);
   }
 
   const ELITE_QBS = ["Patrick Mahomes", "Josh Allen", "Joe Burrow", "Lamar Jackson"];
-
-  function cpuReadBoard(qb) {
-    const userReceiver = offenseIsUser() && G.controlled && G.controlled.team === "off" && G.controlled !== qb;
-    return eligible().map((rec) => {
-      const flight = 0.46 + dist(qb, rec) / 540;
-      const lead = {
-        x: rec.x + rec.vx * flight * 0.94,
-        y: clamp(rec.y + rec.vy * flight * 0.94, TOP + 10, BOT - 10),
-      };
-      lead.x = clamp(lead.x, qb.x - 18, qb.x + maxRange());
-      const window = assessPassWindow(qb, rec, lead, flight);
-      const depth = Math.max(0, lead.x - qb.x) / YPX;
-      const targetBonus = userReceiver && rec === G.controlled ? 16 : 0;
-      // Separation has value, but an open 6-yard outlet beats a "maybe"
-      // 25-yard throw.  This is the core fix for AI-QB interceptions.
-      const score = depth * 0.72 + window.separation * 1.22 - window.risk * 145 - window.placement * 0.28 + targetBonus;
-      return { rec, lead, flight, window, depth, score };
-    }).sort((a, b) => b.score - a.score);
-  }
-
-  function cpuThrowAway(qb) {
-    const sideline = qb.y < MID ? TOP - 32 : BOT + 32;
-    G.ball = { mode: "air", kind: "lob", away: true, from: { x: qb.x, y: qb.y }, to: { x: qb.x + 150, y: sideline }, t: 0, T: 0.65, x: qb.x, y: qb.y, z: 12, holder: null };
-    G.phase = "air"; qb.state = "idle"; qb.throwT = 0.3; playPose(qb, "throw", 0.32); G.aim = null; sfx.throw();
-  }
-
   function cpuQB(dt) {
     const qb = G.ball.holder;
-    if (!qb || qb.role !== "QB") return;
-    const elite = ELITE_QBS.includes(qb.name) || (qb.acc || 0) >= 92;
-    const nearbyRush = G.players.filter((p) => p.team === "def" && !p.blockedBy && dist(p, qb) < 86)
-      .sort((a, b) => dist(a, qb) - dist(b, qb));
-    const pressured = nearbyRush.length > 0;
-    const inFace = nearbyRush[0] && dist(nearbyRush[0], qb) < 25;
-    // Slide inside the pocket away from the nearest free rusher. It gives the
-    // line/QB a shared shape and prevents the old statue-QB sack parade.
-    if (G.playT < 0.85) qb.x -= 36 * dt;
-    if (pressured && nearbyRush[0]) {
-      const avoid = nearbyRush[0].y >= qb.y ? -1 : 1;
-      qb.y = clamp(qb.y + avoid * Math.min(42, qb.spd * 0.38) * dt, TOP + 18, BOT - 18);
+    if (!qb) return;
+    const elite = ELITE_QBS.includes(qb.name);
+    // drift back
+    if (G.playT < 0.8) { qb.x -= 65 * dt; }
+    const rushers = G.players.filter((p) => p.team === "def" && dist(p, qb) < 46 && !p.blockedBy);
+    const pressured = rushers.length > 0;
+    // a free rusher in the QB's lap and the pocket's gone: he can't get it off —
+    // hold the ball and eat the sack (checkTackles finishes it). This is what
+    // makes the sack rate realistic instead of zero.
+    const inFace = rushers.some((p) => dist(p, qb) < 20);
+    if (inFace && G.playT > (elite ? 0.8 : 0.95) && !(qb.apex && qb.passive === "escape" && Math.random() < 0.5)) return;
+    if (G.playT < (elite ? 0.5 : 0.7)) return;
+    // read separation PROJECTED at the catch point, not where players stand now
+    let best = null, bestSep = -1;
+    for (const r2 of eligible()) {
+      const flight = 0.5 + dist(qb, r2) / 620;
+      const proj = { x: r2.x + r2.vx * flight, y: r2.y + r2.vy * flight };
+      let sep = 9999;
+      for (const d of G.players) if (d.team === "def") sep = Math.min(sep, Math.hypot(d.x + d.vx * flight - proj.x, d.y + d.vy * flight - proj.y));
+      if (r2.x < xAtYd(Math.max(0, G.losYd - 8))) sep -= 30;
+      if (proj.x > qb.x + 40) sep += 8;                        // prefer downfield looks
+      if (sep > bestSep) { bestSep = sep; best = r2; }
     }
-    const reaction = (elite ? 0.48 : 0.66) * diff().cpuThink * (1 - Math.min(0.22, cpuExperience() * 0.12));
-    if (G.playT < reaction) return;
-
-    const board = cpuReadBoard(qb);
-    if (!board.length) { if (pressured && G.playT > 1.45) cpuThrowAway(qb); return; }
-    const preferred = board.find((r) => r.rec === G.controlled);
-    const safeLimit = elite ? 0.48 : 0.40;
-    const playableLimit = elite ? 0.60 : 0.53;
-    let choice = board.find((r) => r.window.risk <= safeLimit) || null;
-    // When a player is running a receiver, feed that route if it is genuinely
-    // comparable to the best read. The CPU no longer forces it into coverage.
-    if (preferred && preferred.window.risk <= playableLimit && (!choice || preferred.score >= choice.score - 13)) choice = preferred;
-    const mustThrow = G.playT > (elite ? 2.55 : 2.28) * diff().cpuThink || (pressured && G.playT > (elite ? 1.18 : 1.02));
-
-    if (choice && (choice.window.risk <= safeLimit || mustThrow && choice.window.risk <= playableLimit)) {
-      const savedAcc = qb.acc;
-      if (elite) qb.acc = Math.max(qb.acc, 92);
-      G.aim = choice.lead;
-      const quick = choice.depth <= 9 && choice.window.risk < 0.34 && !inFace;
-      if (quick) throwBullet(); else throwLob();
-      qb.acc = savedAcc;
+    const think = diff().cpuThink * (elite ? 0.55 : 1);
+    const openNow = elite ? 40 : 48;
+    const mustThrow = G.playT > 2.3 * think || (pressured && G.playT > (elite ? 1.35 : 1.0) * think);
+    // SACK: a realistic share of dropbacks end in a sack. Rather than fight
+    // the frame-by-frame pixel race (the QB releases before a rusher can
+    // physically arrive), the protection breakdown is pre-rolled at the snap
+    // — the DL/OL strength gap sets the odds, and it triggers when the QB has
+    // held past the pressure moment (unless he's open early or an escape
+    // artist). This is what a human-controlled rusher achieves live, too.
+    if (qb.sackDoom) {
+      // only a blown-coverage bomb in the very first beat lets him dodge it
+      const escapeOpen = best && bestSep > 120 && G.playT < 0.8;
+      if (!escapeOpen) {
+        if (G.playT >= qb.sackAt) {
+          const sacker = G.players.filter((p) => p.team === "def" && (p.state === "rush" || p.role === "EDGE" || p.role === "DL" || p.role === "LB"))
+            .sort((a, b) => dist(a, qb) - dist(b, qb))[0] || G.players.find((p) => p.team === "def");
+          if (sacker) { sacker.x = qb.x + 8; sacker.y = qb.y; }   // he arrives on the QB
+          G.carrier = qb; qb.canPass = false;
+          announce("sack", sacker && sacker.name);
+          if (sacker) { addStat(sacker, "sacks"); addStat(sacker, "tkl"); }
+          G.shake = Math.max(G.shake, 0.25); sfx.tackle();
+          playDead("SACKED!", null, false);
+          return;
+        }
+        return;   // protection is collapsing — hold the ball, can't step up yet
+      }
+    }
+    // nobody's open and the pocket's dying? a smart QB throws it into the
+    // fifth row instead of forcing a pick
+    if (mustThrow && best && bestSep < 18 && Math.random() < 0.45) {
+      G.ball = { mode: "air", kind: "lob", away: true, from: { x: qb.x, y: qb.y }, to: { x: qb.x + 160, y: TOP - 40 }, t: 0, T: 0.8, x: qb.x, y: qb.y, z: 12, holder: null };
+      G.phase = "air"; qb.state = "idle"; qb.throwT = 0.3; sfx.throw();
       return;
     }
-
-    // A scripted protection loss can only finish when a rusher is actually
-    // in the pocket. It is a pressure cue, not permission for the CPU to
-    // hold the ball while an easy outlet is available.
-    if (qb.sackDoom && pressured && G.playT >= qb.sackAt && (!choice || choice.window.risk > playableLimit) && inFace) {
-      const sacker = nearbyRush[0];
-      G.carrier = qb; qb.canPass = false;
-      announce("sack", sacker && sacker.name);
-      if (sacker) { addStat(sacker, "sacks"); addStat(sacker, "tkl"); }
-      G.shake = Math.max(G.shake, 0.25); sfx.tackle(); playDead("SACKED!", null, false);
-      return;
+    // occasionally take a downfield SHOT at a covered deep receiver — this is
+    // where real incompletions, picks, and big plays come from (pure checkdowns
+    // complete too often and never get intercepted)
+    let shotTgt = null;
+    if (!mustThrow && G.playT > 0.9 && Math.random() < 0.08) {
+      const deep = eligible().filter((r2) => r2.x > qb.x + 120).sort((a, b) => b.x - a.x)[0];
+      if (deep) shotTgt = deep;   // a shot downfield even into coverage
     }
-    if (mustThrow) {
-      if ((qb.agi || 75) >= 84 && !inFace && Math.random() < 0.52) { becomeCarrier(qb); return; }
-      cpuThrowAway(qb);
+    if (shotTgt || (best && (bestSep > openNow || mustThrow))) {
+      const tgtR = shotTgt || best;
+      const flight = 0.5 + dist(qb, tgtR) / 620;
+      const lead = { x: tgtR.x + tgtR.vx * flight * (elite ? 0.95 : 0.6), y: tgtR.y + tgtR.vy * flight * (elite ? 0.95 : 0.6) };
+      lead.x = clamp(lead.x, qb.x - 40, qb.x + maxRange() * (elite ? 1.15 : 1));
+      if (elite) qb.acc = Math.max(qb.acc, 94);                // elite ball placement
+      G.aim = lead;
+      const laneClear = bestSep > (elite ? 30 : 40);
+      if (!shotTgt && laneClear && dist(qb, lead) < 240 && Math.random() < 0.5) throwBullet();
+      else throwLob();
+    } else if (pressured && G.playT > (elite ? 1.8 : 1.4)) {
+      becomeCarrier(qb); // scramble
     }
   }
 
@@ -6100,12 +3867,10 @@
   // not the man. Success is decided at contact, based on how well you
   // timed the press relative to your arrival on the carrier.
   function startPunch(e) {
-    // A peanut punch is an airborne swat.  Jump (or soar) first; F from the
-    // turf no longer manufactures a free leap-and-strip.
-    if (e.punchCd > 0 || e.punching > 0 || e.proneT > 0 || (e.jumpT <= 0 && e.soarT <= 0)) return;
+    if (e.punchCd > 0 || e.punching > 0 || e.proneT > 0) return;
     e.punching = 0.5;
     e.punchDist = G.carrier ? dist(e, G.carrier) : 60;
-    e.swingT = 0.3;
+    e.jumpT = Math.max(e.jumpT, 0.35); e.swingT = 0.3;   // leap + swing
     sfx.juke();
   }
   function checkTackles(dt) {
@@ -6120,45 +3885,25 @@
         // play, per defender, and only a small fraction of the time.
         if (!e.controlled && e.punchCd <= 0 && e.punching <= 0 && !e.punchedThisPlay) {
           const dd0 = dist(e, c);
-          if (dd0 > 18 && dd0 < 40 && Math.random() < dt * 0.02) {
-            e.punchedThisPlay = true;
-            timedJump(e);
-            startPunch(e);
-          }
+          if (dd0 > 18 && dd0 < 40 && Math.random() < dt * 0.02) { e.punchedThisPlay = true; startPunch(e); }
         }
-        if (e.punching > 0 && (e.jumpT > 0 || e.soarT > 0) && dist(e, c) < 26 && !(G.ramp && G.ramp.ent === c)) {
+        if (e.punching > 0 && dist(e, c) < 26 && !(G.ramp && G.ramp.ent === c)) {
           e.punching = 0; e.punchCd = 1.1;
           for (let s2 = 0; s2 < 6; s2++) G.parts.push({ x: c.x + rnd(-6, 6), y: c.y - 12 + rnd(-6, 6), z: 8, vx: rnd(-60, 60), vy: rnd(-40, 40), vz: rnd(20, 70), t: 0.3, puff: true });
           // human punch is timing-based & reliable; an AI strip is a long shot
           const timing = clamp(1 - Math.abs((e.punchDist == null ? 60 : e.punchDist) - 30) / 42, 0, 1);
-          let odds = e.controlled
+          const odds = e.controlled
             ? 0.22 + timing * 0.5 + ((e.str || 75) - 75) / 250
-            : 0.14 + ((e.str || 75) - 75) / 500;   // AI: low base, small strength bonus
-          odds -= (((c.str || 75) - 75) + ((c.hands || 75) - 75)) / 900;   // ball security
+            : 0.10 + ((e.str || 75) - 75) / 500;   // AI: low base, small strength bonus
           if (Math.random() < odds) { e.punched = true; fumble(c, e); return; }
           e.staggerT = 0.3;   // whiffed the swat — a beat to recover
         }
       }
       for (const e of G.players) {
         if (e.team === c.team || e.staggerT > 0 || e.proneT > 0 || e.tackleCd > 0) continue;
-        // Body separation means centers no longer enter the old 14px
-        // overlap-only tackle gate.  A normal wrap starts at true shoulder
-        // contact; a dive/soar earns a little reach with the leading shoulder.
-        const airborne = e.diveT > 0 || e.soarT > 0;
-        let r2 = bodyContactRange(e, c, airborne ? 6 : 2);
-        if (e.apex && e.passive === "tackle") r2 += 3;      // HEAT-SEEKER range
-        const dc = dist(e, c);
-        const evx = e.contactVx == null ? e.vx : e.contactVx;
-        const evy = e.contactVy == null ? e.vy : e.contactVy;
-        const cvx = c.contactVx == null ? c.vx : c.contactVx;
-        const cvy = c.contactVy == null ? c.vy : c.contactVy;
-        const impactClosing = ((evx - cvx) * (c.x - e.x) + (evy - cvy) * (c.y - e.y)) / Math.max(1, dc);
-        // A defender who has already turned away must not magically tackle
-        // just because a separation solve left him brushing the carrier.
-        const recentCarrierContact = e.carrierContact ||
-          (e.carrierContactAt != null && G.playT - e.carrierContactAt < 0.16);
-        const actuallyArriving = dc <= bodyContactRange(e, c, 1.5) || impactClosing > 6 || recentCarrierContact;
-        if (dc < r2 && actuallyArriving) {
+        let r2 = (e.diveT > 0 || e.soarT > 0) ? 22 : 14;   // a soaring dino has a big hit box
+        if (e.apex && e.passive === "tackle") r2 += 7;      // HEAT-SEEKER range
+        if (dist(e, c) < r2) {
           // rampaging BALL CARRIER: send tacklers flying
           if (G.ramp && G.ramp.ent === c) {
             e.staggerT = 1.2; e.vx = 0; e.vy = 0;
@@ -6174,69 +3919,25 @@
             return;
           }
           if (c.jukeT > 0) { e.staggerT = 0.8; sfx.juke(); continue; }
-          // Truckstick has two strength-based tries per carry, rather than
-          // two guaranteed sheds. Even a dominant back is never automatic.
-          if (c.truckCharges > 0) {
-            c.truckCharges--;
-            const truckP = clamp(0.325 + ((c.str || 75) - (e.str || 75)) / 300, 0.25, 0.4);
-            if (Math.random() < truckP) {
-              e.staggerT = 0.9; G.shake = 0.15; sfx.tackle();
-              continue;
-            }
-          }
           if (c.shedCharges > 0) { // power backs bounce off the first hits
             c.shedCharges--; e.staggerT = 0.9; G.shake = 0.15; sfx.tackle();
             continue;
           }
-          // YAC MONSTER: one agility-based chance to make the first tackler miss
+          // YAC MONSTER: the first tackler whiffs
           if (c.apex && c.passive === "yac" && c.yacCharge > 0) {
-            c.yacCharge = 0;
-            const yacP = clamp(0.34 + ((c.agi || 75) - (e.agi || 75)) / 180, 0.25, 0.48);
-            if (Math.random() < yacP) { e.staggerT = 0.85; sfx.juke(); continue; }
-          }
-          // STIFF-ARM contest: raw strength vs raw strength. Win = the
-          // tackler is planted; lose = he's still coming, and mad about it
-          if (c.stiffT > 0) {
-            c.stiffT = 0;
-            if ((c.stiff || c.str || 75) + rnd(0, 26) > (e.str || 75) + rnd(0, 26)) {
-              const dx3 = e.x - c.x, dy3 = e.y - c.y, m3 = Math.hypot(dx3, dy3) || 1;
-              e.staggerT = 0.75; e.proneT = Math.max(e.proneT || 0, 0.3);
-              playPose(c, "stiff", 0.44); playPose(e, "shoved", 0.54);
-              c.impactT = 0.42; c.impactLead = true; e.impactT = 0.42;
-              e.x += (dx3 / m3) * 14; e.y += (dy3 / m3) * 14;
-              G.shake = Math.max(G.shake, 0.12); sfx.tackle();
-              continue;
-            }
+            c.yacCharge = 0; e.staggerT = 0.85; sfx.juke(); continue;
           }
           e.tackleCd = 0.5;
           // HARD HIT: a well-timed dive/flight arriving fast and strong can
           // jar the ball loose — or leave a fresh-catch receiver seeing stars
-          const closing = impactClosing;
-          // Dive momentum is partially spent turning into the tackle, so the
-          // closing threshold must be attainable after the approach step.
-          // This also fixes the visible "arrived but missed" CPU tackle.
-          const hardHit = closing > 56 && (e.str || 75) >= 76 && (e.diveT > 0 || e.soarT > 0);
+          const closing = ((e.vx - c.vx) * (c.x - e.x) + (e.vy - c.vy) * (c.y - e.y)) / Math.max(1, dist(e, c));
+          const hardHit = closing > 180 && (e.str || 75) >= 76 && (e.diveT > 0 || e.soarT > 0);
           const freshCatch = c.catchT != null && G.playT - c.catchT < 0.6;
-          // an arm tackle on a back moving at full clip mostly bounces off —
-          // you bring him down with a dive, a wrap at an angle, or numbers
-          const fullClip = !G.playPass && Math.hypot(c.vx, c.vy) > c.spd * 0.7 && e.diveT <= 0 && e.soarT <= 0;
-          let p = (fullClip ? 0.38 : 0.52) + (e.tkl - c.agi) / 160 - ((c.str || 75) - 75) / 320 + (e.diveT > 0 ? 0.24 : 0) + (e.soarT > 0 ? 0.34 : 0) + (e.controlled ? 0.08 : 0) + (hardHit ? 0.1 : 0);
-          if (G.drive === "A" && !G.humanB && e.team === "def") p += 0.08; // CPU finishes QB/carrier tackles
-          if (e.apex && e.passive === "tackle") p += 0.08;               // HEAT-SEEKER finishes better
-          if (c.apex && c.passive === "escape") p -= 0.08;               // HOUDINI slips, not vanishes
+          let p = 0.52 + (e.tkl - c.agi) / 160 + (e.diveT > 0 ? 0.24 : 0) + (e.soarT > 0 ? 0.34 : 0) + (e.controlled ? 0.08 : 0) + (hardHit ? 0.1 : 0);
+          if (e.apex && e.passive === "tackle") p += 0.16;               // HEAT-SEEKER wraps up
+          if (c.apex && c.passive === "escape") p -= 0.14;               // HOUDINI slips
           if (Math.random() < p) {
-            c.impactT = 0.5;
-            c.impactLead = true; e.impactT = 0.5;
-            playPose(c, "tackled", 0.68);
-            playPose(e, "tackle", e.diveT > 0 || e.soarT > 0 ? 0.58 : 0.48);
-            // A made tackle gets a short body-on-body shoulder wrap. The
-            // carrier is shifted backward along the actual hit vector before
-            // the dead-ball fall, so it never reads as a sprite compressing
-            // vertically in place.
-            beginTackleImpact(e, c, 0.46);
-            const ballSec = clamp(1 - ((c.str || 75) - 75) * 0.004 - ((c.hands || 75) - 75) * 0.003, 0.5, 1.5);
-            const ffSkill = hardHit ? Math.max(0, ((e.tkl || 75) - 80)) * 0.002 : 0;   // big hitters strip more
-            if (Math.random() < (0.008 + G.weather.fumbleMod + ffSkill + (hardHit ? (freshCatch ? 0.16 : 0.06) : 0)) * ballSec) {
+            if (Math.random() < 0.009 + G.weather.fumbleMod + (hardHit ? (freshCatch ? 0.18 : 0.09) : 0)) {
               if (hardHit) { G.shake = Math.max(G.shake, 0.5); announce("bighit", e.name); sfx.roar(); }
               fumble(c, e); return;
             }
@@ -6248,8 +3949,6 @@
           } else if (hardHit) {
             // the big hit lands but doesn't finish: the carrier is DAZED
             c.staggerT = 0.85; e.staggerT = 0.4;
-            c.impactT = 0.34; c.impactLead = true; e.impactT = 0.34;
-            playPose(c, "tackled", 0.36); playPose(e, "tackle", 0.38);
             G.shake = Math.max(G.shake, 0.3); sfx.tackle();
             banner("BIG HIT!", lastName(c.name) + " is dazed but upright!", 0.7);
           } else {
@@ -6267,41 +3966,18 @@
       for (const e of G.players) {
         if (e.team !== "def" || e.staggerT > 0 || e.tackleCd > 0) continue;
         const elite = (e.str || 75) >= 88 || (e.apex && (e.passive === "sack" || e.passive === "wall"));
-        if (G.playT < (elite ? 0.8 : 1.2)) continue;
-        const dqb = dist(e, qb);
-        const evx = e.contactVx == null ? e.vx : e.contactVx;
-        const evy = e.contactVy == null ? e.vy : e.contactVy;
-        const qvx = qb.contactVx == null ? qb.vx : qb.contactVx;
-        const qvy = qb.contactVy == null ? qb.vy : qb.contactVy;
-        const closing = ((evx - qvx) * (qb.x - e.x) + (evy - qvy) * (qb.y - e.y)) / Math.max(1, dqb);
-        const wrapRange = bodyContactRange(e, qb, 1.5);
-        // CPU rushers get a small finish window when they are actively
-        // closing on the human QB. This closes the one-frame run-past gap
-        // where a defender visibly reached the passer but narrowly missed the
-        // old 13px overlap check.
-        // A rusher who is still driving through the pocket can finish from a
-        // forearm's reach; the extra space is reach, not body overlap, and is
-        // gated by real closing speed so a defender running away cannot claim
-        // a sack.
-        const cpuFinish = G.drive === "A" && !G.humanB && dqb < bodyContactRange(e, qb, 10) && closing > 8;
-        const recentQBContact = e.qbContact ||
-          (e.qbContactAt != null && G.playT - e.qbContactAt < 0.22);
-        if (dqb < wrapRange || recentQBContact || cpuFinish) {
+        if (G.playT < (elite ? 0.5 : 0.9)) continue;
+        if (dist(e, qb) < 13) {
           // HOUDINI QB slips the would-be sacker instead of going down
-          // It now requires actual movement and is a rare escape, not a
-          // coin-flip immunity after the rusher has already arrived.
-          const qbMoving = Math.hypot(qb.vx, qb.vy) > qb.spd * 0.42;
-          if (qb.apex && qb.passive === "escape" && qbMoving && Math.random() < 0.18) {
+          if (qb.apex && qb.passive === "escape" && Math.random() < 0.5) {
             e.staggerT = 0.7; e.tackleCd = 0.6; sfx.juke(); continue;
           }
           sfx.tackle();
           announce("sack", e.name);
           addStat(e, "sacks"); addStat(e, "tkl");
           G.carrier = qb;
-          // QB HUNTER can jar it loose, but a clean sack remains the expected
-          // outcome. A strip-sack should feel like a special moment, not erase
-          // most otherwise well-earned pressure finishes.
-          if (e.apex && e.passive === "sack" && Math.random() < 0.09) { fumble(qb, e); return; }
+          // QB HUNTER strip-sack jars the ball loose
+          if (e.apex && e.passive === "sack" && Math.random() < 0.5) { fumble(qb, e); return; }
           playDead("SACKED!", null, false);
           return;
         }
@@ -6320,18 +3996,13 @@
       const c = G.carrier;
       if (c.y <= TOP - 2 || c.y >= BOT + 2) { playDead("OUT OF BOUNDS", null, false); return; }
       if (c.x >= xAtYd(100)) { playDead("", null, false); return; } // TD handled in playDead via spot
-      // Leaving through the BACK of the offense's own end zone is a safety.
-      const backEnd = xAtYd(-10);
-      if (c.team === "off" && (c.x <= backEnd || (c.prevX > backEnd && c.x <= backEnd))) {
-        playDead("OUT OF END ZONE", { spotYd: 0 }, false); return;
-      }
+      if (c.x <= xAtYd(-9) && c.team === "off") { playDead("TACKLED", null, false); return; }
     }
   }
 
   // ---------------------------------------------------------------- kicking
   function updateKick(dt) {
     const k = G.kick;
-    if (!k) return;
     k.t += dt;
     if (k.stage === 0) k.val = 50 + 50 * Math.sin(k.t * 4.2);
     if (k.stage === 1) k.val = 50 + 50 * Math.sin(k.t * 5.6 + Math.PI / 2);
@@ -6339,32 +4010,6 @@
       // CPU nails it near-optimally with some noise
       if (k.stage === 0 && k.val > 88) kickLocked();
       else if (k.stage === 1 && Math.abs(k.val - 50) < rnd(2, 12)) kickLocked();
-    }
-    // the rush is LIVE while you aim: blockers hold each man a beat, then
-    // he's coming for the kicker
-    const kk = k.kickerEnt;
-    for (const e of G.players) {
-      e.animT += dt * (e.team === "def" && e.holdT <= 0 ? 7 : 2);
-      if (e.team !== "def" || !kk) continue;
-      if (e.holdT > 0) { e.holdT -= dt; e.x += rnd(-8, 8) * dt; e.y += rnd(-6, 6) * dt; continue; }
-      moveToward(e, kk, e.spd * 0.95, dt);
-      if (k.stage < 2 && dist(e, kk) < 15) { blockedKick(e); return; }
-    }
-  }
-  // the made/missed kick flies for real -- camera chases the ball
-  function updateKickFly(dt) {
-    const f = G.kickFly;
-    if (!f) return;
-    f.t += dt;
-    const kk = Math.min(1, f.t / f.T);
-    G.ball.x = f.from.x + (f.to.x - f.from.x) * kk;
-    G.ball.y = f.from.y + (f.to.y - f.from.y) * kk;
-    G.ball.z = 10 + f.arc * kk * (1 - kk);
-    updateCamera(dt);
-    if (kk >= 1) {
-      const after = f.after;
-      G.kickFly = null; G.ball.mode = "dead";
-      after();
     }
   }
 
@@ -6376,7 +4021,7 @@
       for (let i = 0; i < 6; i++) G.parts.push({ x: G.camX + rnd(-40, W + 40), y: rnd(-20, H), vx: w.wind.x * 2 - 60, vy: 540, t: rnd(0.25, 0.5), rain: true });
       // players splash through the puddles (Fields rules)
       for (const e of G.players || []) {
-        if (Math.hypot(e.vx, e.vy) > 36 && inPuddle(e) && Math.random() < dt * 9) {
+        if (Math.hypot(e.vx, e.vy) > 60 && inPuddle(e) && Math.random() < dt * 9) {
           for (let i = 0; i < 3; i++) G.parts.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-2, 4), z: 0, vx: rnd(-30, 30), vy: rnd(-20, 6), vz: rnd(20, 60), t: rnd(0.25, 0.45), splash: true });
         }
       }
@@ -6421,34 +4066,26 @@
     const S = G.state;
     if (S === "loading") { drawCenterText("LOADING DINO BOWL...", "", 0); cx.restore(); return; }
     if (S === "title") { drawTitle(); cx.restore(); return; }
-    if (S === "online_wait") { drawOnlineWait(); cx.restore(); return; }
     if (S === "menu") { drawMenu(); cx.restore(); return; }
     if (S === "qbs") { drawQBs(); cx.restore(); return; }
     if (S === "tutorial") { drawTutorial(); cx.restore(); return; }
     if (S === "scout") { drawScouting(); cx.restore(); return; }
     if (S === "editor") { drawEditor(); cx.restore(); return; }
     if (S === "offseason") { drawOffseason(); cx.restore(); return; }
-    if (S === "intro") { drawIntro(); cx.restore(); return; }
     if (S === "pregame") { drawPregame(); cx.restore(); return; }
     if (S === "hub") { drawHub(); cx.restore(); return; }
     if (S === "standings") { drawStandings(); cx.restore(); return; }
-    if (S === "upgrade") { drawUpgrade(); cx.restore(); return; }
     if (S === "sznstats") { drawSznStats(); cx.restore(); return; }
     if (S === "select") { drawSelect(); cx.restore(); return; }
     if (["career_create", "career_quiz", "career_drill", "career_draft"].includes(S)) { drawCareer(); cx.restore(); return; }
 
-    if (S === "halftime" && G.half) {
-      if (G.half.kind === "fg") drawHalfFG();
-      else if (G.half.kind === "dash") drawHalfDash();
-      else drawHalftime();
-      drawHUD(); cx.restore(); return;
-    }
+    if (S === "halftime" && G.half) { drawHalftime(); drawHUD(); cx.restore(); return; }
     if (S === "replay" && G.replay) {
       drawReplay();
       cx.font = PF(8); cx.textAlign = "left"; cx.fillStyle = G.gifRec ? "#ff5533" : "#9db0a4";
       cx.fillText(G.gifRec ? "● REC → GIF" : "G = SAVE AS GIF", 30, H - 24);
       cx.restore();
-      if (G.gifRec && (G.gifSkip = (G.gifSkip + 1) % 3) === 0 && G.gifFrames.length < GIF_MAX_FRAMES) gifGrabFrame();
+      if (G.gifRec && (G.gifSkip = (G.gifSkip + 1) % 3) === 0 && G.gifFrames.length < 80) gifGrabFrame();
       return;
     }
 
@@ -6464,14 +4101,14 @@
     // tapped-player info card (name + unique ratings)
     if (G.selCard && G.selCard.t > 0 && (S === "presnap" || S === "live")) {
       const e2 = G.selCard.e;
-      const cxp = clamp(e2.x - G.camX, 102, W - 102), cyp = Math.max(64, e2.y - 74);
-      cx.fillStyle = "rgba(4,10,7,.92)"; cx.fillRect(cxp - 98, cyp, 196, 46);
-      cx.strokeStyle = "#ffd23f"; cx.strokeRect(cxp - 98, cyp, 196, 46);
+      const cxp = clamp(e2.x - G.camX, 90, W - 90), cyp = Math.max(64, e2.y - 74);
+      cx.fillStyle = "rgba(4,10,7,.92)"; cx.fillRect(cxp - 86, cyp, 172, 46);
+      cx.strokeStyle = "#ffd23f"; cx.strokeRect(cxp - 86, cyp, 172, 46);
       cx.font = PF(8); cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
       cx.fillText((e2.role || e2.species).toUpperCase() + " · " + lastName(e2.name || "DINO").toUpperCase(), cxp, cyp + 14);
       cx.font = PF(7); cx.fillStyle = "#f4f6f1";
-      cx.fillText("SPD " + Math.round((e2.spd / SPEED_SCALE - 96) / 1.9 + 60) + " STR " + (e2.str || 75) + " JMP " + (e2.jump || 70), cxp, cyp + 27);
-      cx.fillText("HND " + (e2.hands || 75) + " TKL " + (e2.tkl || 75) + " AGI " + (e2.agi || 75) + " STA " + (e2.stam || 82), cxp, cyp + 39);
+      cx.fillText("SPD " + Math.round((e2.spd - 96) / 1.9 + 60) + " STR " + (e2.str || 75) + " JMP " + (e2.jump || 70), cxp, cyp + 27);
+      cx.fillText("HND " + (e2.hands || 75) + " TKL " + (e2.tkl || 75) + " AGI " + (e2.agi || 75), cxp, cyp + 39);
     }
     if (G.ticker && G.ticker.t > 0) {
       const a = Math.min(1, G.ticker.t * 2);
@@ -6486,7 +4123,6 @@
     drawTouchButtons();
     if (G.practice) drawPracticeTips();
     if (G.banner) drawBanner();
-    if (S === "qa" && !G.qaCapture) drawQAOverlay();
     if (S === "over") drawOver();
     if (G.showBox) drawBoxScore();
     if (G.help) drawHelp();
@@ -6498,8 +4134,8 @@
     cx.fillStyle = "rgba(4,10,7,.82)"; cx.fillRect(0, 32, W, 18);
     cx.textAlign = "center"; cx.font = PF(7); cx.fillStyle = "#ffd23f";
     const tips = off
-      ? "OFFENSE DRILL — hold & PULL BACK=aim, release=throw · SPACE=bullet · SHIFT=juke · F=stiff-arm · Q=lateral · R=RAMPAGE"
-      : "DEFENSE DRILL — TAB=switch · SPACE=jump · JUMP+F=punch · SHIFT=soar · R=RAMPAGE";
+      ? "OFFENSE DRILL — hold-click=aim · SPACE=bullet · WASD=run · SHIFT=juke · Q=lateral · R=RAMPAGE"
+      : "DEFENSE DRILL — TAB=switch · SPACE=dive · F=punch · SHIFT=soar · R=RAMPAGE";
     cx.fillText(tips + "     [P] SWITCH DRILL · [ESC] QUIT", W / 2, 45);
   }
 
@@ -6507,40 +4143,32 @@
 
   function drawField() {
     const cam = G.camX;
-    // grass stripes every five yards.  Keep their geometry tied to xAtYd so
-    // the visual field stays truthful when the presentation scale changes.
+    // grass stripes per 10 yd
     for (let seg = 0; seg < 24; seg++) {
-      const x = xAtYd(-10 + seg * 5) - cam;
-      if (x + 5 * YPX < 0 || x > W) continue;
+      const x = seg * 100 - cam;
+      if (x + 100 < 0 || x > W) continue;
       const snow = G.weather && G.weather.type === "SNOW";
       const base = seg % 2 ? (snow ? "#c9d4cf" : "#1e6b35") : (snow ? "#bcc9c3" : "#1a5e2e");
       cx.fillStyle = G.weather && G.weather.type === "RAIN" ? shade(base, -14) : base;
-      cx.fillRect(x, TOP, 5 * YPX, BOT - TOP);
+      cx.fillRect(x, TOP, 100, BOT - TOP);
     }
     // endzones
     const ezA = (G.drive === "A" ? G.my : G.opp) || "GB";   // offense's own endzone (left)
     const ezB = (G.drive === "A" ? G.opp : G.my) || "CHI";  // target endzone (right)
-    drawEndzone(0, ezA); drawEndzone(FIELD_LEN - 10 * YPX, ezB);
+    drawEndzone(0, ezA); drawEndzone(FIELD_LEN - 200, ezB);
     // midfield logo: the home team's mark painted at the 50, real-stadium style
     drawMidfieldLogo(cam);
     // yard lines
     cx.strokeStyle = "rgba(244,246,241,.55)"; cx.lineWidth = 2;
-    // Big, high-contrast numbers make every five-yard gain visibly matter.
-    // They are drawn into the turf, not floated as HUD text, so drives feel
-    // longer without lying about the actual spot.
-    cx.font = PF(16); cx.fillStyle = "rgba(244,246,241,.64)"; cx.textAlign = "center";
+    cx.font = PF(10); cx.fillStyle = "rgba(244,246,241,.5)"; cx.textAlign = "center";
     for (let yd = 0; yd <= 100; yd += 5) {
       const x = xAtYd(yd) - cam;
       if (x < -20 || x > W + 20) continue;
       cx.beginPath(); cx.moveTo(x, TOP); cx.lineTo(x, BOT); cx.stroke();
       if (yd % 10 === 0 && yd > 0 && yd < 100) {
         const num = yd <= 50 ? yd : 100 - yd;
-        cx.fillStyle = "rgba(6,35,18,.44)";
-        cx.fillText(String(num), x + 2, TOP + 50 + 2);
-        cx.fillText(String(num), x + 2, BOT - 34 + 2);
-        cx.fillStyle = "rgba(244,246,241,.64)";
-        cx.fillText(String(num), x, TOP + 50);
-        cx.fillText(String(num), x, BOT - 34);
+        cx.fillText(String(num), x, TOP + 34);
+        cx.fillText(String(num), x, BOT - 22);
       }
     }
     // hashes
@@ -6557,9 +4185,6 @@
     drawBackdrop(cam);
     // crowd
     if (G.crowd) cx.drawImage(G.crowd, -cam * 0.55, 6);
-    // The field now has its own life: coaches, photographers, ball kids,
-    // bench groups and near-sideline fans scroll with the actual yard lines.
-    drawSidelineLife(cam);
     // pterodactyls in the sky
     for (const p of G.pteros) {
       const sheet = G.sheets.A ? G.sheets.A.ptero : null;
@@ -6590,7 +4215,7 @@
     // goalposts
     drawGoalpost(xAtYd(-8) - cam); drawGoalpost(xAtYd(108) - cam);
     // LOS + first down
-    if (["presnap", "live", "playcall", "defcall", "dead", "kick", "qa"].includes(G.state)) {
+    if (["presnap", "live", "playcall", "defcall", "dead", "kick"].includes(G.state)) {
       const losX = xAtYd(G.losYd) - cam;
       cx.fillStyle = "rgba(60,120,255,.75)"; cx.fillRect(losX - 1, TOP, 3, BOT - TOP);
       const fdX = xAtYd(Math.min(100, G.losYd + G.toGain)) - cam;
@@ -6698,11 +4323,10 @@
   function drawEndzone(x0, abbr) {
     const cam = G.camX, t = TEAMS[abbr];
     const x = x0 - cam;
-    const width = 10 * YPX;
-    if (x + width < 0 || x > W) return;
-    cx.fillStyle = shade(t[1], -18); cx.fillRect(x, TOP, width, BOT - TOP);
+    if (x + 200 < 0 || x > W) return;
+    cx.fillStyle = shade(t[1], -18); cx.fillRect(x, TOP, 200, BOT - TOP);
     cx.save();
-    cx.translate(x + width / 2, MID);
+    cx.translate(x + 100, MID);
     cx.rotate(x0 === 0 ? -Math.PI / 2 : Math.PI / 2);
     cx.font = PF(26); cx.fillStyle = t[2]; cx.textAlign = "center"; cx.textBaseline = "middle";
     cx.fillText(t[0].toUpperCase().slice(0, 10), 0, 0);
@@ -6718,27 +4342,6 @@
 
   function teamOf(e) { return (e.team === "off") === (G.drive === "A") ? "A" : "B"; }
 
-  // A shared contact burst makes tackle / stiff-arm impact legible at field
-  // scale. It is deliberately made of integer-aligned pixel bars instead of
-  // canvas strokes: diagonal anti-aliasing looked like loose visual debris in
-  // the otherwise crisp 16x16 dinosaur world.
-  function drawPixelImpactBurst(x, y, q) {
-    const spread = Math.round((1 - q) * 4);
-    const marks = [
-      [-10 - spread, -7, 5, 2], [7 + spread, -7, 5, 2],
-      [-14 - spread, 1, 5, 2], [11 + spread, 1, 5, 2],
-      [-6, -12 - spread, 2, 5], [6, -12 - spread, 2, 5],
-    ];
-    cx.save(); cx.globalAlpha = 0.35 + q * 0.65;
-    cx.fillStyle = q > 0.6 ? "#fff3a0" : "#ff9b5f";
-    for (const m of marks) cx.fillRect(Math.round(x + m[0]), Math.round(y + m[1]), m[2], m[3]);
-    cx.restore();
-  }
-  function drawContactBurst(e) {
-    if (!e.impactLead || e.impactT <= 0) return;
-    drawPixelImpactBurst(e.x - G.camX + e.dir * 7, e.y - 22, clamp(e.impactT / 0.5, 0, 1));
-  }
-
   function drawPlayers() {
     const list = G.players.slice().sort((a, b) => a.y - b.y);
     for (const e of list) {
@@ -6746,35 +4349,28 @@
       if (!sheet) continue;
       const ramping = G.ramp && G.ramp.ent === e;
       const spr = ramping ? sheet.rampage : sheet[e.species];
-      // Wings-open art is reserved for an active or explicitly aimed safety
-      // soar. Quetz ground frames stay in the normal walk cycle.
-      const wingsOpen = e.species === "quetz" &&
-        (e.soarT > 0 || (G.soarAim && e === G.controlled));
-      const spriteFrame = selectActionSpriteFrame(e, spr, wingsOpen);
-      // Preserve the small, clean species sprite through every football
-      // moment. The action pack is another hand-drawn 16×16 species map at
-      // the same scale—not a generic, enlarged cel or a rotated runner.
-      const artPack = spriteFrame.pack;
-      const img = (e.dir >= 0 ? artPack.R : artPack.L)[spriteFrame.fi];
-      const drawW = artPack.w, drawH = artPack.h;
-      // This is also the placement used by the exact opaque-sprite contact
-      // pass. Keeping one shared calculation means visual clearance is
-      // guaranteed at the pixels we actually draw, including a jump or dive.
-      const visual = compactVisualPlacement(e, artPack, spriteFrame.action);
-      const pose = spriteFrame.pose, jump = visual.jump;
-      const x = Math.round(visual.x - G.camX), y = visual.y;
+      let fi = (e.animT * 4 | 0) % 2;
+      // wings-open flight frames while soaring OR winding up a soar launch
+      const wingsOpen = e.soarT > 0 || (G.soarAim && e === G.controlled);
+      if (wingsOpen && spr.n > 2) fi = 2 + ((e.animT * 6 | 0) % 2);
+      const img = (e.dir >= 0 ? spr.R : spr.L)[fi];
+      // jump-for-the-ball hop — height scales with the dino's own jump rating
+      // (only ballhawks / elite leapers get real air; most hop modestly)
+      const jumpAmp = 5 + Math.max(0, (e.jump || 60) - 55) * 0.2;
+      const jump = e.jumpT > 0 ? Math.sin((1 - e.jumpT / 0.4) * Math.PI) * jumpAmp : 0;
+      const x = e.x - G.camX - spr.w / 2, y = e.y - spr.h + 6 - jump;
       // shadow (stays on the ground; shrinks as they leap)
       cx.fillStyle = "rgba(0,0,0,.28)";
       const shW = 16 - jump * 0.5;
       cx.fillRect(e.x - G.camX - shW / 2, e.y + 2, shW, 4);
       // the ring IS the ball indicator: carrier or the QB holding it pre-throw
-      if (!G.qaCapture && (e === G.carrier || (e === G.ball.holder && (G.phase === "drop" || G.phase === "handoff")))) {
+      if (e === G.carrier || (e === G.ball.holder && (G.phase === "drop" || G.phase === "handoff"))) {
         cx.strokeStyle = "rgba(255,210,63,.9)"; cx.lineWidth = 2;
         cx.beginPath(); cx.ellipse(e.x - G.camX, e.y, 15, 6, 0, 0, Math.PI * 2); cx.stroke();
       }
-      if (e.proneT > 0 && !["tackled", "shoved", "prone"].includes(pose)) {
+      if (e.proneT > 0) {
         cx.save(); cx.translate(e.x - G.camX, e.y); cx.rotate(e.dir * Math.PI / 2);
-        cx.drawImage(img, -drawW / 2, -drawH + 6); cx.restore();
+        cx.drawImage(img, -spr.w / 2, -spr.h + 6); cx.restore();
       } else if (e.spinT > 0) {
         // spin-move: a quick full rotation through the cut
         cx.save(); cx.translate(e.x - G.camX, e.y - spr.h / 2 + 3 - jump);
@@ -6785,51 +4381,35 @@
         // career bling overlay — positioned dynamically off the sprite bounds so
         // it lands on the head / chest of ANY dino species and faces the right way
         if (e.careerAcc && e.careerAcc !== "NONE") drawBling(e, spr, x, y);
-        // personalized dinos: QBs wear their gallery identity in-game, and
-        // apex rampagers carry their star's signature feature
-        if (!ramping) {
-          let featKind = null;
-          if (e.role === "QB") { const qf = QB_ID[teamAbbrOf(sideOf(e))]; if (qf && qf[1] !== "small") featKind = qf[1]; }
-          else if (e.apex) featKind = RAMP_FEAT[teamAbbrOf(sideOf(e))];
-          if (featKind) {
-            const mid0 = e.x - G.camX;
-            if (e.dir < 0) { cx.save(); cx.translate(2 * mid0, 0); cx.scale(-1, 1); }
-            drawQBFeature(featKind, x, y, spr.w);
-            if (e.dir < 0) cx.restore();
-          }
+        // (no tucked-ball sprite — the golden ring at the feet marks the ball holder)
+        // peanut-punch swing: a fast forward jab while airborne
+        if (e.swingT > 0) {
+          const pr = 1 - e.swingT / 0.3;
+          const sx0 = e.x - G.camX, sy0 = e.y - jump - 16;
+          cx.strokeStyle = "#ff8a5c"; cx.lineWidth = 3;
+          cx.beginPath(); cx.moveTo(sx0, sy0);
+          cx.lineTo(sx0 + e.dir * (4 + pr * 16), sy0 - 2 + pr * 4); cx.stroke();
         }
-        // Compact species action cels own throws, catches, and contact.  The
-        // old canvas stroke overlays drew humanoid white/orange arms over the
-        // dinosaur sprites, so they are deliberately not used as a fallback.
+        // throwing animation: cocked-back windup, then a forward arm swing releasing the ball
+        if (e.throwT > 0) {
+          const prog = 1 - e.throwT / 0.3;          // 0=windup, 1=follow-through
+          const sx = e.x - G.camX, sy = e.y - jump - 20; // shoulder
+          const reach = -8 + prog * 22;             // arm sweeps forward
+          const ax = sx + e.dir * reach, ay = sy - 6 + prog * 8;
+          cx.strokeStyle = spr === sheet.rampage ? "#b08d55" : "#f4f6f1";
+          cx.lineWidth = 3;
+          cx.beginPath(); cx.moveTo(sx, sy); cx.lineTo(ax, ay); cx.stroke();
+          if (prog < 0.6) cx.drawImage(G.ballSpr, ax - 6, ay - 8); // ball in hand pre-release
+        }
       }
-      // A secured ball is visible at the original dino's claws during the
-      // tiny catch/tackle beat.  Held balls otherwise stay tucked (and never
-      // duplicate the airborne ball), preserving the game's uncluttered read.
-      if (G.ball && G.ball.mode === "held" && G.ball.holder === e && pose) {
-        let bx = e.x - G.camX + e.dir * 9, by = e.y - 15 - jump;
-        if (pose === "catchHigh") by = e.y - 28 - jump;
-        else if (pose === "catchLow") by = e.y - 8;
-        else if (pose === "tackled" || pose === "shoved") { bx = e.x - G.camX + e.dir * 5; by = e.y - 11; }
-        const anchor = spriteBallAnchor(artPack, e.dir >= 0 ? "R" : "L", spriteFrame.fi,
-          visual.x - G.camX, visual.y, bx, by);
-        bx = anchor.x; by = anchor.y;
-        drawFootballAt(bx, by);
-      }
-      // The celebration cel owns the read. A very short tag confirms the
-      // result without replacing the dinosaur's point-and-hop with text.
-      if (!G.qaCapture && e.fdCeleb > 0 && e.fdCeleb < 0.62) {
+      // first-down celebration: the arm thrust downfield + a "1ST!" call-out
+      if (e.fdCeleb > 0) {
         const ax0 = e.x - G.camX, ay0 = e.y - jump - 18;
+        cx.strokeStyle = "#ffd23f"; cx.lineWidth = 3;
+        cx.beginPath(); cx.moveTo(ax0, ay0); cx.lineTo(ax0 + e.dir * 16, ay0 - 8); cx.stroke();
         cx.fillStyle = Math.sin(performance.now() / 90) > 0 ? "#ffd23f" : "#fff";
         cx.font = PF(8); cx.textAlign = "center";
-        cx.fillText("1ST!", ax0, ay0 - 22);
-      }
-      // Snowball victims visibly turn blue until they warm back up.
-      if (e.coldT > 0) {
-        cx.save();
-        cx.globalAlpha = 0.22 + 0.12 * Math.min(1, e.coldT / 4.5);
-        cx.fillStyle = "#58c8ff";
-        cx.fillRect(x, y, spr.w, spr.h);
-        cx.restore();
+        cx.fillText("1ST!", ax0, ay0 - 14);
       }
       // controlled marker
       if (e.controlled && G.state === "live") {
@@ -6842,12 +4422,11 @@
         cx.fillText("★", e.x - G.camX, y - 18);
       }
       // carrier name / QB name
-      if (!G.qaCapture && (e === G.carrier || (G.ball.holder === e && G.phase === "drop")) && e.name) {
+      if ((e === G.carrier || (G.ball.holder === e && G.phase === "drop")) && e.name) {
         cx.font = PF(7); cx.textAlign = "center";
         cx.fillStyle = "rgba(0,0,0,.5)"; cx.fillRect(e.x - G.camX - 34, e.y + 8, 68, 11);
         cx.fillStyle = "#fff"; cx.fillText(lastName(e.name).toUpperCase().slice(0, 10), e.x - G.camX, e.y + 17);
       }
-      drawContactBurst(e);
     }
   }
 
@@ -6890,19 +4469,14 @@
     }
   }
 
-  function drawFootballAt(x, y) {
-    const spr = G.ballSpr;
-    if (!spr) return;
-    cx.drawImage(spr, Math.round(x - spr.width / 2), Math.round(y - spr.height / 2));
-  }
   function drawBall() {
     const b = G.ball;
     if (!b || b.mode === "dead") return;
     if (b.mode === "held" && b.holder) return; // tucked away
     // shadow
     cx.fillStyle = "rgba(0,0,0,.3)";
-    cx.fillRect(b.x - G.camX - 3, b.y - 1, 6, 3);
-    drawFootballAt(b.x - G.camX, b.y - b.z);
+    cx.fillRect(b.x - G.camX - 5, b.y - 2, 10, 4);
+    cx.drawImage(G.ballSpr, b.x - G.camX - 8, b.y - b.z - 5);
   }
 
   function drawWeatherFX() {
@@ -6976,58 +4550,6 @@
     if (["WR1", "WR2", "WR3", "TE"].includes(p.role)) return Math.round((p.hands + p.spd + p.agi * 0.5) / 2.5);
     return Math.round(((p.spd || 75) + (p.tkl || 75)) / 2);
   }
-  // pregame INTRO: each team's QB and rampager charge across the screen with
-  // their names and nicknames up in lights
-  const APEX_SPECIES = { QB: "troodon", RB: "carno", WR1: "veloci", TE: "deino", EDGE: "allo", DL: "stego", LB: "spino", CB: "deinony", S: "quetz" };
-  function drawIntroSide(ab, sheet, t, flip) {
-    const team = TEAMS[ab];
-    // team banner
-    cx.fillStyle = team[1]; cx.fillRect(0, 96, W, 118);
-    cx.fillStyle = shade(team[1], -22); cx.fillRect(0, 196, W, 18);
-    const slide = Math.min(1, t * 2.2);
-    cx.font = PF(30); cx.textAlign = "center"; cx.fillStyle = team[2];
-    cx.fillText(team[0].toUpperCase(), W / 2 + (1 - slide) * (flip ? -520 : 520), 172);
-    // the two headliners run in
-    const qb = roster(ab).offense.find((p2) => p2.role === "QB") || { name: "Dino" };
-    const rampInfo = RAMPAGERS[ab] || ["Apex Dino", "truck"];
-    const spec = APEX_SPECIES[APEX_ROLE[ab] || "QB"] || "trex";
-    const runX = flip ? W + 80 - t * 300 : -80 + t * 300;
-    const fi = ((performance.now() / 130) | 0) % 2;
-    const feat = (kind, fx) => {
-      if (!kind) return;
-      if (flip) { cx.save(); cx.translate(2 * (fx + 44), 0); cx.scale(-1, 1); }
-      drawQBFeature(kind, fx, 262, 88);
-      if (flip) cx.restore();
-    };
-    if (sheet && sheet.troodon) {
-      const dirSet = flip ? sheet.troodon.L : sheet.troodon.R;
-      cx.drawImage(dirSet[fi], runX - 44, 262, 88, 88);
-      const qf = QB_ID[ab];
-      if (qf && qf[1] !== "small") feat(qf[1], runX - 44);
-    }
-    if (sheet && sheet[spec]) {
-      const dirSet = flip ? sheet[spec].L : sheet[spec].R;
-      cx.drawImage(dirSet[fi], runX - 44 + (flip ? 130 : -130), 262, 88, 88);
-      feat(RAMP_FEAT[ab], runX - 44 + (flip ? 130 : -130));
-    }
-    // names + nicknames
-    const a2 = clamp((t - 0.5) * 2, 0, 1);
-    cx.save(); cx.globalAlpha = a2;
-    cx.font = PF(13); cx.fillStyle = "#f4f6f1";
-    cx.fillText(lastName(qb.name).toUpperCase() + "  ·  \u201C" + ((QB_ID[ab] || ["THE STARTER"])[0]) + "\u201D", W / 2, 396);
-    cx.font = PF(11); cx.fillStyle = "#ff5533";
-    cx.fillText("\u2605 " + rampInfo[0].toUpperCase() + "  ·  " + (PASSIVES[rampInfo[1]] || PASSIVES.truck).label, W / 2, 428);
-    cx.restore();
-  }
-  function drawIntro() {
-    cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
-    const t = G.intro ? G.intro.t : 0;
-    const half = 3.2;
-    if (t < half) drawIntroSide(G.my, G.sheets.A, t, false);
-    else drawIntroSide(G.opp, G.sheets.B, t - half, true);
-    cx.font = PF(8); cx.textAlign = "center"; cx.fillStyle = "#9db0a4";
-    cx.fillText("TAP / ENTER TO SKIP", W / 2, H - 18);
-  }
   function drawPregame() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
     // header
@@ -7076,11 +4598,7 @@
       const sheet = side === "A" ? G.sheets.A : G.sheets.B;
       const pos = APEX_ROLE[abbr] || "QB";
       const spec = { QB: "troodon", RB: "carno", WR1: "veloci", TE: "deino", EDGE: "allo", DL: "stego", LB: "spino", CB: "deinony", S: "quetz" }[pos] || "trex";
-      if (sheet && sheet[spec]) {
-        const t = performance.now() / 200 | 0;
-        cx.drawImage(sheet[spec].R[t % 2], cx0 - 32, 306, 64, 64);
-        if (RAMP_FEAT[abbr]) drawQBFeature(RAMP_FEAT[abbr], cx0 - 32, 306, 64);
-      }
+      if (sheet && sheet[spec]) { const t = performance.now() / 200 | 0; cx.drawImage(sheet[spec].R[t % 2], cx0 - 32, 306, 64, 64); }
       cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#ff5533"; cx.fillText("★ RAMPAGER · " + pos, cx0, 300);
       cx.font = PF(10); cx.fillStyle = "#fff"; cx.fillText(info[0].toUpperCase().slice(0, 16), cx0, 382);
       cx.font = PF(9); cx.fillStyle = "#ffd23f"; cx.fillText(pk.label, cx0, 401);
@@ -7132,8 +4650,6 @@
       case "visor": P(26, 5, 14, 4, "#3a4c66"); P(27, 6, 12, 2, "#8ec7ff"); break;           // mirrored visor
       case "chain": P(18, 26, 12, 2, "#ffd23f"); P(22, 28, 4, 4, "#fff2b0"); break;
       case "headband": P(26, 4, 14, 3, "#ff2d2d"); break;
-      case "dreads": P(30, 2, 3, 10, "#1c1410"); P(34, 0, 3, 12, "#241a12"); P(26, 3, 3, 8, "#1c1410"); break;
-      case "spikes": for (let s2 = 0; s2 < 4; s2++) P(24 + s2 * 5, -4 + (s2 % 2) * 2, 3, 6, "#ff3b2f"); break;
       case "nails": P(6, 40, 3, 3, "#ff7ac2"); P(12, 42, 3, 3, "#ff7ac2"); P(30, 40, 3, 3, "#ff7ac2"); break;    // painted claws
       case "speed": P(-8, 16, 8, 2, "#8ecafc"); P(-12, 22, 10, 2, "#8ecafc"); P(-7, 28, 7, 2, "#8ecafc"); break; // motion lines
       case "bolt": P(44, 2, 4, 6, "#ffd23f"); P(41, 8, 4, 6, "#ffd23f"); P(45, 14, 3, 5, "#ffd23f"); break;      // lightning
@@ -7147,16 +4663,6 @@
       // "small" handled at draw time (smaller sprite)
     }
   }
-  // each franchise's rampager wears a feature modeled on the real star
-  const RAMP_FEAT = {
-    ARI: "headband", ATL: "dreads", BAL: "visor", BUF: "bigarm", CAR: "spikes",
-    CHI: "chain", CIN: "shades", CLE: "spikes", DAL: "bolt", DEN: "shades",
-    DET: "speed", GB: "cheese", HOU: "chain", IND: "headband", JAX: "spikes",
-    KC: "flame", LA: "beard", LAC: "beard", LV: "mohawk", MIA: "speed",
-    MIN: "chain", NE: "shades", NO: "dreads", NYG: "flame", NYJ: "chain",
-    PHI: "bigarm", PIT: "headband", SEA: "chain", SF: "visor", TB: "headband",
-    TEN: "speed", WAS: "visor",
-  };
   function qbSheet(abbr) {
     G.qbSheets = G.qbSheets || {};
     if (!G.qbSheets[abbr]) G.qbSheets[abbr] = DinoSprites.buildTeamSprites(TEAMS[abbr][1], TEAMS[abbr][2]);
@@ -7201,23 +4707,21 @@
       "or run one more play from the 2 (+2).",
       "Kick a FIELD GOAL through the posts anytime = 3 pts.",
       "On 4th down, a PUNT kicks the problem far downfield.",
-      "Tackled or run out the BACK of YOUR OWN end zone = SAFETY, 2 pts for them."]],
+      "Tackled in YOUR OWN end zone = SAFETY, 2 pts for them."]],
     ["OFFENSE — CONTROLS", [
       "1-4 / tap ...... pick a play (card 4 = your team's famous play)",
       "Q / E .......... audible (swap the play at the line)",
       "SPACE .......... snap the ball",
-      "PULL BACK ...... hold click/touch and DRAG BACKWARD (behind your",
-      "                 head!) — the arc shows the throw · RELEASE = lob",
+      "HOLD CLICK ..... aim: dotted arc shows the throw · RELEASE = lob",
       "SPACE/R-CLICK .. BULLET pass (fast, flat, riskier)",
-      "After the throw the receiver runs his route on his own —",
-      "your ONLY job is SPACE/JUMP as the ball drops in. Time it",
-      "right = strong hands; leave it to autopilot = late, shaky leap.",
-      "WASD run · SHIFT juke · F stiff-arm · E dive · Q lateral · X away"]],
+      "After the throw YOU become the receiver: steer with WASD",
+      "and press SPACE as the ball arrives to TIME THE JUMP.",
+      "WASD run · SHIFT cutback juke · E dive · Q lateral · X throwaway"]],
     ["DEFENSE — CONTROLS", [
       "Click a dino before the snap to control HIM (or TAB mid-play).",
-      "WASD chase · CLICK or E = dive tackle · SPACE = JUMP",
-      "JUMP + F ....... PEANUT PUNCH: swat at the ball while airborne",
-      "SPACE (ball up)  TIME the leap — pick the pass off at its peak",
+      "WASD chase · SPACE dive tackle",
+      "F .............. PEANUT PUNCH: time it as you reach the carrier",
+      "SPACE (ball up)  timed leap — pick the pass off at its peak",
       "SHIFT/hold-click SOAR (safety only): straight-line flight. The",
       "                 wings run on a 1s charge: short hops instantly,",
       "                 full-field flights on a full tank. Unstoppable",
@@ -7246,28 +4750,16 @@
       "                 QB so he can't scramble.",
       "PREVENT ........ everyone plays deep, gives up short stuff,",
       "                 protects a late lead."]],
-    ["RATINGS — WHAT EVERY NUMBER ACTUALLY DOES", [
-      "SPD speed ...... top running speed, pure and simple.",
-      "STA stamina .... how LONG top speed lasts; long ball-carrier runs",
-      "                 produce heavy legs — and, in season mode,",
-      "                 how fresh the player is again by NEXT week.",
-      "STR strength ... breaks tackles, powers the STIFF-ARM (F),",
-      "                 shoves through blocks, protects the ball.",
-      "HND catching ... contested grabs, off-target passes, fumble-proofing.",
-      "JMP / AGI ...... jump-ball ceiling · juke sharpness + tackle slip.",
-      "QBs: ARM = throw distance, ACC = how tight the ball groups.",
-      "OL: BLOCKING (mass+technique) instead of catching.",
-      "DEF: TACKLING instead of catching.  K: RANGE · ACCURACY · STAMINA.",
-      "All from real NFL size/stat data, Madden-style 60-99 scales."]],
-    ["WEATHER & DINO POWERS", [
+    ["WEATHER, RATINGS & DINO POWERS", [
+      "Every player has UNIQUE ratings from their real NFL size and",
+      "stats: speed, strength, jump, hands… Strong O-lines block",
+      "longer; strong D-lines break through faster.",
       "RAIN/FREEZING adds small drop+fumble risk. SNOW slows legs.",
-      "V throws a snowball in snow games: hits make dinos COLD and blue.",
-      "Caleb Williams, the ICEMAN, is immune. C throws the CHALLENGE",
-      "FLAG once a game on a close call. Halftime = mascot minigame!",
-      "RAMPAGE (R) is once per half per team — spend it well."]],
+      "V throws a snowball in snow games. C throws the CHALLENGE",
+      "FLAG once a game on a close call. Halftime = mascot minigame!"]],
   ];
   // ------------------------------------------------------------- scouting
-  const SCOUT_COLS = [["spd", "SPD"], ["str", "STR"], ["stam", "STA"], ["jump", "JMP"], ["hands", "HND"], ["tkl", "TKL"], ["agi", "AGI"]];
+  const SCOUT_COLS = [["spd", "SPD"], ["str", "STR"], ["jump", "JMP"], ["hands", "HND"], ["tkl", "TKL"], ["agi", "AGI"]];
   function openScouting() {
     G.scout = { sort: "spd", posFilter: "ALL", top: 0, list: null };
     G.state = "scout";
@@ -7276,7 +4768,7 @@
     }
   }
   function scoutList() {
-    let L = (G.scoutData || []).map((p2) => p2.stam ? p2 : Object.assign({}, p2, { stam: stamOf(p2.name, p2.role || p2.pos) }));
+    let L = G.scoutData || [];
     const f = G.scout.posFilter;
     if (f === "OFF") L = L.filter((p2) => ["QB", "RB", "FB", "WR", "TE"].includes(p2.pos));
     else if (f === "OL") L = L.filter((p2) => ["C", "G", "OT", "OL", "T"].includes(p2.pos));
@@ -7297,7 +4789,7 @@
     const y0 = 92;
     if (mouse.y > y0 - 16 && mouse.y < y0 + 4) {
       for (let i = 0; i < SCOUT_COLS.length; i++) {
-        const x0 = 410 + i * 74;
+        const x0 = 420 + i * 82;
         if (mouse.x > x0 - 36 && mouse.x < x0 + 36) { G.scout.sort = SCOUT_COLS[i][0]; G.scout.top = 0; return; }
       }
     }
@@ -7318,7 +4810,7 @@
     cx.textAlign = "center";
     SCOUT_COLS.forEach((c, i) => {
       cx.fillStyle = c[0] === G.scout.sort ? "#ffd23f" : "#69be28";
-      cx.fillText(c[1] + (c[0] === G.scout.sort ? "▼" : ""), 410 + i * 74, 92);
+      cx.fillText(c[1] + (c[0] === G.scout.sort ? "▼" : ""), 420 + i * 82, 92);
     });
     for (let i = 0; i < 14; i++) {
       const p2 = L[G.scout.top + i]; if (!p2) break;
@@ -7330,7 +4822,7 @@
       cx.textAlign = "center";
       SCOUT_COLS.forEach((c, j) => {
         cx.fillStyle = c[0] === G.scout.sort ? "#ffd23f" : "#f4f6f1";
-        cx.fillText(String(p2[c[0]] != null ? p2[c[0]] : "—"), 410 + j * 74, y);
+        cx.fillText(String(p2[c[0]] != null ? p2[c[0]] : "—"), 420 + j * 82, y);
       });
     }
   }
@@ -7502,8 +4994,7 @@
 
   // menu card layout: 3 columns of chunky arcade cards with dino mascots
   const MENU_ICONS = {
-    "EXHIBITION": ["trex", "🏈"], "2-PLAYER VERSUS": ["carno", "🤜🤛"],
-    "QUICK MATCH": ["quetz", "🌐"], "ONLINE (LINK)": ["quetz", "🔗"],
+    "EXHIBITION": ["trex", "🏈"], "2-PLAYER VERSUS": ["carno", "🤜🤛"], "ONLINE VERSUS": ["quetz", "🌐"],
     "PRACTICE": ["troodon", "🏋"], "CONTINUE SEASON": ["spino", "📅"], "CONTINUE CAREER": ["veloci", "⭐"],
     "NEW SEASON": ["spino", "📅"], "NEW CAREER": ["veloci", "⭐"], "MEET THE QBS": ["troodon", "🎓"],
     "TUTORIAL": ["pachy", "📖"], "SCOUTING": ["deinony", "🔎"], "PLAYBOOK LAB": ["deino", "✏"],
@@ -7517,36 +5008,6 @@
     return opts.map((o, i) => ({
       x: x0 + (i % cols) * (cw + gapx), y: y0 + ((i / cols) | 0) * (chh + gapy), w: cw, h: chh, o, i,
     }));
-  }
-  function drawOnlineWait() {
-    cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
-    cx.textAlign = "center";
-    const o = G.online || {};
-    const searching = o.phase !== "found";
-    const dots = ".".repeat(1 + ((performance.now() / 400 | 0) % 3));
-    cx.font = PF(22); cx.fillStyle = "#ffd23f";
-    cx.fillText(searching ? "FINDING AN OPPONENT" : "OPPONENT FOUND!", W / 2, 190);
-    cx.font = PF(11); cx.fillStyle = "#f4f6f1";
-    const sub = searching ? "Queuing you into the next player online" + dots
-      : (o.role === "host" ? "You're the host — pick the teams…" : "Matched! Waiting for the host to pick teams" + dots);
-    cx.fillText(sub, W / 2, 232);
-    // a little spinning dino to show it's alive
-    if (G.sheets.A && G.sheets.A.quetz) {
-      const spr = G.sheets.A.quetz, t = performance.now() / 160 | 0;
-      cx.save(); cx.translate(W / 2, 320);
-      cx.rotate(searching ? (performance.now() / 500) % (Math.PI * 2) : 0);
-      cx.drawImage(spr.R[t % 2], -spr.w, -spr.h, spr.w * 2, spr.h * 2);
-      cx.restore();
-    }
-    netStatus && 0;
-    cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    cx.fillText(searching ? "ESC / TAP = CANCEL" : "", W / 2, H - 56);
-    // a tappable cancel chip for mobile
-    if (searching) {
-      cx.fillStyle = "rgba(5,12,8,.8)"; cx.fillRect(W / 2 - 70, H - 46, 140, 30);
-      cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(W / 2 - 70, H - 46, 140, 30);
-      cx.font = PF(10); cx.fillStyle = "#ffd23f"; cx.fillText("CANCEL", W / 2, H - 26);
-    }
   }
   function drawMenu() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
@@ -7627,102 +5088,9 @@
     cx.font = PF(13); cx.fillStyle = Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6";
     cx.fillText("ENTER = PLAY", W / 2, 400);
     cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    cx.fillText("S = STANDINGS  ·  T = TEAM STATS  ·  U = TRAIN  ·  ESC = MENU", W / 2, 434);
-    // tappable TRAIN chip with the point balance
-    const pts = (z.trainPts || 0);
-    cx.fillStyle = pts > 0 ? "#14402a" : "rgba(13,37,25,.8)";
-    cx.fillRect(W / 2 - 90, 448, 180, 34);
-    cx.strokeStyle = pts > 0 ? "#ffd23f" : "#1d4030"; cx.lineWidth = 2;
-    cx.strokeRect(W / 2 - 90, 448, 180, 34);
-    cx.font = PF(9); cx.fillStyle = pts > 0 ? "#ffd23f" : "#9db0a4";
-    cx.fillText("🏋 TRAIN (" + pts + " PTS)", W / 2, 470);
+    cx.fillText("S = STANDINGS  ·  T = TEAM STATS  ·  ESC = MENU", W / 2, 434);
   }
 
-  // ---------------- TRAIN: the clickable upgrade room (#10) ----------------
-  // pick a starter, pick an attribute, spend a point: +1, up to +5 per
-  // attribute per season. Points come from wins and big offensive days.
-  const TRAIN_CAP = 5;
-  function trainCols(p2) {
-    return p2.role === "QB" || p2.pos === "QB"
-      ? [["arm", "ARM"], ["acc", "ACC"], ["spd", "SPD"], ["str", "STR"], ["stam", "STA"]]
-      : [["spd", "SPD"], ["hands", "HND"], ["str", "STR"], ["jump", "JMP"], ["stam", "STA"]];
-  }
-  function upgradeList() {
-    const r2 = roster(G.szn.team);
-    const rows = [];
-    const seen = {};
-    for (const [pos, n2] of [["QB", 1], ["RB", 1], ["WR", 2], ["TE", 1]]) {
-      const list = r2.offense.filter((p2) => p2.role === pos);
-      for (let i = 0; i < n2 && list[i]; i++) rows.push(list[i]);
-    }
-    const defs = (r2.defense || []).slice().sort((a, b) => (b.ovr || 75) - (a.ovr || 75)).slice(0, 3);
-    rows.push(...defs);
-    return rows.slice(0, 8);
-  }
-  function openUpgrade() {
-    if (!G.szn) return;
-    G.upRows = upgradeList();
-    G.state = "upgrade";
-  }
-  function upgradeCell(mx, my) {
-    const rows = G.upRows || [];
-    for (let i = 0; i < rows.length; i++) {
-      const y = 118 + i * 44;
-      if (my < y - 16 || my > y + 12) continue;
-      for (let j2 = 0; j2 < 5; j2++) {
-        const x = 400 + j2 * 106;
-        if (mx > x - 44 && mx < x + 44) return { i, j: j2 };
-      }
-    }
-    return null;
-  }
-  function upgradeClick() {
-    if (mouse.y > H - 50) { G.state = "hub"; return; }
-    const hit = upgradeCell(mouse.x, mouse.y);
-    if (!hit) return;
-    const z = G.szn;
-    if ((z.trainPts || 0) <= 0) { banner("NO TRAIN POINTS", "Win games to earn more!", 1.1); return; }
-    const p2 = G.upRows[hit.i];
-    const [field] = trainCols(p2)[hit.j];
-    z.devF = z.devF || {};
-    const mine = z.devF[p2.name] = z.devF[p2.name] || {};
-    if ((mine[field] || 0) >= TRAIN_CAP) { banner("MAXED THIS SEASON", "+" + TRAIN_CAP + " is the yearly cap per skill", 1.1); return; }
-    mine[field] = (mine[field] || 0) + 1;
-    z.trainPts--;
-    saveSeason();
-    G.upRows = upgradeList();   // reflect the boost immediately
-    sfx.firstdown();
-  }
-  function drawUpgrade() {
-    cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
-    cx.textAlign = "center"; cx.font = PF(14); cx.fillStyle = "#ffd23f";
-    cx.fillText("🏋 TRAINING ROOM — " + (G.szn.trainPts || 0) + " POINTS", W / 2, 44);
-    cx.font = PF(8); cx.fillStyle = "#9db0a4";
-    cx.fillText("TAP A STAT TO SPEND A POINT (+1, MAX +" + TRAIN_CAP + "/SKILL/SEASON) · WINS EARN MORE", W / 2, 66);
-    const rows = G.upRows || [];
-    rows.forEach((p2, i) => {
-      const y = 118 + i * 44;
-      cx.textAlign = "left"; cx.font = PF(9);
-      cx.fillStyle = "#69be28"; cx.fillText((p2.role || p2.pos || "").padEnd(3), 40, y);
-      cx.fillStyle = "#f4f6f1"; cx.fillText(lastName(p2.name).slice(0, 14).toUpperCase(), 96, y);
-      cx.fillStyle = "#9db0a4"; cx.fillText("OVR " + (p2.ovr || playerOvr(p2)), 290, y);
-      const boosts = (G.szn.devF || {})[p2.name] || {};
-      trainCols(p2).forEach(([f2, label], j2) => {
-        const x = 400 + j2 * 106;
-        const hov = mouse.x > x - 44 && mouse.x < x + 44 && mouse.y > y - 16 && mouse.y < y + 12;
-        cx.fillStyle = hov ? "#14402a" : "#0d2519";
-        cx.fillRect(x - 44, y - 16, 88, 28);
-        cx.strokeStyle = hov ? "#ffd23f" : "#1d4030"; cx.lineWidth = 2;
-        cx.strokeRect(x - 44, y - 16, 88, 28);
-        cx.textAlign = "center"; cx.font = PF(7);
-        cx.fillStyle = "#9db0a4"; cx.fillText(label, x - 22, y + 2);
-        cx.fillStyle = boosts[f2] ? "#69be28" : "#f4f6f1";
-        cx.fillText(String(p2[f2] != null ? p2[f2] : "—") + (boosts[f2] ? " ▲" : " +"), x + 18, y + 2);
-      });
-    });
-    cx.textAlign = "center"; cx.font = PF(9);
-    cx.fillStyle = "#ffd23f"; cx.fillText("TAP HERE / ESC = BACK TO THE HUB", W / 2, H - 24);
-  }
   function drawStandings() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
     cx.textAlign = "center"; cx.font = PF(14); cx.fillStyle = "#ffd23f";
@@ -7776,8 +5144,7 @@
     cx.font = PF(20); cx.fillStyle = "#ffd23f";
     cx.fillText(G.selStep === 0 ? "PICK YOUR TEAM" : "PICK YOUR OPPONENT", W / 2, 60);
     cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    // a matched guest only WATCHES the host choose — make that clear
-    cx.fillText(Net.remoteView ? "🌐 MATCHED! YOUR HOST IS PICKING THE TEAMS…" : "ARROWS / CLICK · ENTER TO CONFIRM", W / 2, 88);
+    cx.fillText("ARROWS / CLICK · ENTER TO CONFIRM", W / 2, 88);
     const sel = G.selStep === 0 ? G.selA : G.selB;
     const other = G.selStep === 1 ? G.selA : -1;
     for (let i = 0; i < 32; i++) {
@@ -7889,25 +5256,14 @@
   }
 
   function drawLiveUI() {
-    // grip planted but not pulled yet: coach the windup
-    if (G.slingAnchor && !G.aim && G.ball.holder && mouse.down) {
-      const qb = G.ball.holder;
-      cx.font = PF(8); cx.fillStyle = "#ffd23f"; cx.textAlign = "center";
-      cx.fillText("⟵ PULL BACK TO WIND UP", qb.x - G.camX, qb.y - 44);
-    }
     // aiming arc
     if (G.aim && G.ball.holder) {
       const qb = G.ball.holder;
       const a = G.aim;
-      // the windup: a taut "rubber band" from the QB back toward the pull
-      cx.strokeStyle = "rgba(255,138,92,.9)"; cx.lineWidth = 3;
-      cx.beginPath(); cx.moveTo(qb.x - G.camX, qb.y);
-      const bx = qb.x - (a.x - qb.x) * 0.22, by = qb.y - (a.y - qb.y) * 0.22;
-      cx.lineTo(bx - G.camX, by); cx.stroke();
       cx.setLineDash([5, 6]); cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2;
       cx.beginPath();
       const n = 14;
-      const d = dist(qb, a), h = clamp(d * 0.17, 20, 74);
+      const d = dist(qb, a), h = clamp(d * 0.28, 26, 120);
       for (let i = 0; i <= n; i++) {
         const k = i / n;
         const px = qb.x + (a.x - qb.x) * k - G.camX;
@@ -7915,14 +5271,11 @@
         if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
       }
       cx.stroke(); cx.setLineDash([]);
-      // No magic threat percentage/ring: the football, coverage leverage,
-      // and this modest landing cross are the read.  The game still judges
-      // risk underneath, but it never pretends to be a targeting computer.
-      const markX = a.x - G.camX, markY = a.y;
-      cx.fillStyle = "rgba(244,246,241,.88)";
-      cx.fillRect(markX - 5, markY - 1, 10, 2); cx.fillRect(markX - 1, markY - 5, 2, 10);
-      cx.font = PF(7); cx.fillStyle = "rgba(244,246,241,.72)"; cx.textAlign = "center";
-      cx.fillText("RELEASE", markX, markY - 16);
+      // landing marker
+      cx.strokeStyle = "#ffd23f";
+      cx.beginPath(); cx.arc(a.x - G.camX, a.y, 12, 0, Math.PI * 2); cx.stroke();
+      cx.font = PF(8); cx.fillStyle = "#ffd23f"; cx.textAlign = "center";
+      cx.fillText("RELEASE=LOB · SPACE/R-CLICK=BULLET", a.x - G.camX, a.y - 22);
     }
 
     // soar aim — a defender launching himself wings-open at a target point
@@ -7951,149 +5304,54 @@
         // a trailing teammate exists to pitch to?
         const mate = G.players.find((p) => p.team === "off" && p !== cc && p.role !== "OL" && p.x < cc.x - 4);
         if (mate && !cc.canPass) prompt("Q LATERAL");
-        else if (cc.canPass) prompt("HOLD & PULL BACK TO PASS · Q LATERAL");
+        else if (cc.canPass) prompt("HOLD-CLICK PASS · Q LATERAL");
       } else if (!offenseIsUser() && cc.soarT <= 0) {
         if (cc.species === "quetz" && soarReady(cc)) {
           prompt((cc.soarCharge >= 0.98 ? "SOAR — FULL RANGE" : "SOAR — SHORT HOP (" + Math.round(cc.soarCharge * 100) + "%)"), "#8ecafc");
         }
         else if (cc.species === "quetz") prompt("WINGS CHARGING " + Math.round((cc.soarCharge || 0) * 100) + "%", "#5a7a94");
         else if (cc.blockedBy) prompt("SHIFT: SPIN OFF THE BLOCK", "#ff8a5c");
-        else if (G.carrier && dist(cc, G.carrier) < 46) prompt("JUMP + F PUNCH", "#ff8a5c");
+        else if (G.carrier && dist(cc, G.carrier) < 46) prompt("F PUNCH", "#ff8a5c");
       }
     }
     // defense footer hint
     if (!offenseIsUser() && G.controlled) {
       cx.font = PF(8); cx.fillStyle = "rgba(244,246,241,.7)"; cx.textAlign = "center";
       const soarer = G.controlled.species === "quetz";
-      cx.fillText("TAB SWITCH · SPACE JUMP · CLICK/E DIVE · JUMP+F PUNCH" + (soarer ? " · PULL-CLICK / SHIFT = SOAR" : ""), W / 2, H - 14);
+      cx.fillText("TAB SWITCH · SPACE DIVE · F PUNCH" + (soarer ? " · HOLD-CLICK / SHIFT = SOAR" : ""), W / 2, H - 14);
     }
   }
 
   function drawKickUI() {
     const k = G.kick;
-    const meter = kickMeterPlan(k);
-    const bx = W / 2 - 220, bw = 440;
-    cx.fillStyle = "rgba(5,12,8,.78)"; cx.fillRect(W / 2 - 250, 82, 500, 166);
-    cx.strokeStyle = "#ffd23f"; cx.strokeRect(W / 2 - 250, 82, 500, 166);
+    cx.fillStyle = "rgba(5,12,8,.6)"; cx.fillRect(W / 2 - 220, 180, 440, 190);
+    cx.strokeStyle = "#ffd23f"; cx.strokeRect(W / 2 - 220, 180, 440, 190);
     cx.textAlign = "center";
     cx.font = PF(14); cx.fillStyle = "#ffd23f";
-    const title = k.kind === "XP" ? "EXTRA POINT" : k.kind === "FG" ? "FIELD GOAL · " + Math.round(100 - G.losYd + 17) + " YDS" : k.kind === "KO" ? "KICKOFF · COVER THE RETURN" : "PUNT · PIN THEM DEEP";
-    cx.fillText(title, W / 2, 112);
+    const title = k.kind === "XP" ? "EXTRA POINT" : k.kind === "FG" ? "FIELD GOAL · " + Math.round(100 - G.losYd + 17) + " YDS" : "PUNT";
+    cx.fillText(title, W / 2, 210);
     cx.font = PF(9); cx.fillStyle = "#f4f6f1";
-    cx.fillText(lastName(k.kicker.name).toUpperCase() + "  LEG " + (k.kicker.leg || 84) + " · ACC " + (k.kicker.kacc || kickAccOf(k.kicker.name)) + (k.cpu ? "  (CPU)" : ""), W / 2, 135);
-    // Retro Bowl's great UI trick: the user sees the makeable lane first,
-    // then stops one bright cursor in it.  The same line is reused for aim so
-    // the kick stays fast, readable, and does not cover the live rush.
-    const powerStage = k.stage === 0;
-    const laneStart = powerStage ? meter.powerMin : clamp(meter.accCenter - meter.accHalf, 0, 100);
-    const laneEnd = powerStage ? 100 : clamp(meter.accCenter + meter.accHalf, 0, 100);
-    const val = powerStage ? k.val : (k.stage === 1 ? k.val : k.acc + 50);
-    const by = 164;
-    cx.fillStyle = "#6d241a"; cx.fillRect(bx, by, bw, 28);
-    cx.fillStyle = "#2f8f47"; cx.fillRect(bx + bw * laneStart / 100, by, bw * (laneEnd - laneStart) / 100, 28);
-    // A light centre stripe makes the highest-accuracy portion obvious while
-    // preserving the full skill-scaled green window on either side.
-    if (!powerStage) {
-      cx.fillStyle = "rgba(244,246,241,.25)";
-      cx.fillRect(bx + bw * (meter.accCenter - 1.2) / 100, by, bw * 2.4 / 100, 28);
-    }
-    cx.strokeStyle = "#f4f6f1"; cx.strokeRect(bx, by, bw, 28);
-    const vx = bx + bw * clamp(val, 0, 100) / 100;
-    cx.fillStyle = "#ffd23f"; cx.fillRect(vx - 4, by - 5, 8, 38);
-    cx.fillStyle = "#fff9d0"; cx.fillRect(vx - 1, by - 7, 2, 42);
-    cx.font = PF(9); cx.fillStyle = "#f4f6f1";
-    const stageText = powerStage ? (k.kind === "KO" ? "KICK DEPTH — STOP IN THE GREEN" : "KICK POWER — STOP IN THE GREEN") : "AIM — STOP IN THE GREEN";
-    cx.fillText(stageText, W / 2, 217);
-    if (!k.cpu) {
-      cx.font = PF(8); cx.fillStyle = "#9db0a4";
-      cx.fillText("CLICK / SPACE TO LOCK " + (powerStage ? "POWER" : "AIM"), W / 2, 236);
+    cx.fillText(lastName(k.kicker.name).toUpperCase() + "  LEG " + (k.kicker.leg || 84) + (k.cpu ? "  (CPU)" : ""), W / 2, 234);
+    // power bar
+    cx.fillStyle = "#0d2519"; cx.fillRect(W / 2 - 170, 258, 340, 22);
+    cx.fillStyle = "#e8622c"; cx.fillRect(W / 2 - 170, 258, 340 * ((k.stage === 0 ? k.val : k.power) / 100), 22);
+    cx.strokeStyle = "#f4f6f1"; cx.strokeRect(W / 2 - 170, 258, 340, 22);
+    cx.font = PF(8); cx.fillStyle = "#9db0a4"; cx.fillText("POWER", W / 2, 296);
+    // accuracy bar
+    if (k.stage >= 1) {
+      cx.fillStyle = "#0d2519"; cx.fillRect(W / 2 - 170, 310, 340, 22);
+      cx.fillStyle = "#1d4030"; cx.fillRect(W / 2 - 24, 310, 48, 22);
+      const vx = W / 2 - 170 + 340 * ((k.stage === 1 ? k.val : k.acc + 50) / 100);
+      cx.fillStyle = "#ffd23f"; cx.fillRect(vx - 3, 306, 6, 30);
+      cx.strokeStyle = "#f4f6f1"; cx.strokeRect(W / 2 - 170, 310, 340, 22);
+      cx.font = PF(8); cx.fillStyle = "#9db0a4"; cx.fillText("ACCURACY — CLICK IN THE CENTER", W / 2, 350);
+    } else if (!k.cpu) {
+      cx.font = PF(8); cx.fillStyle = "#9db0a4"; cx.fillText("CLICK / SPACE TO SET POWER", W / 2, 350);
     }
     // wind
     const wd = G.weather.wind;
     cx.font = PF(9); cx.fillStyle = "#8ecafc";
-    cx.fillText("WIND " + Math.round(Math.hypot(wd.x, wd.y) / 6) + " " + windArrow(), W / 2 + 178, 112);
-  }
-
-  function drawSidelineDino(x, feetY, seed, faceRight) {
-    // Sideline staff retain their bare-dino sprites. Spectators use the block
-    // helper below, so this is never used to populate a crowd or fan bench.
-    const herd = G.fanSprites;
-    const keys = DinoSprites.FAN_SPECIES_KEYS || (herd ? Object.keys(herd) : []);
-    if (!herd || !keys.length) return;
-    const key = keys[((seed % keys.length) + keys.length) % keys.length];
-    const pack = herd[key];
-    if (!pack) return;
-    const frame = ((Math.floor(performance.now() / 260) + seed) % pack.n + pack.n) % pack.n;
-    const img = (faceRight ? pack.R : pack.L)[frame];
-    cx.drawImage(img, Math.round(x - img.width / 2), Math.round(feetY - img.height));
-  }
-
-  function drawSidelineFanBlock(x, feetY, seed) {
-    const home = G.stadium && TEAMS[G.stadium.home];
-    const palette = crowdFanPalette(home && home[1]);
-    const w = 5 + ((seed >>> 1) % 2) * 2;
-    const h = 7 + ((seed >>> 4) % 2) * 2;
-    const top = Math.round(feetY - h);
-    // These follow the same clean, rectilinear language as the far stands.
-    // There are no sprite frames or animated limbs to misread as players.
-    cx.fillStyle = "#101720";
-    cx.fillRect(Math.round(x - w / 2 - 1), top + h, w + 2, 2);
-    cx.fillStyle = palette[((seed * 7) >>> 0) % palette.length];
-    cx.fillRect(Math.round(x - w / 2), top, w, h);
-    if ((seed >>> 7) % 3 === 0) {
-      cx.fillStyle = "rgba(244,246,241,.4)";
-      cx.fillRect(Math.round(x - w / 2 + 1), top + 1, Math.max(1, w - 3), 1);
-    }
-  }
-
-  function drawSidelineLife(cam) {
-    const topFeet = TOP - 2, botFeet = BOT + 22;
-    // field-space positions instead of screen-space looping keeps a coach at
-    // the same 35-yard line while the camera follows a long return.
-    for (let i = -2; i < 46; i++) {
-      const wx = i * 68 + 18;
-      const sx = wx - cam;
-      if (sx < -20 || sx > W + 20) continue;
-      const lower = i % 2 === 0;
-      const feetY = lower ? botFeet : topFeet;
-      const type = ((i % 7) + 7) % 7;
-      if (type === 0) { // yellow-coat chain crew and marker
-        drawSidelineDino(sx - 4, feetY, i, !lower);
-        cx.fillStyle = "#f2a900"; cx.fillRect(sx + 8, feetY - 27, 2, 34);
-        cx.fillStyle = "#ffd23f"; cx.fillRect(sx + 4, feetY - 28, 10, 8);
-        continue;
-      }
-      if (type === 1) { // television camera person
-        drawSidelineDino(sx - 2, feetY, i, !lower);
-        cx.fillStyle = "#252c36"; cx.fillRect(sx + 4, feetY - 17, 12, 8);
-        cx.fillStyle = "#707d88"; cx.fillRect(sx + 14, feetY - 16, 8, 4);
-        cx.fillStyle = "#10151c"; cx.fillRect(sx + 7, feetY - 9, 2, 9); cx.fillRect(sx + 15, feetY - 9, 2, 9);
-        continue;
-      }
-      if (type === 2 || type === 5) { // bench of compact block-fan spectators
-        cx.fillStyle = "#7a4b27"; cx.fillRect(sx - 16, feetY + 1, 32, 4);
-        for (let j = -1; j <= 1; j++) {
-          const bx = sx + j * 8;
-          drawSidelineFanBlock(bx, feetY, i + j * 11);
-        }
-        continue;
-      }
-      // Coaches, medics, and ball kids are dinos too; props identify their
-      // job without putting a human silhouette back into the dino stadium.
-      drawSidelineDino(sx, feetY, i + type * 7, !lower);
-      if (type === 3) { // coach clipboard
-        cx.fillStyle = "#c9b48a"; cx.fillRect(sx + 5, feetY - 16, 5, 8);
-        cx.fillStyle = "#5a4a30"; cx.fillRect(sx + 6, feetY - 14, 3, 1); cx.fillRect(sx + 6, feetY - 11, 3, 1);
-      }
-      if (type === 4) { // medic kit
-        cx.fillStyle = "#8ecafc"; cx.fillRect(sx - 12, feetY - 7, 7, 5);
-        cx.fillStyle = "#f4f6f1"; cx.fillRect(sx - 10, feetY - 6, 3, 1); cx.fillRect(sx - 9, feetY - 7, 1, 3);
-      }
-      if (type === 6) { // ball kid's football
-        cx.fillStyle = "#8a4a1f"; cx.fillRect(sx + 9, feetY - 9, 5, 3);
-        cx.fillStyle = "#f4e6c6"; cx.fillRect(sx + 11, feetY - 8, 1, 1);
-      }
-    }
+    cx.fillText("WIND " + Math.round(Math.hypot(wd.x, wd.y) / 6) + " " + windArrow(), W / 2 + 150, 210);
   }
   function windArrow() {
     const w = G.weather.wind, a = Math.atan2(w.y, w.x);
@@ -8140,16 +5398,15 @@
     cx.textAlign = "right"; cx.font = PF(9);
     const wIco = G.weather ? (G.weather.type === "RAIN" ? "☔" : G.weather.type === "SNOW" ? "❄" : "☀") : "";
     hudText((G.drive === "A" ? "◈ YOUR BALL" : "◈ CPU BALL") + "  " + wIco + " " + windArrow(), W - 120, 20, "#9db0a4");
-    // rampage meter (one per half — spent = grayed out until the break)
-    const rampSpent = !G.practice && G.rampUsed && G.rampUsed.A === (G.quarter <= 2 ? 1 : 2);
+    // rampage meter
     cx.fillStyle = "#0d2519"; cx.fillRect(W - 104, 8, 90, 14);
     const rp = G.rampage.A;
-    cx.fillStyle = rampSpent ? "#3a4441" : (rp >= 100 ? "#ff4444" : "#e8622c");
-    cx.fillRect(W - 104, 8, 90 * (rampSpent ? 1 : rp / 100), 14);
+    cx.fillStyle = rp >= 100 ? "#ff4444" : "#e8622c";
+    cx.fillRect(W - 104, 8, 90 * (rp / 100), 14);
     cx.strokeStyle = "#f4f6f1"; cx.strokeRect(W - 104, 8, 90, 14);
     cx.font = PF(7); cx.textAlign = "center";
-    cx.fillStyle = rampSpent ? "#9db0a4" : "#fff";
-    cx.fillText(rampSpent ? "SPENT·½" : (rp >= 100 ? "R=RAMPAGE!" : "🦖RAMPAGE"), W - 59, 18);
+    cx.fillStyle = "#fff";
+    cx.fillText(rp >= 100 ? "R=RAMPAGE!" : "🦖RAMPAGE", W - 59, 18);
 
     // compact temperature + time-of-day dial (hidden under the practice tips bar)
     if (!G.practice && G.stadium && ["live", "presnap", "dead", "playcall", "defcall", "kick", "ptchoice"].includes(G.state)) {
@@ -8203,7 +5460,7 @@
       cx.fillText(G.pog.line, W / 2, 312);
     }
     cx.font = PF(13); cx.fillStyle = Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6";
-    cx.fillText("ENTER / TAP = CONTINUE  ·  B = BOX SCORE", W / 2, 348);
+    cx.fillText("ENTER = CONTINUE  ·  B = BOX SCORE", W / 2, 348);
   }
 
   // ------------------------------------------------------------- box score
@@ -8267,25 +5524,13 @@
     for (let i = 0; i < GALLERY.length; i++) {
       const [key, label] = GALLERY[i];
       const spr = sheet[key];
-      const gx = 100 + (i % 4) * 210, gy = 58 + ((i / 4) | 0) * 158;
-      const frameCount = key === "quetz" ? Math.min(2, spr.n) : spr.n;
-      cx.drawImage(spr.R[t % frameCount], gx, gy, spr.w * 2.0, spr.h * 2.0);
+      const gx = 90 + (i % 4) * 210, gy = 70 + ((i / 4) | 0) * 150;
+      cx.drawImage(spr.R[t % 2], gx, gy, spr.w * 2.6, spr.h * 2.6);
       cx.font = PF(8); cx.fillStyle = "#f4f6f1";
-      cx.fillText(label, gx + spr.w, gy + spr.h * 2.0 + 14);
+      cx.fillText(label, gx + 46, gy + 108);
     }
     cx.font = PF(9); cx.fillStyle = "#9db0a4";
     cx.fillText("G TO CLOSE", W / 2, H - 20);
-  }
-
-  function drawQAOverlay() {
-    const s = G.qaScene;
-    if (!s) return;
-    // Keep the label out of the action's central read; GIF reviewers can see
-    // both the football moment and exactly which behavior is under inspection.
-    cx.fillStyle = "rgba(4,10,7,.82)"; cx.fillRect(18, H - 34, 370, 18);
-    cx.strokeStyle = "rgba(255,210,63,.78)"; cx.strokeRect(18, H - 34, 370, 18);
-    cx.textAlign = "left"; cx.font = PF(7); cx.fillStyle = "#ffd23f";
-    cx.fillText("QA · " + s.caption, 28, H - 21);
   }
 
   function drawHelp() {
@@ -8298,19 +5543,19 @@
       "OFFENSE — 4 downs to cross the yellow line.",
       " 1-4 / CLICK ....... call a play (4 = team's FAMOUS play)",
       " Q / E audible ..... SPACE = snap",
-      " PULL BACK ......... hold click, drag backward, release = lob",
+      " HOLD L-CLICK ...... aim pass · RELEASE = lob",
       " SPACE / R-CLICK ... BULLET pass while aiming (fast + flat)",
       " WASD run · SHIFT juke · E dive · X throwaway",
       " Q while running ... aim a LATERAL (backward, live ball!)",
       " QB sneak / handoff behind the line can still THROW",
       "",
       "DEFENSE — you control the ▼ dino. TAB switch · SPACE dive.",
-      " SPACE then F .... PEANUT PUNCH the ball out midair",
+      " F near carrier .... PEANUT PUNCH the ball out",
       " SHIFT (safety) .... QUETZALCOATLUS SOARS in a straight line",
       "",
       "R = RAMPAGE when the ★ APEX dino's meter is full.",
       "Every team has ONE apex — sometimes on defense!",
-      "SNOWBALL HITS = cold + slow (except ICEMAN Caleb) · V = throw snowball",
+      "RAIN/FREEZING = drops+fumbles · SNOW = slow legs · V = throw a snowball",
       "OOB inside 1:00 stops the clock · M mute · H close help",
     ];
     lines.forEach((l, i) => cx.fillText(l, 120, 130 + i * 21));
@@ -8330,11 +5575,8 @@
 
   // debug/test hooks (used by automated game tests)
   G.debug = {
-    enterPlaycall, buildPlayers, changePossession, enterKick, startKickoff, startKickReturn, signaturePlay, choosePlay, tryRampage, lateral, dropBall, goForTwo, resolveArrival, breakOnBall, kickMeterPlan, assessPassWindow, cpuQB, cpuReadBoard,
-    cpuChooseDef, cpuChooseOff, saveCpuMemory, newSeason, startPlayoffs, seasonAfterGame, startSeasonGame, gameOver, simWeekOthers, pickWeather, makeStadium,
-    resolvePlayerContacts, resolveVisualSpriteContacts, visualMasksOverlap,
-    bodyRadius, bodyContactRange, stageHighlight, spriteFrameFor: selectGameplaySpriteFrame,
-    get szn() { return G.szn; }
+    enterPlaycall, buildPlayers, changePossession, enterKick, signaturePlay, choosePlay, tryRampage, lateral, dropBall, goForTwo,
+    newSeason, startPlayoffs, seasonAfterGame, startSeasonGame, gameOver, simWeekOthers, pickWeather, makeStadium, get szn() { return G.szn; }
   };
 
   boot();
