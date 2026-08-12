@@ -3619,7 +3619,26 @@
     if (riskyMoonBall && G.drive === "A" && !G.humanB && G.aiPlay) G.aiPlay.risky = true;
     const learnedPick = cpuRiskPickBoost(riskyMoonBall);
     const recs = eligible().map((e) => ({ e, d: dist(e, spot) })).sort((a, b2) => a.d - b2.d);
-    const defs = G.players.filter((e) => e.team === "def").map((e) => ({ e, d: dist(e, spot) })).sort((a, b2) => a.d - b2.d);
+    // The defender pool had no state filter, so "nearest to the landing spot"
+    // could be a man who is not playing football at that instant: face-down
+    // after a missed dive (proneT), frozen by a block-sell or leak freeze
+    // (staggerT), or locked up in a block (blockedBy). He still became `df` and
+    // drove the contested gate, the lurk pick and the tip roll below, so a
+    // grounded body could be credited with the interception and an
+    // `int:lurk`/`ct:` tag could name a defender who never made a play
+    // (LESSON #25 — a cause tag has to name a real cause). Four siblings already
+    // agree on this predicate (the `posOwner` claim, the mid-flight lane pick,
+    // `breakOnBall`, the loose-ball scrum); this is the same filter on the same
+    // pool, and it can only ever REMOVE a man from the contest.
+    // Honest scope: narrow, not constant. The reachable case is a human defender
+    // who dives and misses on a playable-defense snap (proneT 0.55, right on the
+    // landing spot) or a sell/leak freeze — a blocked DL is already walled off by
+    // noIntZone. Measured on a staged arrival: a prone man on the spot went
+    // int:lurk -> INCOMPLETE, and with the receiver there too ct:/catch:contest
+    // -> catch:solo, while healthy-defender arrivals came out identical. The
+    // catch windows and the tip model are untouched — this decides only WHO may
+    // contest.
+    const defs = G.players.filter((e) => e.team === "def" && e.proneT <= 0 && e.staggerT <= 0 && !e.blockedBy).map((e) => ({ e, d: dist(e, spot) })).sort((a, b2) => a.d - b2.d);
     const nearestRec = recs[0];
     const intendedRec = b.target ? recs.find((r2) => r2.e === b.target) : null;
     // The player chose a receiver at release.  Preserve that intent unless a
@@ -7777,6 +7796,40 @@
             playDead("FLATTENED!", null, false);
             return;
           }
+          // Is THIS contact inside the 0.40s post-catch grace window? Computed up
+          // front so the escape branches below can decline to SPEND a resource on
+          // a contact that the window is about to wave off. It deliberately does
+          // NOT skip those branches wholesale.
+          //
+          // The obvious fix — hoisting the whole bail up here, above the escape
+          // branches — was tried first and is WRONG. A juke, a truck or a shed
+          // that fires RESOLVES the contact by staggering the tackler and
+          // `continue`s, so it never reached the late bail in the first place;
+          // notably `shedCharges` (below) is consumed unconditionally whenever a
+          // charge remains. Hoisting therefore suppressed the ENTIRE contact for
+          // the full window instead of just protecting the resource: the tackler
+          // was no longer pushed off, real takedowns were pushed past the window,
+          // and it broke both the hard-hit fumble path and the tackled->getup
+          // chain. Measured, not guessed — test_all #15 and the E3 getup
+          // assertion both went red, and a stable 3-run baseline proved they were
+          // not flakes.
+          //
+          // What actually leaked is narrower: only the branches that spend a
+          // resource and then FAIL. On a failed truck roll (truckP clamped
+          // 0.25-0.40, so ~2/3 of tries), a failed YAC roll (0.25-0.48, ~60%),
+          // or a LOST stiff-arm contest, the charge or the player's timed input
+          // was consumed and then the contact was waved off with no stagger, no
+          // shake and no sound — nothing sets tackleCd on that path either, so
+          // nothing limited the bleed. That is the LESSON #19 violation ("the
+          // player can always see WHY"), and it fired on exactly the play the YAC
+          // passive advertises: completeCatch stamps catchT and becomeCarrier
+          // grants the charges in the SAME tick, while a trailing DB parked at
+          // coverCushion ~28px is already inside a ~26px body contact range.
+          //
+          // `shedCharges` is intentionally NOT guarded: it always applies
+          // staggerT 0.9 + shake + sound before continuing, so it is never spent
+          // silently. The late bail stays exactly where it was.
+          const inGrace = c.catchT != null && G.playT - c.catchT < 0.40 && e.diveT <= 0 && e.soarT <= 0;
           if (c.jukeT > 0) {
             e.staggerT = 0.8; e.grapT = 0; e.grappling = null;   // juked out of the wrap
             c.tackleAcc = Math.max(0, (c.tackleAcc || 0) - 30);
@@ -7784,7 +7837,7 @@
           }
           // Truckstick has two strength-based tries per carry, rather than
           // two guaranteed sheds. Even a dominant back is never automatic.
-          if (c.truckCharges > 0) {
+          if (c.truckCharges > 0 && !inGrace) {
             c.truckCharges--;
             const truckP = clamp(0.325 + ((c.str || 75) - (e.str || 75)) / 300, 0.25, 0.4);
             if (Math.random() < truckP) {
@@ -7797,14 +7850,14 @@
             continue;
           }
           // YAC MONSTER: one agility-based chance to make the first tackler miss
-          if (c.apex && c.passive === "yac" && c.yacCharge > 0) {
+          if (c.apex && c.passive === "yac" && c.yacCharge > 0 && !inGrace) {
             c.yacCharge = 0;
             const yacP = clamp(0.34 + ((c.agi || 75) - (e.agi || 75)) / 180, 0.25, 0.48);
             if (Math.random() < yacP) { e.staggerT = 0.85; sfx.juke(); continue; }
           }
           // TIMED STIFF-ARM contest: the player armed a stiff-arm, so it's a
           // strong strength-vs-strength shove. Win = the tackler is planted.
-          if (c.stiffT > 0) {
+          if (c.stiffT > 0 && !inGrace) {
             c.stiffT = 0;
             if ((c.stiff || c.str || 75) + rnd(0, 26) > (e.str || 75) + rnd(0, 26)) {
               shrugOffTackle(c, e, 0.9);
@@ -7850,12 +7903,12 @@
           // closing threshold must be attainable after the approach step.
           // This also fixes the visible "arrived but missed" CPU tackle.
           const hardHit = (closing > 56 && (e.str || 75) >= 76 && (e.diveT > 0 || e.soarT > 0)) || bigDrive;
+          // freshCatch is the WIDER 0.6s "ball isn't tucked yet" window that only
+          // tryStripAtTakedown prices — it is not a bail. The 0.40s tackle-grace
+          // bail that used to sit right here now runs at the TOP of this block,
+          // above the escape branches (its QA history stays on it: 0.22 -> 0.40,
+          // because completions were dying for 0 YAC).
           const freshCatch = c.catchT != null && G.playT - c.catchT < 0.6;
-          // a clean completion gets a beat to secure and turn upfield — only a
-          // committed dive can finish a tackle inside the catch grace window
-          // QA balance: 0.22 → 0.40 — completions died for 0 YAC; a clean
-          // catch now gets a real beat to secure and turn upfield (a committed
-          // dive can still finish it, so this is not a free 5 yards)
           if (c.catchT != null && G.playT - c.catchT < 0.40 && e.diveT <= 0 && e.soarT <= 0) { continue; }
           // an arm tackle on a back moving at full clip mostly bounces off —
           // you bring him down with a dive, a wrap at an angle, or numbers
