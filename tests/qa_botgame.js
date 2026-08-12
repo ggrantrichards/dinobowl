@@ -1,8 +1,32 @@
 // QA bot: plays full games through the real engine and prints a JSON balance
 // report — box scores, completion %, INT rate, sacks, yards/play — plus
 // physics-feel metrics (line overlap %, contested-catch displacement).
-// Usage: node tests/qa_botgame.js [games=2]
+// Usage: node tests/qa_botgame.js [games=2] [seed]
+//
+// SEED PINNING (added 2026-08-12, and it is the difference between a usable
+// balance instrument and a coin flip). Unseeded, this harness draws different
+// matchups and different play selections every run, so two runs of the SAME
+// build produced pilot INT 37 vs 53 and CPU completion 96% vs 85%. That makes
+// any before/after comparison meaningless and is exactly the trap LESSON #24
+// describes. Pass a seed and Math.random becomes a deterministic mulberry32
+// stream installed BEFORE the engine boots, so two runs of the same build at the
+// same seed are identical and a diff attributes cleanly to the code change.
+// Balance work should always pass a seed; leave it off only to sample variety.
 "use strict";
+
+const SEED = process.argv[3] == null ? null : Number(process.argv[3]);
+if (SEED != null) {
+  // mulberry32 — small, fast, good enough for gameplay sampling
+  let a = SEED >>> 0;
+  Math.random = function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 const H = require("./harness.js");
 const { step, stepFor, key, mouse, G } = H;
 
@@ -112,6 +136,7 @@ const GAMES = Number(process.argv[2] || 2);
   const tele = {};
   for (const t of (g.qaTele || [])) { const k = t.drive + "|" + t.tag; tele[k] = (tele[k] || 0) + 1; }
   console.log(JSON.stringify({
+    seed: SEED,   // null = unseeded, so this run is NOT comparable to another
     tele,
     games: reports,
     passing: { A_pilot: agg("A"), B_cpu: agg("B") },
