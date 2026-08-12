@@ -3873,6 +3873,18 @@
       // long enough to read the takedown, short enough that dinos pop back
       // up with football urgency instead of lying around
       G.carrier.proneT = Math.max(G.carrier.proneT || 0, 0.4);
+      // ...and he must STAND BACK UP (LESSON #3). Nothing decrements proneT
+      // outside live play — tickDeadEntities ticks jumpT/spinT/throwT/swingT/
+      // catchDiveT/poseT/pileT and never proneT — so the authored cels expired
+      // while the flag stayed set and the renderer drew the STANDING cel turned
+      // 90 degrees for the rest of the beat. Measured on a routine 1st-and-20
+      // tackle: 180 of 180 frames (a full 3s) in that rotated fallback, with
+      // neither `prone` nor `getup` ever playing, on tackles AND sacks.
+      // The chain runner clears proneT and tackleFallPending as it advances a
+      // link, so this is also what releases the flag. It starts only after the
+      // in-flight tackled/impact cel finishes (LESSON #2 — never an override),
+      // and a first down replaces it with prone->getup->celebrate just below.
+      G.carrier.poseChain = [{ pose: "prone", dur: 0.34 }, { pose: "getup", dur: 0.34 }];
       // PILE-ON (Retro Bowl look): the next one or two arriving defenders
       // keep coming and fold onto the tackle spot instead of stopping short
       const spot = { x: G.carrier.x, y: G.carrier.y };
@@ -6144,7 +6156,15 @@
           else {
             e.poseChain.shift();
             if (!e.poseChain.length) e.poseChain = null;
-            e.proneT = 0; e.tackleFallPending = false;
+            // A GROUNDED link means he is still down, so proneT must stay set:
+            // snapshotFrame records `prone: e.proneT > 0` and the replay draws
+            // the laid-out body from it, so releasing the flag on every link
+            // made replays show a STANDING dino during the prone cel. Only a
+            // rising/upright link (getup, celebrate) releases it.
+            if (link.pose === "prone" || link.pose === "tackled" || link.pose === "layflat") {
+              e.proneT = Math.max(e.proneT || 0, link.dur);
+            } else e.proneT = 0;
+            e.tackleFallPending = false;
             playPose(e, link.pose, link.dur);
             if (link.fdCeleb) { e.fdCeleb = link.fdCeleb; e.jumpT = 0.45; }
           }
