@@ -43,6 +43,76 @@ the `k.mode` latch in P0-4) are untouched. **21 P0s remain.**
 
 Note: §5 A8 names `BUILD = "aa-plus-v35-20260812"`; the shipped token is now **v36**.
 
+## BALANCE TARGETS — from the owner, 2026-08-12 (authoritative)
+
+These are the owner's first-hand Retro Bowl numbers. They are the spec; published
+sources do not carry this data (searched, nothing usable). **Do not tune toward NFL
+realism** — Retro Bowl is deliberately an arcade curve and NFL rates are the wrong
+target. A game is ~25 attempts, so per-game NFL rates do not transfer either.
+
+| scenario | pass yds | TD | INT | comp % |
+|---|---|---|---|---|
+| **Normal** (good OL + good WR/RB) | **300** | **4** | **2** | **80** |
+| Underdog (elite opponent, weak roster) | 175 | 2 | 2 | 70 |
+| Stacked (your roster OP, weak opponent) | 400 | 5 | 0 | — |
+| **Opponent / CPU baseline** | **280** | — | **2** | **75** |
+| Opponent points | **~26** | | | |
+
+**The arithmetic that makes 80% completion and 2 INT coexist** — and it is the whole
+design, so do not "fix" one without the other. 25 attempts = 20 completions + 2 INTs
++ 3 harmless incompletions. That is an **8% INT rate, ~3.5x the NFL's 2.3%**, sitting
+on top of a completion rate well above the NFL's 65%. So **40% of all failed throws
+are interceptions**. Throw it to the right place and it is caught almost every time;
+misread the route, misclick, or panic, and you are usually picked rather than merely
+incomplete. High punishment SALIENCE at moderate frequency, with all agency in the
+player's thumb — which is what the zero-scatter throw model in
+`RETRO_BOWL_MECHANICS.md` §1/§4 is built to deliver.
+
+### Where Dino Bowl actually stands (seeded 6-game run, seed 4242, post-batch-B)
+
+| metric | pilot | CPU | target | verdict |
+|---|---|---|---|---|
+| completion % | 76 | 85 | 80 / 75 | **in band** (CPU slightly too high) |
+| INT per attempt | 7.6% | 3.4% | ~8% | **already correct — do not touch** |
+| INT per game | 2.7 | 0.7 | 2 | close |
+| **yards per attempt** | **4.3** | **2.8** | **~12** | **3-4x too low** |
+| **pass yards / game** | **152** | **54** | **300 / 280** | **2-5x too low** |
+| **pass TD / game** | **0.2** | **0.2** | **4** | **20x too low** |
+| **points / game** | **1.0** | **14.7** | — / ~26 | **broken** |
+
+**The conclusion that matters: the INT dice are NOT the problem. The offense is.**
+Completion rate and INT rate are already inside the Retro Bowl band. What is broken
+is that a completed pass gains 4.3 yards, so drives never reach the end zone. Any
+instinct to "reduce interceptions" is tuning the one dial that is already right.
+
+### Tuning priority, in order
+
+1. **Yards per attempt.** The read selection only ever takes short, safe routes.
+   The CPU's own AI manages 2.8 yds/att with no harness bias at all, so this is the
+   engine, not the pilot. Levers: `safeLimit`/`playableLimit` and the `risk * 145`
+   board weight in `cpuReadBoard`, route depth, the throw range clamp, and the
+   lowered lob apex from the 08-11 session. This is ROADMAP A6 and it is
+   balance-coupled — re-baseline with a seeded 6-game diff.
+2. **Rushing nets ~0 yards for both sides** even after the sack-attribution fix
+   (verified identical pre-batch-B, so it is not a regression). Half the offense is
+   missing; TDs cannot recover without it.
+3. **TDs follow from 1 and 2.** Do not chase TD count directly.
+4. **CPU is too conservative** (85% completion means it only throws layups). Same
+   read-selection lever as 1; it is also what makes the defense feel untested.
+5. **INT rate: leave alone.** 7.6% vs an 8% target.
+
+### Instrument status (what you can and cannot trust)
+
+- **FIXED**: `qa_botgame` is seedable (`node tests/qa_botgame.js [games] [seed]`).
+  Unseeded, the same build produced pilot INT 37 vs 53 — every unseeded balance
+  comparison in this repo's history is uninterpretable (LESSON #24).
+- **FIXED**: sacks are no longer booked as QB rushing attempts, which had cancelled
+  64 carries to 0 net rushing yards.
+- **STILL BROKEN**: the scripted pilot is a weak QB — bullets only, risk <= 0.45,
+  mistimed catch jump. Its 4.3 yds/att is partly its own fault, so the human-side
+  yardage figure is a floor, not a measurement (LESSON #16). Fix the pilot before
+  signing off any human-side balance number.
+
 ## Read this before deleting anything
 
 **`AA_PLUS_PLAN.md` §3.7 says "remove legacy FILM cels sprites.js:671-992".
