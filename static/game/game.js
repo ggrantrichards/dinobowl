@@ -4455,7 +4455,9 @@
     // the mascot rex (flickers while stunned)
     const sheet = G.sheets.A;
     if (sheet && sheet.trex && !(h.stun > 0 && ((performance.now() / 90) | 0) % 2)) {
-      const spr = sheet.trex, fi = ((performance.now() / 140) | 0) % 2;
+      // modulo the species' OWN cel count, not a hard-coded 2 — trex carries a
+      // 4-frame walk since the 08-07 pass, and `% 2` dropped the mirrored half
+      const spr = sheet.trex, fi = ((performance.now() / 140) | 0) % spr.R.length;
       cx.fillStyle = "rgba(0,0,0,.28)";
       cx.fillRect(h.px - G.camX - 8, h.py + 2, 16, 4);
       cx.drawImage(spr.R[fi], h.px - G.camX - spr.w / 2, h.py - spr.h + 6);
@@ -4535,7 +4537,8 @@
     }
     const sheet = G.sheets.A;
     if (sheet && sheet.carno && !(h.stun > 0 && ((performance.now() / 90) | 0) % 2)) {
-      const spr = sheet.carno, fi = ((performance.now() / 100) | 0) % 2;
+      // same as the meteor game above: cycle carno's full 4-frame walk
+      const spr = sheet.carno, fi = ((performance.now() / 100) | 0) % spr.R.length;
       cx.fillStyle = "rgba(0,0,0,.28)";
       cx.fillRect(h.px - G.camX - 8, MID + 2, 16 - h.jumpZ * 0.1, 4);
       cx.drawImage(spr.R[fi], h.px - G.camX - spr.w / 2, MID - spr.h + 6 - h.jumpZ);
@@ -6437,8 +6440,18 @@
           .map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
         const cuePose = b.kind === "lob" ? "catchHigh" : "catchLow";
         const cueDur = clamp((b.T - b.t) + 0.18, 0.40, 0.72);
-        if (recCue && recCue.d < 60) playPose(recCue.e, cuePose, cueDur);
-        if (defCue && defCue.d < 60) playPose(defCue.e, cuePose, cueDur);
+        // Never cue a dino that is DOWN or mid-contact. This fired on the
+        // nearest receiver and nearest defender unconditionally, so it could
+        // overwrite an in-flight tackle/tackled/prone cel (LESSON #2) — and on a
+        // grounded dino the laid-out rotation then got applied to a CATCH cel,
+        // the same double-rotation defect fixed in A-2. Only the animation cue
+        // is gated: the leap block below still sets jumpT/jumpTimed for everyone,
+        // because those decide catch outcomes and balance is a separate batch.
+        const cueOk = (e) => e && (e.proneT || 0) <= 0 && (e.staggerT || 0) <= 0 &&
+          !e.grappling && (e.grappledT || 0) <= 0 && !e.poseChain &&
+          !["tackle", "tackled", "prone", "layflat", "shoved", "getup", "dive"].includes(e.pose || "");
+        if (recCue && recCue.d < 60 && cueOk(recCue.e)) playPose(recCue.e, cuePose, cueDur);
+        if (defCue && defCue.d < 60 && cueOk(defCue.e)) playPose(defCue.e, cuePose, cueDur);
       }
       // as the pass arrives, the nearest receiver and nearest defender both leap
       // (nobody leaps for a throwaway or a ball landing out of bounds)
@@ -9013,7 +9026,11 @@
     const rampInfo = RAMPAGERS[ab] || ["Apex Dino", "truck"];
     const spec = APEX_SPECIES[APEX_ROLE[ab] || "QB"] || "trex";
     const runX = flip ? W + 80 - t * 300 : -80 + t * 300;
-    const fi = ((performance.now() / 130) | 0) % 2;
+    // Raw cel tick — each species moduloes by ITS OWN frame count at the draw
+    // sites below. This used to be `% 2`, which threw away half of every 4-frame
+    // walk cycle (the mirrored contact and pass-down cels added in the 08-07
+    // animation pass), so both showcase headliners strode on one leg.
+    const fi = ((performance.now() / 130) | 0);
     const feat = (kind, fx, dy) => {
       if (!kind) return;
       if (flip) { cx.save(); cx.translate(2 * (fx + 44), 0); cx.scale(-1, 1); }

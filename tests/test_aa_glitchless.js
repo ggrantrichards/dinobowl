@@ -317,6 +317,56 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
   check("D7 all 11 land species still carry 4 tackled cels",
     packSizes.every((n) => n === 4), packSizes.join(","));
 
+  // ---------------------------------------------------------------------------
+  // E. THE ANIMATION BATCH (ROADMAP A3, shipped 2026-08-12)
+  //   E1-E3  a tackled/sacked carrier RISES instead of holding a 90-rotated walk
+  //          cel (measured 180/180 frames in that fallback before the fix)
+  //   E4     grounded pose-chain links keep proneT so replays stay truthful
+  //   E5     a dive that misses does not stack a second rotation on a flat cel
+  //   E6     the catch cue cannot overwrite a contact/grounded cel (LESSON #2)
+  //   E7     accessories baseline against the STANDING pack, not a grounded one
+  //   E8     no frame index is clamped to `% 2` while 4-cel walks exist
+  // ---------------------------------------------------------------------------
+  check("E1 a tackled carrier is handed a prone->getup rise chain (LESSON #3)",
+    /G\.carrier\.poseChain = \[\{ pose: "prone", dur: 0\.34 \}, \{ pose: "getup", dur: 0\.34 \}\];/.test(SRC));
+  check("E4 grounded chain links KEEP proneT so the replay tape stays truthful",
+    /if \(link\.pose === "prone" \|\| link\.pose === "tackled" \|\| link\.pose === "layflat"\) \{/.test(SRC) &&
+    /e\.proneT = Math\.max\(e\.proneT \|\| 0, link\.dur\);/.test(SRC));
+  check("E5 a spent dive cel is swapped for the authored grounded cel, guarded on pose",
+    /if \(e\.pose === "dive"\) \{ e\.pose = ""; e\.poseT = 0; playPose\(e, "prone", e\.proneT\); \}/.test(SRC));
+  check("E6 the catch cue skips a downed or mid-contact dino",
+    /const cueOk = \(e\) =>/.test(SRC) && /cueOk\(recCue\.e\)/.test(SRC) && /cueOk\(defCue\.e\)/.test(SRC));
+  check("E7 frameBobDy baselines against a supplied standing pack",
+    /function frameBobDy\(pack, dirKey, fi, basePack\)/.test(SRC) &&
+    /const t0 = maskTopRow\(base, dirKey, 0\)/.test(SRC) &&
+    /frameBobDy\(artPack, e\.dir >= 0 \? "R" : "L", spriteFrame\.fi, spr\)/.test(SRC));
+  check("E8 no walk-cel index is hard-clamped to `% 2`",
+    !/\(\(performance\.now\(\) \/ 1[034]0\) \| 0\) % 2/.test(SRC), "a % 2 cel clamp survives");
+
+  // functional: drive a routine 1st-and-20 tackle and watch the rise
+  g.state = "dead"; g.deadT = 0; g.deadNext = null;
+  g.drive = "A"; g.losYd = 30; g.down = 1; g.toGain = 20; g.patMode = false; g.practice = false;
+  g.clock = 300; g.quarter = 1; g.score.A = 0; g.score.B = 0;
+  dbg.enterPlaycall(); stepFor(0.2);
+  dbg.choosePlay((g.callsheet || []).find((p) => p.type === "run") || g.callsheet[0], false);
+  stepFor(0.1); key(" ");
+  let liveGuard = 0, seen = null;
+  while (g.state === "live" && liveGuard < 1200) { step(16.7); liveGuard++; if (g.carrier) seen = g.carrier; }
+  let rotatedFallback = 0, sawGetup = 0;
+  if (seen) {
+    for (let i = 0; i < 180; i++) {
+      step(16.7);
+      // the defect signature: nothing authored playing, yet still flagged down,
+      // so the renderer turns the STANDING cel on its side
+      if (!(seen.pose || "") && (seen.proneT || 0) > 0) rotatedFallback++;
+      if (seen.pose === "getup") sawGetup++;
+    }
+  }
+  check("E2 a routine tackle never shows the 90-rotated walk fallback",
+    !!seen && rotatedFallback === 0, seen ? rotatedFallback + " frames" : "no carrier seen");
+  check("E3 ...and the carrier visibly stands back up through getup",
+    !!seen && sawGetup > 0, seen ? sawGetup + " getup frames" : "no carrier seen");
+
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
   process.exitCode = fail ? 1 : 0;
