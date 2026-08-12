@@ -343,29 +343,54 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
   check("E8 no walk-cel index is hard-clamped to `% 2`",
     !/\(\(performance\.now\(\) \/ 1[034]0\) \| 0\) % 2/.test(SRC), "a % 2 cel clamp survives");
 
-  // functional: drive a routine 1st-and-20 tackle and watch the rise
+  // Functional: a routine 1st-and-20 tackle, FORCED so the gate is deterministic.
+  // An earlier version just ran a run play and hoped it ended in a tackle; it
+  // failed roughly 1 run in 5 because the play could end out of bounds or as an
+  // incompletion, and a flaky gate is worse than no gate (LESSON #8). This now
+  // mirrors test_all #7: strip the carrier's escape resources, put a committed
+  // diving tackler on him, and pin the RNG so the takedown lands.
   g.state = "dead"; g.deadT = 0; g.deadNext = null;
   g.drive = "A"; g.losYd = 30; g.down = 1; g.toGain = 20; g.patMode = false; g.practice = false;
   g.clock = 300; g.quarter = 1; g.score.A = 0; g.score.B = 0;
+  g.weather = { type: "CLEAR", wind: { x: 0, y: 0 }, catchMod: 0, speedMod: 1, fumbleMod: 0, kickMod: 0, temp: 72, month: "SEP" };
   dbg.enterPlaycall(); stepFor(0.2);
   dbg.choosePlay((g.callsheet || []).find((p) => p.type === "run") || g.callsheet[0], false);
   stepFor(0.1); key(" ");
-  let liveGuard = 0, seen = null;
-  while (g.state === "live" && liveGuard < 1200) { step(16.7); liveGuard++; if (g.carrier) seen = g.carrier; }
-  let rotatedFallback = 0, sawGetup = 0;
+  stepFor(0.5);
+  const rbE = g.players.find((e) => e.team === "off" && e.role === "RB");
+  if (g.state === "live" && rbE && !g.carrier) {
+    g.carrier = rbE; g.ball = { mode: "held", holder: rbE, x: rbE.x, y: rbE.y, z: 12 };
+    g.phase = "carry"; rbE.state = "carry";
+  }
+  const seen = g.carrier;
+  let rotatedFallback = 0, sawGetup = 0, sawTackled = 0, reachedDead = false;
   if (seen) {
+    // no escapes, and a committed diver so the takedown cannot be declined
+    seen.shedCharges = 0; seen.yacCharge = 0; seen.truckCharges = 0;
+    seen.jukeT = 0; seen.jukeCd = 99; seen.stiffT = 0; seen.catchT = null;
+    const tk = g.players.find((e) => e.team === "def");
+    tk.x = seen.x; tk.y = seen.y; tk.str = 92; tk.diveT = 0.3;
+    tk.staggerT = 0; tk.tackleCd = 0; tk.proneT = 0; tk.vx = 380; tk.vy = 0;
+    const savedRnd = Math.random;
+    Math.random = () => 0.9;          // tackle lands, strip roll fails (no fumble)
+    for (let i = 0; i < 90 && g.state === "live"; i++) step(16.7);
+    Math.random = savedRnd;
+    reachedDead = g.state !== "live";
     for (let i = 0; i < 180; i++) {
       step(16.7);
       // the defect signature: nothing authored playing, yet still flagged down,
       // so the renderer turns the STANDING cel on its side
       if (!(seen.pose || "") && (seen.proneT || 0) > 0) rotatedFallback++;
       if (seen.pose === "getup") sawGetup++;
+      if (seen.pose === "tackled" || seen.pose === "prone") sawTackled++;
     }
   }
-  check("E2 a routine tackle never shows the 90-rotated walk fallback",
-    !!seen && rotatedFallback === 0, seen ? rotatedFallback + " frames" : "no carrier seen");
-  check("E3 ...and the carrier visibly stands back up through getup",
-    !!seen && sawGetup > 0, seen ? sawGetup + " getup frames" : "no carrier seen");
+  check("E2 the forced tackle resolved and never showed the 90-rotated walk fallback",
+    !!seen && reachedDead && rotatedFallback === 0,
+    seen ? "dead=" + reachedDead + " fallbackFrames=" + rotatedFallback : "no carrier");
+  check("E3 ...the grounded cels play, and the carrier stands back up through getup",
+    !!seen && sawTackled > 0 && sawGetup > 0,
+    seen ? "grounded=" + sawTackled + " getup=" + sawGetup : "no carrier");
 
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);

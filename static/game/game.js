@@ -717,6 +717,27 @@
   const BLK_TETHER_TECH = { bull: 0.70, speed: 1.00, spin: 1.10 };
   const BLK_TETHER_RUN_MULT = 1.35;
   const BLK_COLLAPSE_LEFT = 0.18;     // pocket-collapse leaves this much grind
+  // --- CPU CARRIER EVASION, as hazards per GAME-SECOND (LESSON #15).
+  // The juke and the stiff-arm used bare per-FRAME probabilities (0.018 / 0.02)
+  // rolled from cpuCarrier, which runs once per rendered frame and is already
+  // handed dt. That made an evasive move a function of the player's monitor.
+  // Measured on a pinned scenario (one defender welded inside the window for
+  // 400 game-seconds): the per-frame odds held at ~0.018 as designed, but that
+  // came out as ~2.5 / ~1.0 / ~0.5 jukes per GAME-second at 6.9 / 16.7 / 33.3ms
+  // frame times — a 144Hz screen bought ~2.4x the jukes of a 60Hz one. Same
+  // scenario with slow-mo running: 2.4/s vs 1.0/s, because update() is fed
+  // sdt (dt * slowScale, in loop()) while the roll ignored dt entirely — the
+  // rate rose exactly when the camera slowed down. Not cosmetic: a juke wipes
+  // the wrap and drains 30 off the deterministic takedown accumulator.
+  // x dt makes each a hazard per game-second: refresh-rate independent, and
+  // slow-mo safe because sdt IS game time. Calibrated to REPRODUCE the 60Hz
+  // frequency, not to re-balance it — 0.018/frame x 60 frames/s = 1.08/s, and
+  // the agility term (agi-75)/900 per frame x 60 = (agi-75)/15 per second.
+  // Re-measured after: 0.95-1.08 per game-second across those same three frame
+  // times, and 1.2 with slow-mo on.
+  const JUKE_RATE = 1.08;             // base juke attempts/sec inside 28px
+  const JUKE_AGI_PER_PT = 1 / 15;     // +0.067/sec per agility point over 75
+  const STIFF_RATE = 1.2;             // stiff-arm attempts/sec inside 26px
   // One release path for every way a block can end. The old code cleared
   // blockedBy/engaged by hand at six sites and one of them leaked a stale
   // blockedBy on the rusher (permanently speed-capped, filtered out of the
@@ -3287,7 +3308,7 @@
     // pancake is a once-per-PLAY beat, so a latch that outlived the snap would
     // silently downgrade it to once per GAME (LESSON #20 — a latch or
     // accumulator model has to be reset wherever the play resets).
-    for (const e of G.players) { e.punchedThisPlay = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; }
+    for (const e of G.players) { e.punchedThisPlay = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; }
     G.qbImprov = false;
     if (offenseIsUser()) G.snapTaught = (G.snapTaught || 0) + 1;   // coach bubble fades after 3 snaps
     const qb = G.players.find((e) => e.role === "QB");
@@ -7647,9 +7668,22 @@
       ty = e.y + (n.y > e.y ? -1 : 1) * 90;
       // jukes are a gamble, not a reflex — a good back only breaks one now and
       // then, and elite agility makes it more likely to land
-      if (dist(n, e) < 28 && e.jukeCd <= 0 && Math.random() < 0.018 + Math.max(0, (e.agi - 75)) / 900) doJuke(e);
+      // per-game-second hazard now (LESSON #15 — the arithmetic is at
+      // JUKE_RATE), plus ONE decision per closing defender. jukeCd (2.1s)
+      // already blocks a repeat inside a single pass — measured dwell inside
+      // 28px is only ~0.1s — so the latch only bites the long chase, where a
+      // pursuer who hangs between 28 and 44px could earn a second juke the
+      // moment the cooldown lapsed. Keyed to the man like punchedThisPlay,
+      // freed when he drops off, and cleared at the snap so it can never
+      // survive into the next play as a stale one-shot throttle (LESSON #20).
+      if (dist(n, e) > 44 && e.jukeConsidered === n.bodyId) e.jukeConsidered = null;
+      if (dist(n, e) < 28 && e.jukeCd <= 0 && e.jukeConsidered !== n.bodyId &&
+        Math.random() < dt * (JUKE_RATE + Math.max(0, (e.agi - 75)) * JUKE_AGI_PER_PT)) {
+        e.jukeConsidered = n.bodyId;
+        doJuke(e);
+      }
       // …and only a true STIFF-ARM artist (85+) throws the paw, rarely
-      else if (dist(n, e) < 26 && e.stiffCd <= 0 && (e.stiff || e.str || 75) >= 85 && Math.random() < 0.02) startStiffArm(e);
+      else if (dist(n, e) < 26 && e.stiffCd <= 0 && (e.stiff || e.str || 75) >= 85 && Math.random() < dt * STIFF_RATE) startStiffArm(e);
     }
     // A goal-line dive can score before contact.  Do not auto-dive at the
     // sticks: that used to whistle an untouched CPU carrier dead the instant
