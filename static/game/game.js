@@ -8711,7 +8711,9 @@
       } else {
         cx.drawImage(img, x, y);
         // accessories ride the current FRAME's pixels (see frameBobDy)
-        const bobDy = frameBobDy(artPack, e.dir >= 0 ? "R" : "L", spriteFrame.fi);
+        // baseline against the species' STANDING pack (`spr`) — the same body
+        // whose head fraction drawBling/drawQBFeature position against
+        const bobDy = frameBobDy(artPack, e.dir >= 0 ? "R" : "L", spriteFrame.fi, spr);
         // career bling overlay — positioned dynamically off the sprite bounds so
         // it lands on the head / chest of ANY dino species and faces the right way
         if (e.careerAcc && e.careerAcc !== "NONE") drawBling(e, spr, x, y + bobDy);
@@ -8817,13 +8819,22 @@
     }
     return null;
   }
-  function frameBobDy(pack, dirKey, fi) {
+  // How far below the STANDING silhouette's top edge this cel's body starts.
+  // `basePack` is the species' walk pack and is the baseline that matters: the
+  // accessory draw positions off a head fraction of the upright body, so the
+  // offset has to be measured against that same upright reference. Measuring a
+  // pack against its OWN cel 0 (the old behaviour) returns ~0 for a grounded
+  // pack — every prone cel starts low — so bling and QB visors floated at the
+  // upright head position, 9-11px above a laid-out body. Now far more visible,
+  // because the prone cel plays on every tackle since the A-1 rise chain.
+  function frameBobDy(pack, dirKey, fi, basePack) {
     if (!pack) return 0;
+    const base = basePack && basePack.mask ? basePack : pack;
     let byPack = bobCache.get(pack);
-    if (!byPack) { byPack = {}; bobCache.set(pack, byPack); }
+    if (!byPack || byPack.__base !== base) { byPack = { __base: base }; bobCache.set(pack, byPack); }
     const key = dirKey + ":" + fi;
     if (byPack[key] !== undefined) return byPack[key];
-    const t0 = maskTopRow(pack, dirKey, 0), tf = maskTopRow(pack, dirKey, fi);
+    const t0 = maskTopRow(base, dirKey, 0), tf = maskTopRow(pack, dirKey, fi);
     const dy = t0 == null || tf == null ? 0 : tf - t0;
     byPack[key] = dy;
     return dy;
