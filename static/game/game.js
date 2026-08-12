@@ -6573,6 +6573,22 @@
       if (e.diveT <= 0) {
         if (e === G.carrier) { playDead("DIVE", null, false); return; }
         e.proneT = 0.55;
+        // The `dive` cel is ALREADY horizontal (sprites.js builds dive frames
+        // 2-3 through actionLayFlat), and doDive gives the pose 0.50s against a
+        // 0.30s diveT. So for the 0.20s overhang the laid-out ROTATION was
+        // applied on top of an already-flat cel and stood the sprite on end.
+        // Swap the spent dive cel for the authored grounded one — but only when
+        // `dive` is still what is playing: if the dive actually landed a hit,
+        // the contact pose owns the body and must not be overwritten (LESSON #2).
+        // cel duration MATCHES proneT so the authored grounded art covers the
+        // whole time he is flagged down — a shorter cel left a gap where the
+        // generic rotated-walk fallback showed through
+        if (e.pose === "dive") { e.pose = ""; e.poseT = 0; playPose(e, "prone", e.proneT); }
+        // No rise CHAIN here on purpose: a dive expires during LIVE play, where
+        // proneT decays on the live path and he stands and rejoins on his own.
+        // The chain runner only ticks in dead-ball states, so a chain queued
+        // here just sat there and fired a stale `getup` after the whistle, long
+        // after he was already upright. LESSON #3 is satisfied by the live rise.
       }
     }
     const sp = e.spd * speedMod;
