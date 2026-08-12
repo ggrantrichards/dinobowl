@@ -1606,7 +1606,7 @@
       if (G.szn.seasonStats[s.name]) {
         // (|| 0) on BOTH sides: a season save written before `fum` existed has
         // no such key, and `undefined + n` NaN-poisons the line forever.
-        for (const f of ["passYds", "passTd", "passInt", "cmp", "att", "rushYds", "rushTd", "car", "recYds", "recTd", "rec", "tkl", "sacks", "defInt", "ff", "fum"]) t[f] = (t[f] || 0) + (s[f] || 0);
+        for (const f of ["passYds", "passTd", "passInt", "cmp", "att", "rushYds", "rushTd", "car", "recYds", "recTd", "rec", "tkl", "sacks", "defInt", "ff", "fum", "sacked", "sackYds"]) t[f] = (t[f] || 0) + (s[f] || 0);
       }
       t.games++;
       G.szn.seasonStats[s.name] = t;
@@ -4003,7 +4003,21 @@
         addStat(G.playPass.passer, "passYds", g2);
         addStat(G.playPass.receiver, "recYds", g2);
       } else if (G.carrier) {
-        addStat(G.carrier, "rushYds", g2); addStat(G.carrier, "car");
+        // A SACK IS NOT A CARRY. Both sack sites make the QB the carrier and
+        // then whistle with noSpot=false, so this block used to book every sack
+        // as a QB rushing ATTEMPT carrying the lost yardage. The effect on the
+        // data was severe and silent: over 6 bot games it turned 64 "carries"
+        // into 0 net rushing yards, because ~-7 yards per sack cancelled the
+        // real rushing gains almost exactly. Every rushing total, carry count
+        // and yards-per-play figure in the box score, the season roll-up and the
+        // balance harness was wrong, which is why no balance tuning could be
+        // trusted. Sack yardage now lands on the QB's own `sacked`/`sackYds`
+        // fields and no longer touches rushYds or car.
+        if (reason === "SACKED!") {
+          addStat(G.carrier, "sacked"); addStat(G.carrier, "sackYds", g2);
+        } else {
+          addStat(G.carrier, "rushYds", g2); addStat(G.carrier, "car");
+        }
       }
     }
 
@@ -4894,6 +4908,11 @@
         passYds: 0, passTd: 0, passInt: 0, cmp: 0, att: 0,
         rushYds: 0, rushTd: 0, car: 0, recYds: 0, recTd: 0, rec: 0,
         tkl: 0, sacks: 0, defInt: 0, ff: 0, fum: 0,
+        // A sack is neither a carry nor a pass attempt, so it gets its own two
+        // fields on the QB's line: `sacked` counts them, `sackYds` holds the
+        // (negative) yardage. `sacks` above stays what it always was — the
+        // DEFENDER's credit.
+        sacked: 0, sackYds: 0,
       };
     }
     return G.gameStats[key];
