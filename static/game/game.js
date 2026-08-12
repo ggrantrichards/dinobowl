@@ -3283,7 +3283,11 @@
     // per-play flags reset by construction — the throw latch (hasThrown/
     // canPass) must never survive into the next snap via ANY entity-reuse
     // path (owner play-test 2026-08-07: "could no longer throw at all")
-    for (const e of G.players) { e.punchedThisPlay = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; }
+    // pancakeDone joins the list for the same reason: the fullback lead-block
+    // pancake is a once-per-PLAY beat, so a latch that outlived the snap would
+    // silently downgrade it to once per GAME (LESSON #20 — a latch or
+    // accumulator model has to be reset wherever the play resets).
+    for (const e of G.players) { e.punchedThisPlay = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; }
     G.qbImprov = false;
     if (offenseIsUser()) G.snapTaught = (G.snapTaught || 0) + 1;   // coach bubble fades after 3 snaps
     const qb = G.players.find((e) => e.role === "QB");
@@ -7046,7 +7050,32 @@
           .sort((p, q2) => dist(p, c) - dist(q2, c))[0];
         if (threat && dist(threat, c) < 140) {
           moveToward(e, threat, sp, dt);
-          if (dist(e, threat) < bodyContactRange(e, threat, 2)) { threat.staggerT = 0.9; e.staggerT = 0.35; sfx.tackle(); }
+          // The fullback's pancake is a ONE-PER-PLAY beat now. It used to be a
+          // raw `threat.staggerT = 0.9; e.staggerT = 0.35;` with no latch and
+          // no str/blk/tkl input, and the two halves fed each other: the
+          // self-freeze early-returned the FB at updateEntity's stagger gate,
+          // so he skipped this branch for 0.35s and then re-ran it, while the
+          // threat filter above (`p.staggerT <= 0`) excludes the man he just
+          // froze — so he simply walked to the NEXT one. Measured by counting
+          // pancakes at this exact site over five seeded 12-play samples of
+          // hand-built lead-block geometry: up to 3 defenders frozen at once
+          // (1.75 pancakes per play on the worst seed) and 0.32-6.55s of FB
+          // self-freeze; after the latch it is at most 1 per play and 0.00s of
+          // self-freeze on every seed. Scope is narrow and worth stating
+          // plainly: `fb: true` lives only on the SIG_ARCHETYPES power_toss /
+          // tush_push, so it needs a franchise that has one, a fullback on the
+          // field, and the card to be offered — it is not an ordinary run and
+          // it cannot softlock. But it IS the marquee play the player
+          // deliberately chose, which makes it the most visible instance of the
+          // rigid-body symptom LESSON #1 was written about. The pancakeDone
+          // latch (reset per snap in snap(), beside punchedThisPlay/pressDone)
+          // keeps the spectacle exactly once, and dropping the FB's own freeze
+          // lets him keep escorting the carrier instead of re-arming.
+          if (dist(e, threat) < bodyContactRange(e, threat, 2) && !e.pancakeDone) {
+            e.pancakeDone = true;
+            threat.staggerT = Math.max(threat.staggerT || 0, 0.9);
+            sfx.tackle();
+          }
         } else moveToward(e, { x: c.x + 40, y: c.y }, sp * 0.98, dt);
         break;
       }
@@ -7070,13 +7099,50 @@
         }
         if (e.block) {
           const b2 = e.block;
-          if (b2.soarT > 0) { e.block = null; break; }   // you can't stalk-block a flying dino
+          // You can't stalk-block a flying dino. Dropping the target used to
+          // leave e.blockHold set, and blockHold is a persistent ACCUMULATOR,
+          // not a per-target timer: the cap below is
+          // clamp(0.9 + (str delta)/40, 0.45, 1.7), so a retained hold can
+          // already exceed the NEXT defender's cap and that block dies on
+          // frame one — handing a fresh defender freeT = 1.0 for a block that
+          // never happened. Verified with a hand-built rep (blockHold 0.80,
+          // target made to soar, one frame stepped): the value survived the
+          // break before this line existed, and is 0 after. Keying the
+          // accumulator to the rep is what LESSON #20 asks of an accumulation
+          // model — every detach path clears its own state.
+          if (b2.soarT > 0) { e.block = null; e.blockHold = 0; break; }
           // shadow the defender on the side between him and the ball carrier
           const ref = G.carrier || { x: xAtYd(G.losYd), y: MID };
           const side = b2.x > ref.x ? -bodyContactRange(e, b2, 1) : bodyContactRange(e, b2, 1);
           moveToward(e, { x: b2.x + side, y: b2.y }, sp * 0.95, dt);
           if (dist(e, b2) < bodyContactRange(e, b2, 2)) {
-            b2.vx *= 0.5; b2.vy *= 0.5; if (b2.staggerT <= 0) b2.staggerT = 0.12;
+            // STALK BLOCK: bump and slide, never a hard freeze. This used to
+            // read `if (b2.staggerT <= 0) b2.staggerT = 0.12`, and that guard
+            // did NOT prevent a continuous freeze — it re-stamped on every
+            // decay. buildPlayers pushes offense into G.players before defense
+            // and updateEntity walks that array in order, so the receiver
+            // re-stamped 0.12 before the defender's own update ever reached the
+            // stagger gate near the top of updateEntity (`e.staggerT -= dt;
+            // e.vx = e.vy = 0; return;`). The defender never got one free
+            // frame — which also made the velocity damp on this very line dead
+            // code. Measured on four seeded 19-play run samples: 35-59% of
+            // stalk-contact frames at exactly vx===0 && vy===0, worst unbroken
+            // pin 94 frames (1.57s), and 10-28 of every 15-39 blocked
+            // defenders held past 2 consecutive frames. buildPlayers puts
+            // WR1/WR2/WR3/TE in `runblock` on every run play, so this fired on
+            // every carry. Now the damp is live, plus a small rating-scaled
+            // nudge off the carrier's path — 8-46 px/s against a ~91 px/s top
+            // speed, a shove and not the 180px/s wall LESSON #14 calls out.
+            // Separation itself belongs to the contact solver's soft live mode:
+            // a block must cost the defender ground and tempo, not turn him
+            // into a statue that cannot spin off (LESSON #1). Post-fix the same
+            // seeds read 0-6.5% frozen frames, and blocks still WORK — the
+            // blocked defender's closest approach to the carrier is unchanged
+            // or farther, so this removes the weld, not the block.
+            b2.vx *= 0.5; b2.vy *= 0.5;
+            const shove = clamp(26 + ((e.str || 68) - (b2.str || 70)) * 0.6, 8, 46) * dt;
+            const sdx = b2.x - e.x, sdy = b2.y - e.y, sm = Math.hypot(sdx, sdy) || 1;
+            b2.x += (sdx / sm) * shove; b2.y += (sdy / sm) * shove;
             // stalk blocks obey the trench rules too: strength decides how long
             // the pin lasts, and nothing stays blocked past 1.7 seconds
             e.blockHold = (e.blockHold || 0) + dt;
