@@ -1,0 +1,122 @@
+[
+  {
+    "frame": 1,
+    "target": 0,
+    "actual": "0.000",
+    "bytes": 48094
+  },
+  {
+    "frame": 2,
+    "target": 0.083,
+    "actual": "0.083",
+    "bytes": 48105
+  },
+  {
+    "frame": 3,
+    "target": 0.166,
+    "actual": "0.166",
+    "bytes": 48082
+  },
+  {
+    "frame": 4,
+    "target": 0.249,
+    "actual": "0.249",
+    "bytes": 48067
+  },
+  {
+    "frame": 5,
+    "target": 0.333,
+    "actual": "0.333",
+    "bytes": 48044
+  },
+  {
+    "frame": 6,
+    "target": 0.416,
+    "actual": "0.416",
+    "bytes": 48050
+  },
+  {
+    "frame": 7,
+    "target": 0.499,
+    "actual": "0.499",
+    "bytes": 48152
+  },
+  {
+    "frame": 8,
+    "target": 0.582,
+    "actual": "0.582",
+    "bytes": 48117
+  },
+  {
+    "frame": 9,
+    "target": 0.665,
+    "actual": "0.665",
+    "bytes": 48115
+  },
+  {
+    "frame": 10,
+    "target": 0.748,
+    "actual": "0.748",
+    "bytes": 48093
+  },
+  {
+    "frame": 11,
+    "target": 0.832,
+    "actual": "0.832",
+    "bytes": 48089
+  },
+  {
+    "frame": 12,
+    "target": 0.915,
+    "actual": "0.915",
+    "bytes": 48010
+  },
+  {
+    "frame": 13,
+    "target": 0.998,
+    "actual": "0.998",
+    "bytes": 47983
+  },
+  {
+    "frame": 14,
+    "target": 1.081,
+    "actual": "1.081",
+    "bytes": 48063
+  },
+  {
+    "frame": 15,
+    "target": 1.164,
+    "actual": "1.164",
+    "bytes": 48063
+  },
+  {
+    "frame": 16,
+    "target": 1.247,
+    "actual": "1.247",
+    "bytes": 48016
+  },
+  {
+    "frame": 17,
+    "target": 1.331,
+    "actual": "1.331",
+    "bytes": 48009
+  },
+  {
+    "frame": 18,
+    "target": 1.414,
+    "actual": "1.414",
+    "bytes": 48041
+  },
+  {
+    "frame": 19,
+    "target": 1.497,
+    "actual": "1.497",
+    "bytes": 48040
+  },
+  {
+    "frame": 20,
+    "target": 1.58,
+    "actual": "1.580",
+    "bytes": 48045
+  }
+]

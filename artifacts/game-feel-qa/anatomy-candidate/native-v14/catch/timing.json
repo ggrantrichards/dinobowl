@@ -1,0 +1,122 @@
+[
+  {
+    "frame": 1,
+    "t": 0.059,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-001.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 2,
+    "t": 0.282,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-002.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 3,
+    "t": 0.308,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-003.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 4,
+    "t": 0.341,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-004.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 5,
+    "t": 0.392,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-005.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 6,
+    "t": 0.44,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-006.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 7,
+    "t": 0.467,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-007.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 8,
+    "t": 0.517,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-008.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 9,
+    "t": 0.598,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-009.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 10,
+    "t": 0.675,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-010.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 11,
+    "t": 0.757,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-011.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 12,
+    "t": 0.833,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-012.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 13,
+    "t": 0.924,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-013.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 14,
+    "t": 0.999,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-014.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 15,
+    "t": 1.125,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-015.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 16,
+    "t": 1.175,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-016.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 17,
+    "t": 1.233,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-017.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 18,
+    "t": 1.317,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-018.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 19,
+    "t": 1.392,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-019.png",
+    "scene": "catch"
+  },
+  {
+    "frame": 20,
+    "t": 1.474,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v14/catch/frame-020.png",
+    "scene": "catch"
+  }
+]

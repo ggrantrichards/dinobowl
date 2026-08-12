@@ -1,0 +1,65 @@
+[
+  {
+    "i": 1,
+    "requested": 0.05,
+    "actual": 0.041,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-01.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 2,
+    "requested": 0.34,
+    "actual": 0.275,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-02.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 3,
+    "requested": 0.46,
+    "actual": 0.368,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-03.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 4,
+    "requested": 0.58,
+    "actual": 0.516,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-04.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 5,
+    "requested": 0.72,
+    "actual": 0.643,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-05.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 6,
+    "requested": 0.88,
+    "actual": 0.791,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-06.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 7,
+    "requested": 1.08,
+    "actual": 1,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-07.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 8,
+    "requested": 1.32,
+    "actual": 1.233,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-08.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 9,
+    "requested": 1.5,
+    "actual": 1.401,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v14-detail-09.png",
+    "scene": "firstdown"
+  }
+]

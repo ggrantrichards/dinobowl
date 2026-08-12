@@ -1,0 +1,102 @@
+[
+  {
+    "desired": 0,
+    "time": 0.058,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-000.png"
+  },
+  {
+    "desired": 0.08315789473684211,
+    "time": 0.058,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-001.png"
+  },
+  {
+    "desired": 0.16631578947368422,
+    "time": 0.124,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-002.png"
+  },
+  {
+    "desired": 0.24947368421052632,
+    "time": 0.233,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-003.png"
+  },
+  {
+    "desired": 0.33263157894736844,
+    "time": 0.309,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-004.png"
+  },
+  {
+    "desired": 0.41578947368421054,
+    "time": 0.399,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-005.png"
+  },
+  {
+    "desired": 0.49894736842105264,
+    "time": 0.482,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-006.png"
+  },
+  {
+    "desired": 0.5821052631578948,
+    "time": 0.556,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-007.png"
+  },
+  {
+    "desired": 0.6652631578947369,
+    "time": 0.642,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-008.png"
+  },
+  {
+    "desired": 0.748421052631579,
+    "time": 0.699,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-009.png"
+  },
+  {
+    "desired": 0.8315789473684211,
+    "time": 0.816,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-010.png"
+  },
+  {
+    "desired": 0.9147368421052633,
+    "time": 0.891,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-011.png"
+  },
+  {
+    "desired": 0.9978947368421053,
+    "time": 0.973,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-012.png"
+  },
+  {
+    "desired": 1.0810526315789473,
+    "time": 1.056,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-013.png"
+  },
+  {
+    "desired": 1.1642105263157896,
+    "time": 1.151,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-014.png"
+  },
+  {
+    "desired": 1.2473684210526317,
+    "time": 1.174,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-015.png"
+  },
+  {
+    "desired": 1.3305263157894738,
+    "time": 1.3,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-016.png"
+  },
+  {
+    "desired": 1.4136842105263157,
+    "time": 1.391,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-017.png"
+  },
+  {
+    "desired": 1.496842105263158,
+    "time": 1.459,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-018.png"
+  },
+  {
+    "desired": 1.58,
+    "time": 1.555,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/final-native/interception/frame-019.png"
+  }
+]

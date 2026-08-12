@@ -1,0 +1,122 @@
+[
+  {
+    "frame": 1,
+    "t": 0.058,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-001.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 2,
+    "t": 0.115,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-002.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 3,
+    "t": 0.15,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-003.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 4,
+    "t": 0.208,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-004.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 5,
+    "t": 0.291,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-005.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 6,
+    "t": 0.366,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-006.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 7,
+    "t": 0.45,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-007.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 8,
+    "t": 0.598,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-008.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 9,
+    "t": 0.625,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-009.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 10,
+    "t": 0.683,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-010.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 11,
+    "t": 0.807,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-011.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 12,
+    "t": 0.85,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-012.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 13,
+    "t": 0.925,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-013.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 14,
+    "t": 1.008,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-014.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 15,
+    "t": 1.091,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-015.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 16,
+    "t": 1.166,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-016.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 17,
+    "t": 1.249,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-017.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 18,
+    "t": 1.323,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-018.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 19,
+    "t": 1.407,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-019.png",
+    "scene": "tackle"
+  },
+  {
+    "frame": 20,
+    "t": 1.49,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/native-v15/tackle/frame-020.png",
+    "scene": "tackle"
+  }
+]

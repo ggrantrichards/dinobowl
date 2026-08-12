@@ -1,0 +1,72 @@
+[
+  {
+    "i": 1,
+    "requested": 0.03,
+    "actual": 0.056,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-01.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 2,
+    "requested": 0.12,
+    "actual": 0.139,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-02.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 3,
+    "requested": 0.22,
+    "actual": 0.206,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-03.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 4,
+    "requested": 0.32,
+    "actual": 0.239,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-04.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 5,
+    "requested": 0.42,
+    "actual": 0.339,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-05.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 6,
+    "requested": 0.54,
+    "actual": 0.456,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-06.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 7,
+    "requested": 0.72,
+    "actual": 0.639,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-07.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 8,
+    "requested": 0.94,
+    "actual": 0.963,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-08.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 9,
+    "requested": 1.18,
+    "actual": 1.097,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-09.png",
+    "scene": "tackle"
+  },
+  {
+    "i": 10,
+    "requested": 1.48,
+    "actual": 1.397,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/tackle-sample-10.png",
+    "scene": "tackle"
+  }
+]

@@ -1,0 +1,58 @@
+[
+  {
+    "i": 1,
+    "requested": 0.05,
+    "actual": 0.061,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-01.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 2,
+    "requested": 0.3,
+    "actual": 0.231,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-02.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 3,
+    "requested": 0.44,
+    "actual": 0.374,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-03.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 4,
+    "requested": 0.56,
+    "actual": 0.496,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-04.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 5,
+    "requested": 0.72,
+    "actual": 0.665,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-05.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 6,
+    "requested": 0.92,
+    "actual": 0.792,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-06.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 7,
+    "requested": 1.18,
+    "actual": 1.101,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-07.png",
+    "scene": "firstdown"
+  },
+  {
+    "i": 8,
+    "requested": 1.44,
+    "actual": 1.367,
+    "file": "/Users/ggrantrichards/Desktop/Comp Sci/Projects/dinobowl/dinobowl/artifacts/game-feel-qa/anatomy-candidate/firstdown-v13-detail-08.png",
+    "scene": "firstdown"
+  }
+]
