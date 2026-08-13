@@ -44,9 +44,59 @@ const GAMES = Number(process.argv[2] || 2);
   key("Enter");
   stepFor(2.6);
 
-  // ---- simple but competent side-A pilot: on offense, snap and throw to the
-  // most open receiver at a sane time; on defense, let the AI cover (switch
-  // control off by never pressing keys). This isolates ENGINE balance.
+  // ---- A COMPETENT HUMAN PILOT (rewritten 2026-08-12).
+  // The previous pilot was a FLOOR, not a measurement (LESSON #16: "a scripted
+  // pilot's ceiling is not the engine's ceiling"). It produced 4.3 yds/att and 0
+  // points a game, and four separate things about it — not the engine — were
+  // dragging those numbers down:
+  //
+  //  1. IT INHERITED THE BOARD'S CHECKDOWN BIAS WHOLE. It took the first read
+  //     with risk <= 0.45 out of `cpuReadBoard`, but that board is already sorted
+  //     by `depth * 1.05 + separation * 1.22 - risk * 145`, so each 0.01 of risk
+  //     costs 1.45 YARDS of depth: a 4-yard checkdown at risk 0.02 (+1.3) outranks
+  //     a 25-yard shot at risk 0.20 (-2.75). board[0] is the SHORTEST read by
+  //     construction, so "first acceptable read" meant "shortest read", always.
+  //     The pilot now RE-RANKS every read with its own value function so that the
+  //     engine's read-selection bias shows up in the ENGINE's numbers (side B) and
+  //     not in the pilot's.
+  //  2. EVERY THROW WAS A FLAT BULLET. It only ever right-clicked, and never set
+  //     `G.slingPull`. The engine's own CPU throws a bullet only for depth <= 9 at
+  //     risk < 0.34 and otherwise LOBS with `slingPull = clamp(0.4 + depth/30,
+  //     0.45, 1.0)` so the arc matches the depth. A flat deep ball arrives LOW, and
+  //     the drop model is a low-ball TIP — so the pilot was converting its own deep
+  //     completions into tips. It now lobs with the same depth-scaled pull.
+  //  3. IT THREW AT 0.85s, before deep routes had developed. Now it holds the ball
+  //     and only fires early for a genuinely open deep shot.
+  //  4. IT PRESSED SPACE AFTER EVERY THROW, which LESSON #16 records as having
+  //     "mistimed every catch jump and made the engine look broken". Removed
+  //     entirely: AI receivers already time their own leaps via `jumpTimed`, and
+  //     that is the behaviour we actually want to measure.
+  //
+  // It also had NO pressure awareness and took ~10 sacks a game; a human throws it
+  // away instead of eating one.
+  // How much a pick costs, in yards, in the pilot's head. This is the pilot's
+  // RISK APPETITE and it is CALIBRATED, not guessed: it is tuned so the pilot
+  // lands on the owner's Retro Bowl spec of ~80% completion and an ~8% INT rate
+  // (see ROADMAP.md BALANCE TARGETS). A pilot that plays to the spec makes
+  // yards-per-attempt a clean reading of what the ENGINE offers.
+  // CALIBRATION SWEEP, seed 4242, 6 games, with the slingshot lob working:
+  //   cost  comp%  INT/att%  yds/att  yds/gm     spec: 80% comp, ~8% INT/att
+  //     25    76      6.7      6.0     180   <- CHOSEN, closest to spec
+  //     15    74     13.5      7.0     190
+  //     10    72     15.7      6.6     190
+  //      6    76     13.8      7.3     194
+  // Being bolder than 25 buys about one yard an attempt for DOUBLE the spec INT
+  // rate, so 25 it is. For reference, the old bullet-only pilot managed 76% /
+  // 7.6% / 4.3 yds/att / 152 yds-gm, so the rewrite is worth +1.7 yds/att and
+  // +28 yards a game of measurement headroom that was previously being blamed
+  // on the engine.
+  // Overridable for sweeps: PILOT_INT_COST / PILOT_RISK_CAP.
+  const INT_COST_YDS = Number(process.env.PILOT_INT_COST || 25);
+  const RISK_CAP = Number(process.env.PILOT_RISK_CAP || 0.62);
+  // expected value of a read, the way a competent player weighs it: yards you
+  // probably get, minus what a pick would cost you
+  const readValue = (r) => (r.depth || 0) * (1 - r.window.risk) - r.window.risk * INT_COST_YDS;
+
   function pilotTick() {
     const S = g.state;
     if (S === "playcall") { key("1"); return; }
@@ -58,27 +108,93 @@ const GAMES = Number(process.argv[2] || 2);
       return;
     }
     if (S !== "live") { key("Enter"); return; }
-    // live offense with the ball in the QB's hands: pick the best window
-    if (g.drive === "A" && g.phase === "drop" && g.ball.holder && g.playT > 0.85) {
-      const qb = g.ball.holder;
-      const board = dbg.cpuReadBoard ? dbg.cpuReadBoard(qb) : null;
-      if (board && board.length) {
-        const pick = board.find((r) => r.window && r.window.risk <= 0.45) ||
-          (g.playT > 2.4 && board[0].window && board[0].window.risk <= 0.6 ? board[0] : null);
-        if (pick) {
-          g.aim = pick.lead;
-          mouse("mousedown", 480, 270, 2); mouse("mouseup", 480, 270, 2);   // bullet via right-click
-        } else if (g.playT > 2.8) {
-          key("x");   // nothing there — a competent human throws it away
+    if (g.drive !== "A" || g.phase !== "drop" || !g.ball.holder) return;
+
+    const qb = g.ball.holder;
+    const board = dbg.cpuReadBoard ? dbg.cpuReadBoard(qb) : null;
+    if (!board || !board.length) return;
+
+    // is someone in his face? a human feels this and gets rid of the ball
+    const heat = g.players.some((e) => e.team === "def" && !e.blockedBy &&
+      Math.hypot(e.x - qb.x, e.y - qb.y) < 46);
+
+    const ranked = board.slice().sort((a, b) => readValue(b) - readValue(a));
+    const best = ranked[0];
+    const v = readValue(best);
+    const t = g.playT;
+
+    // Hold the ball like a human: early only for a genuinely open deep shot,
+    // then progressively less picky, and under pressure take what is there.
+    let fire = false;
+    if (heat && t > 0.6) fire = v > -4;            // pressured: anything sane
+    else if (t < 1.15) fire = v > 12;              // early: only a real shot
+    else if (t < 2.6) fire = v > 2;
+    else fire = v > -2;
+
+    // ---- windup in progress? steer it, then release.
+    // THE LOB HAS TO BE A REAL SLINGSHOT DRAG. Setting G.aim and clicking does
+    // not work: a left mousedown in the drop phase sets G.slingAnchor and
+    // NULLS G.aim (game.js onPress), and update() then recomputes
+    // `G.aim = slingAim()` every frame from the drag vector while mouse.down is
+    // true. slingAim is a catapult — `dx = anchor - mouse`, so you drag AWAY
+    // from the target — and the pull DISTANCE sets both range and arc
+    // (slingPull, which only throwLob reads; a bullet is always flat).
+    // A first attempt here fired mousedown+mouseup with a programmatic G.aim and
+    // silently threw NOTHING, because aim was null by the time onRelease ran:
+    // attempts collapsed to ~2 a game and the numbers looked like a balance
+    // result. So: drag, read back the engine's OWN computed aim, correct once,
+    // then release. No duplicated range/arc maths, so this cannot drift from the
+    // engine the way a reimplementation would.
+    if (g.__wind) {
+      const w = g.__wind;
+      const cur = g.aim;
+      if (cur && w.tries < 2) {
+        const errX = w.tx - cur.x, errY = w.ty - cur.y;
+        if (Math.hypot(errX, errY) > 12) {
+          // aim lands along the drag ray at a distance set by the pull, so
+          // scale the pull by how short/long we came in
+          const have = Math.hypot(cur.x - qb.x, cur.y - qb.y) || 1;
+          const want = Math.hypot(w.tx - qb.x, w.ty - qb.y);
+          w.pull = Math.max(20, Math.min(300, w.pull * (want / have)));
+          const u = { x: (w.tx - qb.x) / want, y: (w.ty - qb.y) / want };
+          mouse("mousemove", w.ax - u.x * w.pull, w.ay - u.y * w.pull, 0);
+          w.tries++;
+          return;
         }
       }
+      mouse("mouseup", w.mx, w.my, 0);   // release -> onRelease -> throwLob
+      g.__wind = null;
+      return;
     }
-    // time the catch jump like a human: SPACE as the ball arrives
-    if (g.drive === "A" && g.ball && g.ball.mode === "air" && !g.ball.away &&
-      g.ball.T && g.ball.t / g.ball.T > 0.8 && !g.__jumped) {
-      g.__jumped = true; key(" ");
+
+    if (fire && best.window.risk < RISK_CAP) {
+      // bullet for the short stuff, exactly the split cpuQB uses
+      const quick = best.depth <= 9 && best.window.risk < 0.34 && !heat;
+      if (quick) {
+        g.aim = best.lead;
+        mouse("mousedown", 480, 270, 2); mouse("mouseup", 480, 270, 2);   // right button = bullet
+        return;
+      }
+      // start the sling windup toward the lead point
+      const tx = best.lead.x, ty = best.lead.y;
+      const want = Math.hypot(tx - qb.x, ty - qb.y) || 1;
+      const u = { x: (tx - qb.x) / want, y: (ty - qb.y) / want };
+      // first guess: slingAim maps a ~14..274px pull onto 46px..maxRange, so
+      // start proportional and let the correction pass above finish the job
+      const pull = Math.max(20, Math.min(300, 14 + (want / 720) * 260));
+      const ax = qb.x - g.camX, ay = qb.y;
+      mouse("mousedown", ax, ay, 0);
+      // onPress may have grabbed a nearby receiver (or re-snapped); put the QB
+      // back in charge and plant the anchor ourselves
+      g.players.forEach((e) => { e.controlled = false; });
+      qb.controlled = true; g.controlled = qb;
+      g.slingAnchor = { x: ax, y: ay };
+      const mx = ax - u.x * pull, my = ay - u.y * pull;
+      mouse("mousemove", mx, my, 0);
+      g.__wind = { tx, ty, ax, ay, mx, my, pull, tries: 0 };
+      return;
     }
-    if (!g.ball || g.ball.mode !== "air") g.__jumped = false;
+    if (t > 3.0) key("x");   // nothing there — throw it away rather than eat a sack
   }
 
   const overlapSamples = [];
