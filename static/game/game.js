@@ -3458,7 +3458,7 @@
     // rainbow's danger radius grows with hang time while a sub-0.28s bullet
     // can never be broken on. The divisor charges exactly that closing
     // distance: bullets read honestly open, floaty lobs need real grass.
-    const closeR = 24 + 82 * Math.max(0, flight - 0.28);
+    const closeR = 24 + 30 * Math.max(0, flight - 0.28);
     let risk = clamp(0.56 - separation / Math.max(70, closeR * 1.55) + Math.max(0, 34 - laneGap) / 110 + placement / 150, 0, 1);
     // QA balance: a DB trailing BEHIND the receiver on a downfield throw
     // rarely erases the catch anymore (box-out at the catch point), so he
@@ -7712,14 +7712,14 @@
       };
       lead.x = clamp(lead.x, qb.x - 18, qb.x + maxRange());
       const window = assessPassWindow(qb, rec, lead, flight);
-      const depth = Math.max(0, lead.x - qb.x) / YPX;
+      const depth = (lead.x - xAtYd(G.losYd)) / YPX;
       const targetBonus = userReceiver && rec === G.controlled ? 16 : 0;
       // Separation has value, but an open 6-yard outlet beats a "maybe"
       // 25-yard throw.  This is the core fix for AI-QB interceptions.
       // QA balance: depth 0.72 → 1.05 — with coverage now lagging at route
       // breaks, an open 10-yard dig should outscore a 2-yard flat; the risk
       // term still vetoes genuine coverage
-      const score = depth * 1.05 + window.separation * 1.22 - window.risk * 145 - window.placement * 0.28 + targetBonus;
+      const score = depth * 7.5 + Math.min(window.separation, 70) * 1.22 - window.risk * 145 - window.placement * 0.28 + targetBonus;
       return { rec, lead, flight, window, depth, score };
     }).sort((a, b) => b.score - a.score);
   }
@@ -7752,7 +7752,7 @@
     // then was lobbing into in-phase coverage, the "off rip" interception
     // (owner play-test 2026-08-07). Hot-route exception: a genuinely wide-
     // open short outlet may still beat a blitz early.
-    const minHold = elite ? 0.85 : 1.0;
+    const minHold = elite ? 1.35 : 1.5;
     const beforeHold = G.playT < minHold;
 
     const board = cpuReadBoard(qb);
@@ -7771,11 +7771,11 @@
         r.score >= choice.score - 10);
       if (mover) choice = mover;
     }
-    if (beforeHold && choice && !(choice.depth <= 6 && choice.window.risk < 0.18)) choice = null;
+    if (beforeHold && choice && !(pressured && choice.depth <= 4 && choice.window.risk < 0.14)) choice = null;
     // When a player is running a receiver, feed that route if it is genuinely
     // comparable to the best read. The CPU no longer forces it into coverage.
     if (!beforeHold && preferred && preferred.window.risk <= playableLimit && (!choice || preferred.score >= choice.score - 13)) choice = preferred;
-    const mustThrow = G.playT > (elite ? 2.55 : 2.28) * diff().cpuThink || (pressured && G.playT > (elite ? 1.18 : 1.02));
+    const mustThrow = G.playT > (elite ? 2.9 : 2.7) * diff().cpuThink || (pressured && G.playT > (elite ? 1.72 : 1.6));
 
     if (choice && (choice.window.risk <= safeLimit || mustThrow && choice.window.risk <= playableLimit)) {
       // RELEASE RE-GATE: the world moved since the board was built — if the
@@ -7796,7 +7796,7 @@
     }
     // CHECKDOWN LADDER: nothing downfield under the gate — take the open
     // outlet instead of force-feeding the least-bad deep ball
-    if (!choice && !beforeHold && G.playT > (elite ? 1.3 : 1.5)) {
+    if (!choice && !beforeHold && G.playT > (elite ? 1.8 : 2.0)) {
       const dump = board.filter((r) => r.depth <= 8 && r.window.risk <= 0.30)
         .sort((a, b) => b.window.separation - a.window.separation)[0];
       if (dump) {
