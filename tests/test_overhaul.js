@@ -60,7 +60,14 @@ const SPRITES = fs.readFileSync(path.join(__dirname, "..", "static", "game", "sp
   key(" ");
   const qb = g.ball.holder;
   g.players.filter((e) => e.team === "def").forEach((e, i) => { e.x = qb.x + 410 + i * 9; e.y = 110 + i * 30; e.vx = e.vy = 0; });
-  g.playT = 1.2;
+  // 1.2 was chosen to sit just past the old `minHold` of 1.0. The A6 balance pass
+  // raised minHold to 1.5 (elite 1.35) so the CPU QB lets routes develop instead
+  // of dumping the ball at the first safe checkdown, so 1.2 is now INSIDE the
+  // hold window and the QB correctly declines to throw. Moved past the new
+  // threshold — the assertion below is about WHICH read he picks for a
+  // user-controlled receiver, not about when he is allowed to throw
+  // (LESSON #18: move the test with a comment when the design deliberately moved).
+  g.playT = 1.8;
   const reads = dbg.cpuReadBoard(qb);
   dbg.cpuQB(0.016);
   check("CPU QB identifies a safe projected window", reads.length > 0 && reads[0].window.risk < 0.40, reads[0] && reads[0].window.risk);
