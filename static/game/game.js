@@ -3521,8 +3521,30 @@
     // QA balance: lead by the ball's ACTUAL flight time (was a flat 0.35s) so
     // the receiver catches in stride instead of arriving early and idling at
     // the spot while his trail DB closes back onto his hip.
-    const rec = forceRec || pickPassTarget(G.aim);
-    const leadT = rec ? clamp(dist(qb, rec) / 430, 0.3, 0.75) * 0.9 : 0;
+    // AIM ASSIST MAY FORGIVE A NEAR MISS. IT MAY NOT OVERRULE THE PLAYER.
+    // pickPassTarget returns the nearest ELIGIBLE receiver, and eligible()
+    // excludes anyone whose state is "block" — so a stalk-blocking WR, a
+    // blocking TE or a back in protection is NOT throwable, while the aim
+    // reticle gives no hint of it. Point at one and the ball went silently to a
+    // different man. Measured by aiming EXACTLY at a receiver in clear weather
+    // (so zero scatter): errors up to 6.72 YARDS off the reticle, several of them
+    // with the man under the cursor standing completely still. Restricting the
+    // same test to throwable receivers dropped the maximum to 1.63 yards, which
+    // isolates this as the cause. That is the opposite of the zero-scatter
+    // contract — the player cannot see WHY the ball left (LESSON #19).
+    // Now the snap only holds if an eligible man is actually near the reticle;
+    // otherwise the ball goes exactly where it was pointed and falls incomplete,
+    // which is a result the player can read.
+    const SNAP_RANGE = 2.2 * YPX;
+    const snapped = forceRec || pickPassTarget(G.aim);
+    const rec = forceRec || (snapped && dist(snapped, G.aim) <= SNAP_RANGE ? snapped : null);
+    // ...and lead by the ball's REAL flight time. A bullet flies d/430 seconds
+    // (see T below), but the lead was floored at 0.3s * 0.9: a 2-yard checkdown
+    // is airborne about 0.11s and was being led 0.27s, i.e. 2.4x too far ahead.
+    // That floor was a systematic 1.2-1.7 yard miss on exactly the short throws
+    // the game leans on, and it is why a stationary or decelerating receiver
+    // watched the ball sail past his upfield shoulder.
+    const leadT = rec ? Math.min(0.75, dist(qb, rec) / 430) * 0.9 : 0;
     const tgt = rec ? { x: rec.x + rec.vx * leadT, y: rec.y + rec.vy * leadT } : { x: G.aim.x, y: G.aim.y };
     const userThrow = qb.controlled && offenseIsUser();
     let err = userThrow
