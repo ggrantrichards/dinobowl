@@ -4839,7 +4839,23 @@
     // nearly double the intent, and it was the longest beat in the game. A long
     // boot now simply looks FAST, which is what a booted kickoff should look
     // like, and flySkip() can cut it short after 0.35s either way.
-    G.kickFly = { from: { x: kk.x, y: kk.y }, to: { x: toX, y: toY }, t: 0, T: clamp(0.8 + d / 640, 0.8, 1.7), arc: clamp(d * 0.45, 80, 300), after, through: !!through };
+    let arc = clamp(d * 0.45, 80, 300);
+    if (through) {
+      // A MADE kick has to be SEEN threading the window, and the capped arc
+      // could not put it there: z = 10 + arc*k*(1-k) peaks at 85 while the
+      // drawn crossbar sits 84px above the ball's y and the plane crossing
+      // lands at k ≈ 0.78-0.87 — measured 25/35/45yd makes and PATs all
+      // crossed at z 18-22, i.e. ~70px BELOW the bar, reading as a clank off
+      // the base pad. Solve the same parabola for the height that matters:
+      // z = 118 at the upright plane puts the ball ~27px above the bar,
+      // squarely inside the lit window, agreeing with the MID±8 make the
+      // resolution already ruled (LESSON #23: the fork stays snug — only the
+      // presentation moves). Misses keep the old low arc; the 1000 cap keeps
+      // a maximum-range make on screen (peak z ≈ 250 of 296 available).
+      const planeK = clamp((xAtYd(108) - kk.x) / ((toX - kk.x) || 1), 0.1, 0.9);
+      arc = Math.min(1000, 108 / (planeK * (1 - planeK)));
+    }
+    G.kickFly = { from: { x: kk.x, y: kk.y }, to: { x: toX, y: toY }, t: 0, T: clamp(0.8 + d / 640, 0.8, 1.7), arc, after, through: !!through };
     G.ball = { mode: "kickfly", x: kk.x, y: kk.y, z: 10, holder: null };
     G.state = "kickfly";
   }
@@ -4915,7 +4931,14 @@
     const edgeKick = Math.abs(accError - meter.accHalf) < 2.5 || Math.abs(range - fgDist) < 1.2;
     const doink = good && edgeKick && Math.random() < 0.55;
     const postX = xAtYd(108);
-    const toX = good ? postX + 30 : (short ? postX - rnd(60, 140) : postX + rnd(0, 30));
+    // A made kick used to TERMINATE 30px past the plane — the ball visibly
+    // died ON the post structure instead of sailing through it (owner
+    // play-test 2026-08-14: "you never see the ball go through"). The make/
+    // miss ruling is untouched — this is only where the flight ends: a good
+    // ball now sails 150px past the posts and exits the frame, the way a
+    // real make clears the bar with room. launchKick pairs this with an arc
+    // that actually crosses the plane inside the drawn window (see there).
+    const toX = good ? postX + 150 : (short ? postX - rnd(60, 140) : postX + rnd(0, 30));
     const toY = good ? MID + rnd(-8, 8) : (short ? MID + rnd(-16, 16) : MID + (Math.random() < 0.5 ? -1 : 1) * rnd(44, 76));
     const drive0 = G.drive, losYd0 = G.losYd;
     launchKick(toX, clamp(toY, TOP + 12, BOT - 12), () => {
@@ -6663,8 +6686,33 @@
     const tired = e.stamNow < 0.55 ? (0.92 - (0.55 - e.stamNow) * 0.32) : 1;
     const longCarryFade = e === G.carrier ? clamp(((e.carryT || 0) - 2.2) * 0.05, 0, 0.18) : 0;
     const burst = (e === G.carrier && !G.playPass && (e.carryT || 0) < 1.2) ? 1.12 : 1;   // hitting the hole
+    // CATCH GATHER (owner play-test: "players don't slow down after
+    // receiving", so the defense never converges). completeCatch stamps
+    // catchT and becomeCarrier in the SAME tick, and moveToward writes
+    // velocity straight from e.spd — so a receiver at full route speed was a
+    // full-speed carrier on the very frame he possessed the ball (measured
+    // 100% of route speed at catch+0.1s), INSIDE checkTackles' 0.40s tackle
+    // grace. Untouchable AND at top speed is a double buff: the nearest
+    // defender closed only 2-9px over the first half second (5 seeded runs),
+    // which reads as teleport-YAC. The real Retro Bowl cannot have this
+    // problem — its movement is accel-based (WR 0.115 px/frame^2,
+    // RETRO_BOWL_MECHANICS.md sec 2), so possession always costs a
+    // re-acceleration beat. We set velocity directly, so the beat is an
+    // explicit deterministic ramp (LESSON #19, no dice): 55% legs at
+    // possession, full stride at +0.45s. Measured (5 seeds x 6 games): 65% of
+    // route speed at +0.1s, defenders close 11-14px in the first 0.5s,
+    // median YAC 1.8-2.7 -> 1.3-2.1yd, comp%/INT flat within seed noise.
+    // The 0.40s grace itself is untouched — the carrier is protected BECAUSE
+    // he is gathering, not on top of full speed. diveT/soarT keep their own
+    // landing physics (same guard as inGrace), and QB keeps/handoffs have no
+    // catchT, so runs never gather.
+    let gather = 1;
+    if (e === G.carrier && e.catchT != null && e.diveT <= 0 && e.soarT <= 0) {
+      const ct = G.playT - e.catchT;
+      if (ct >= 0 && ct < 0.45) gather = 0.55 + ct;
+    }
     const speedMod = G.weather.speedMod * (e.grappledT > 0 ? 0.42 : 1) * (e.diveT > 0 ? 1.9 : 1) *
-      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - longCarryFade) * (e.coldT > 0 ? 0.78 : 1) * burst;
+      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - longCarryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather;
     if (e.jukeT > 0) e.jukeT -= dt;
     if (e.diveT > 0) {
       e.diveT -= dt;

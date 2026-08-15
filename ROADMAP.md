@@ -113,6 +113,23 @@ instinct to "reduce interceptions" is tuning the one dial that is already right.
   yardage figure is a floor, not a measurement (LESSON #16). Fix the pilot before
   signing off any human-side balance number.
 
+## OWNER PLAY-TEST FINDINGS — v40, 2026-08-13 (the LESSON #6 pass, in progress)
+
+First live human findings against the deployed build. Verbatim, with status:
+
+1. **"Players don't slow down much after receiving the ball"** — no catch gather,
+   so the defence never gets a convergence window; compounds with the 0.40s grace
+   window (full speed AND untackleable). IN ANALYSIS.
+2. **"The field goal is not positioned in a way where you see the ball go through
+   it"** — made-FG flight/camera geometry never shows the ball threading the
+   uprights; the fgFlashT crossing beat exists but the visual does not land.
+   Presentation only — the make/miss ruling is owner-tuned and untouched. IN ANALYSIS.
+3. **"CPU safeties don't use their flight ability on defense to catch breakaways
+   at all"** — soar machinery (startSoar/soarT/soarCharge) exists but no CPU
+   defensive decision ever fires it; the marquee dino power is human-only by
+   omission. IN ANALYSIS — event-driven trigger on the existing breakaway
+   detection, once per play per safety, normal contact resolution, LESSON #15/#17.
+
 ## Read this before deleting anything
 
 **`AA_PLUS_PLAN.md` §3.7 says "remove legacy FILM cels sprites.js:671-992".
