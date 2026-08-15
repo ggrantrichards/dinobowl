@@ -122,7 +122,7 @@ instinct to "reduce interceptions" is tuning the one dial that is already right.
 | **A6** | Read-selection / yards-per-attempt | v39 | **DONE** (owner-approved) |
 | — | Short-throw aim accuracy | v40 | **DONE** |
 | — | Owner play-test round 1+2 (all 3 findings) | v41, v42 | **DONE** |
-| **C** | Special teams & kick input (6 items) | — | **IN PROGRESS** |
+| **C** | Special teams & kick input | v43 | **DONE** |
 
 Baseline held throughout: **293 assertions, 9 suites, 0 fail**, clean 3-game soak,
 every deploy curl-verified byte-identical to local.
@@ -138,6 +138,38 @@ grace; the three hard freezes (stalk-block frozen frames 35-59% → 0-6.5%, wors
 pin 1.57s → 0.50s; blockHold leak; FB pancake 3 defenders → 1, self-freeze
 6.55s → 0.00s); sacks no longer booked as rushing attempts; juke/stiff frame-rate
 spread 4.87x → 1.13x.
+
+### Batch C — DONE (v43-20260813)
+**C1 kick input:** two models fired on one press — the press burned the meter's
+power beat AND fired `sfx.kick` while the same held pointer accumulated a drag
+pull (measured **2 sfx.kick per kick**, two different power numbers per gesture),
+and a discarded regrip left the NEXT press kicking with a power the player never
+chose. Now `k.mode` latches one model per kick; a press only arms the gesture and
+samples the meter AT THE PRESS; `kickRelease` arbitrates tap vs pull; the loser is
+a no-op. Kick SFX moved to the actual boot (2 → 1). `onRelease` now sees the kick
+state at all — it previously bailed on anything not `"live"`, so a tap inside one
+frame was invisible. Meter oscillation / perfect window / dawdle / resolveKick
+math untouched.
+**C2 kickoff:** the beat rendered with **0 players for all 102 frames** and left
+`ball.mode = "koflight"` frozen over the first play-call card 10.5s later. Now a
+real 11-v-11 alignment (22 players, all 102 frames) and the ball resolves to
+`dead` before any card. Still no kick return (owner veto) — receiving team takes
+over at its own 25.
+**C3 spotting:** missed FG had no floor and was spotted at the LOS (los 97 miss →
+opponent at their own **3**); now spot-of-kick with a 20-yard floor. Extra points
+were staged from the TD's LOS — **measured at 18, 22, 29, 42, 57 and 72 yards**;
+now uniformly 33 (`originYd 84`), at **no conversion cost: XP 96% → 97%**.
+
+*Attribution note:* points/game moved at both probe seeds, but that is kickoff-flow
+divergence, not a nerf — C2 changes possession timing from the first snap, so a
+seeded game is a different game after it (LESSON #24). The attributable mechanism
+measurement is flat (XP 96→97%, FG rates unchanged). Two seeds cannot rule out a
+systematic effect; the kicking mechanism itself is clean.
+
+*Open owner calls from batch C:* (1) a tap now commits on RELEASE using the
+press-instant value — timing-honest, but the visual commit is ~50-80ms late; say
+the word if it feels laggy. (2) The 2.4s pregame beat in `kickoffAfterPregame` is
+still an empty field — same class as C2, not yet fixed.
 
 ### OWNER PLAY-TEST FINDINGS — v40 → all fixed in v41/v42
 
