@@ -6393,6 +6393,7 @@
         announce("bigplay", G.carrier.name);
         crowdCheer(0.5);
         if (G.qaTele) G.qaTele.push({ tag: "brk:clear", drive: G.drive });
+        cpuSoarSave(G.carrier);
       }
     }
     // check-down outlet: after his chip, the blocking back releases to the
@@ -7683,6 +7684,43 @@
     e.staggerT = 0; e.proneT = 0;         // takeoff shrugs off any contact
     G.soarSpent = { side: sideOf(e), play: G.playNo };
     sfx.juke(); sfx.roar();
+    return true;
+  }
+  // CPU SOAR SAVE (owner play-test 2026-08-13, finding #3): the CPU
+  // quetzalcoatlus safety NEVER flew — both startSoar call sites were human
+  // input (mouse release on a soar aim, SHIFT), so on a breakaway the CPU
+  // safety jogged a pursuit angle while the carrier walked in, and the wings
+  // the owner designed were cosmetic on defense. Hook the one event that
+  // means "the pursuit is beaten": the breakawayCalled latch — geometric and
+  // once per play (LESSON #15/#20), so this can never become a per-frame
+  // leash. The fastest-to-the-spot un-engaged CPU quetz spends his existing
+  // charge (no refill) to fly at an INTERCEPT POINT — the carrier led by his
+  // own velocity over the flight time, the same lead pursue() takes on foot —
+  // and the landing resolves through normal checkTackles contact, so it
+  // converts touchdowns into long gains sometimes, never scripts the takedown
+  // (LESSON #17). A human-steered safety is never auto-launched (owner
+  // keeper: playable defense, LESSON #22), and a flight that cannot beat the
+  // carrier to the spot is not attempted: a truly beaten defense stays beaten
+  // rather than wasting the meter on cinema.
+  function cpuSoarSave(c) {
+    if (!c) return false;
+    let best = null, bestT = 1e9, bestTgt = null;
+    for (const e of G.players) {
+      if (e.team === c.team || e.species !== "quetz" || e.controlled) continue;
+      if (e.blockedBy || e.grapT > 0 || e.proneT > 0 || e.staggerT > 0 || !soarReady(e)) continue;
+      const fsp = e.spd * 1.9 * (G.weather ? G.weather.speedMod : 1);
+      const maxT = 0.35 + (e.soarCharge || 0) * 1.35;
+      // two-pass intercept estimate: aim where the carrier WILL be when the
+      // wings arrive, not where he is (startSoar locks steering at takeoff)
+      let t = dist(e, c) / fsp;
+      t = clamp(dist(e, { x: c.x + c.vx * t, y: c.y + c.vy * t }) / fsp, 0.3, maxT);
+      const tgt = { x: c.x + c.vx * t, y: clamp(c.y + c.vy * t, TOP + 4, BOT - 4) };
+      if (dist(e, tgt) > fsp * maxT * 1.02) continue;   // out of wing range
+      if (ydAtX(tgt.x) >= 100) continue;                // he scores before the meet
+      if (t < bestT) { best = e; bestT = t; bestTgt = tgt; }
+    }
+    if (!best || !startSoar(best, bestTgt)) return false;
+    if (G.qaTele) G.qaTele.push({ tag: "soar:save", drive: G.drive });
     return true;
   }
   // returns TRUE only if this defender actually has a play on the ball;
