@@ -113,22 +113,52 @@ instinct to "reduce interceptions" is tuning the one dial that is already right.
   yardage figure is a floor, not a measurement (LESSON #16). Fix the pilot before
   signing off any human-side balance number.
 
-## OWNER PLAY-TEST FINDINGS — v40, 2026-08-13 (the LESSON #6 pass, in progress)
+## BATCH STATUS — what is DONE and live
 
-First live human findings against the deployed build. Verbatim, with status:
+| batch | scope | shipped | state |
+|---|---|---|---|
+| **A** | Animation & pose integrity (5 items + 3 in-kind) | v37 | **DONE** |
+| **B** | Contact physics & live feel (5 items) | v38 | **DONE** |
+| **A6** | Read-selection / yards-per-attempt | v39 | **DONE** (owner-approved) |
+| — | Short-throw aim accuracy | v40 | **DONE** |
+| — | Owner play-test round 1+2 (all 3 findings) | v41, v42 | **DONE** |
+| **C** | Special teams & kick input (6 items) | — | **IN PROGRESS** |
 
-1. **"Players don't slow down much after receiving the ball"** — no catch gather,
-   so the defence never gets a convergence window; compounds with the 0.40s grace
-   window (full speed AND untackleable). IN ANALYSIS.
-2. **"The field goal is not positioned in a way where you see the ball go through
-   it"** — made-FG flight/camera geometry never shows the ball threading the
-   uprights; the fgFlashT crossing beat exists but the visual does not land.
-   Presentation only — the make/miss ruling is owner-tuned and untouched. IN ANALYSIS.
-3. **"CPU safeties don't use their flight ability on defense to catch breakaways
-   at all"** — soar machinery (startSoar/soarT/soarCharge) exists but no CPU
-   defensive decision ever fires it; the marquee dino power is human-only by
-   omission. IN ANALYSIS — event-driven trigger on the existing breakaway
-   detection, once per play per safety, normal contact resolution, LESSON #15/#17.
+Baseline held throughout: **293 assertions, 9 suites, 0 fail**, clean 3-game soak,
+every deploy curl-verified byte-identical to local.
+
+### Batch A — DONE (v37-20260812)
+proneT rise chain (rotated-walk fallback 180/180 frames → 0); dive cel
+double-rotation; frameBobDy baselined on the standing pack (max float 12px → 0);
+catch-cue contact guard; `% 2` walk-cel clamps removed (3 sites).
+
+### Batch B — DONE (v38-20260812)
+Arrival-pool state filter; escape charges no longer burned inside the catch
+grace; the three hard freezes (stalk-block frozen frames 35-59% → 0-6.5%, worst
+pin 1.57s → 0.50s; blockHold leak; FB pancake 3 defenders → 1, self-freeze
+6.55s → 0.00s); sacks no longer booked as rushing attempts; juke/stiff frame-rate
+spread 4.87x → 1.13x.
+
+### OWNER PLAY-TEST FINDINGS — v40 → all fixed in v41/v42
+
+1. **"Players don't slow down after receiving the ball"** — FIXED v41. Receivers
+   were at **100% of route speed** the frame they possessed the ball, inside the
+   0.40s untackleable grace. Deterministic gather ramp: 55% legs at possession →
+   full stride at +0.45s, crossing ~95% exactly as the grace expires. Defenders
+   now close 11-14px in the first 0.5s (was 2-9px).
+2. **"You never see the ball go through the uprights"** — FIXED v41, and it had
+   **never once** flown through: made kicks peaked at z≈72 against a crossbar
+   ~84+, crossing ~70px BELOW the bar and dying on the posts. Arc now solved from
+   the crossing constraint (z≈115, inside the drawn window), flight ends 150px
+   past. Make/miss ruling byte-identical.
+3. **"CPU safeties never use their flight ability"** — FIXED v42. Verified true:
+   both startSoar call sites were human input, 0 defensive soars in 12 seeded
+   games. `cpuSoarSave` hooks the existing breakawayCalled latch (once per play,
+   structural), flies the fastest un-engaged CPU quetz to a led intercept point,
+   spends real charge, resolves through normal contact. 17/17 in-range breakaways
+   answered; a breakaway TD became a stopped long gain. Never auto-launches a
+   human-steered safety (measured zero fires on the controlled side).
+   *Feel knob if it reads as a leash: charge gate 0.3 → 0.6, or reach 1.02 → 0.9.*
 
 ## Read this before deleting anything
 

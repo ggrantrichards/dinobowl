@@ -4701,9 +4701,36 @@
     const kicker = roster(G.drive === "A" ? G.my : G.opp).kicker;
     G.kick = {
       kind, stage: 0, t: 0, power: 0, acc: 0, kicker, cpu: !isHuman(G.drive),
+      // WHICH INPUT MODEL OWNS THIS KICK. There are two of them — the two-beat
+      // meter (tap / SPACE / the touch KICK button) and the pull-back drag —
+      // and they used to BOTH run on one gesture: the press burned the power
+      // beat off the oscillating bar while the same held pointer accumulated a
+      // pull, so one gesture produced two different power numbers. `mode` stays
+      // null until the first real input decides (LESSON: latch the model, do
+      // not stack them); after that the loser is a no-op for the rest of the
+      // kick. `press` holds the meter value sampled at a press that has not yet
+      // been decided, and a seeded `val` keeps the first frame finite.
+      mode: null, press: null, val: 50,
       // Kickoffs are launched from the kicking side's 35, independent of the
       // previous drive's final spot.  That is important after touchdowns.
-      originYd: kind === "KO" ? 35 : G.losYd,
+      // An EXTRA POINT is snapped from a fixed spot too, and it is not the
+      // drive's LOS. This read `kind === "KO" ? 35 : G.losYd`, and touchdown()
+      // never assigns G.losYd — the author knew, because goForTwo sets
+      // `G.losYd = 98` by hand. So the XP was staged wherever the scoring PLAY
+      // started: score from the 45 and the kicker lined up at the 39 for a
+      // 68.8-yard kick while the meter plan and the HUD both said 33 (measured
+      // staged-vs-shown: +79.8 yds from the 1, +35.8 from the 45, -17.2 from the
+      // 98). A blocked XP inherited it too — the live ball started 60.3 yards
+      // from the end zone the recovery has to reach (`spotYd >= 100`). The
+      // scoring was never wrong; the picture was, which is LESSON #4 in reverse.
+      // 84 is derived, not chosen: `100 - 84 + 17 = 33` reproduces the two
+      // hard-coded 33s (kickMeterPlan and resolveKick), so geometry, meter and
+      // scoring agree WITHOUT touching G.losYd — that is the live drive spot and
+      // must keep pointing at the real ball. Measured after: staged 29.8 vs shown
+      // 33 from EVERY touchdown spot, the same -3.2 the file already carries on
+      // ordinary field goals (the unit stages 140px = 5.83 yds back while the
+      // distance model assumes 7), and a blocked XP now starts 21.3 yards out.
+      originYd: kind === "KO" ? 35 : kind === "XP" ? 84 : G.losYd,
     };
     buildKickFormation(kind);
   }
@@ -4720,14 +4747,121 @@
     // A VISIBLE kickoff (owner ask 2026-08-07: "there was no kickoff"):
     // the ball actually boots off the tee and sails through the end zone
     // on camera — still no live return (owner keeper), just the moment.
+    //
+    // WHAT WAS BROKEN: this beat used to run `G.players = []` one line before
+    // building the flight, so the 1.7s the owner asked for played over a field
+    // with NOBODY on it — no kicker, no tee, no coverage, no return unit. The
+    // comment above promised a boot; the code deleted everyone who could boot
+    // it. Worse, the flight went the wrong way: the drawing frame always points
+    // the CURRENT offense right, `G.drive` is the KICKING team here, and
+    // `xAtYd(66) -> xAtYd(-4)` runs right-to-left, i.e. backwards into the
+    // kicking team's OWN end zone (ROADMAP S8). Measured baseline: 0 players
+    // for all 102 frames of the beat, ball resting at x 144 = the left end zone.
+    //
+    // THE FIX: stand both units up in a real kickoff alignment and boot from
+    // the kicking team's own 35 toward the receiving end zone. Everything here
+    // is presentation — the whole beat lives in state "dead", where update()
+    // runs only tickDeadEntities(), so no AI ticks and no ball is ever live.
+    // Kick RETURNS remain an owner veto: deadNext still spots the receiving
+    // team at its own 25, exactly as before.
     sfx.kick(); crowdCheer(0.25);
     banner("KICKOFF", "…sails through the end zone — touchback, out at the 25", 1.6);
     G.state = "dead"; G.deadT = 1.7; G.clockStopped = true;
-    G.players = []; G.carrier = null;
-    G.koFly = { t: 0, T: 1.35, fx: xAtYd(66), fy: MID + rnd(-30, 30), tx: xAtYd(-4), ty: MID + rnd(-24, 24) };
+    const teeX = xAtYd(35);
+    buildKickoffSet(teeX);
+    // T 1.45 inside the 1.7s beat leaves the ball a quarter-second on the deck
+    // in the end zone before the whistle, instead of vanishing mid-air.
+    G.koFly = { t: 0, T: 1.45, fx: teeX, fy: MID, tx: xAtYd(104), ty: MID + rnd(-40, 40) };
     G.ball = { mode: "koflight", x: G.koFly.fx, y: G.koFly.fy, z: 12, holder: null };
-    G.camX = clamp(G.koFly.fx - W * 0.7, 0, FIELD_LEN - W);
-    G.deadNext = () => { G.koFly = null; changePossession(25); enterPlaycall(); };
+    // camera sits BEHIND the tee now that the ball travels left-to-right, so
+    // the field the kick is headed for is the part you can see.
+    G.camX = clamp(teeX - W * 0.25, 0, FIELD_LEN - W);
+    G.deadNext = () => {
+      G.koFly = null;
+      changePossession(25);
+      // The units now walk to the new line of scrimmage. Two things force this:
+      // possession flips the drawing frame (the offense always attacks right),
+      // and `teamOf()` reads G.drive — so without the side-tag swap the kicking
+      // team would suddenly be painted in the RECEIVING team's colours on the
+      // first card. Re-ranking them at the new LOS also means no screen ever
+      // renders with `G.players.length === 0`; enterPresnap's buildPlayers()
+      // replaces this holding pattern with the real formation on the snap.
+      const losX = xAtYd(G.losYd);
+      let o = 0, d = 0;
+      for (const e of G.players) {
+        e.team = e.team === "off" ? "def" : "off";
+        e.dir = e.team === "off" ? 1 : -1;
+        e.vx = 0; e.vy = 0; e.state = "idle";
+        const i = e.team === "off" ? o++ : d++;
+        e.x = losX + (e.team === "off" ? -30 - (i % 2) * 24 : 30 + (i % 2) * 24);
+        e.y = MID - 150 + (i % 11) * 30;
+      }
+      resolvePlayerContacts();
+      // ...and the ball must NEVER be handed on still in "koflight". Every other
+      // ball mode has an owner: "loose"/"air" are advanced by updateBall, "held"
+      // rides its holder, "kickfly" by updateKickFly. "koflight" is advanced
+      // ONLY by the koFly block inside the dead-state branch, so the moment the
+      // beat ended nothing moved it and the football simply hung in mid-air over
+      // the first play-call card of the game (measured: still mode "koflight",
+      // z 12, at t = 10.5s, ~1.7s after the beat). Spot it dead on the new line.
+      G.ball = { mode: "dead", x: losX, y: G.hashY || MID, z: 0, holder: null };
+      G.carrier = null; G.controlled = null;
+      enterPlaycall();
+    };
+  }
+  // The kickoff alignment itself, 22 cosmetic bodies. Deliberately
+  // self-contained rather than routed through buildKickFormation("KO"): that
+  // builder is shared with the live FG/PUNT snaps and hard-depends on a
+  // populated `G.kick`, and seeding a fake G.kick during a "dead" beat would
+  // put a non-null kick object in front of every `G.kick` reader for 1.7s.
+  // Nothing here is live, so it owns its own bodies.
+  function buildKickoffSet(teeX) {
+    const kickR = roster(G.drive === "A" ? G.my : G.opp);
+    const recvR = roster(G.drive === "A" ? G.opp : G.my);
+    const cover = kickR.defense || [];
+    const back = recvR.defense || [];
+    const SPEC = ["allo", "deinony", "trike", "stego"];
+    const pick = (list, i) => list[i % Math.max(1, list.length)] || { name: "", spd: 80 };
+    const P = [];
+    // Kicking team = "off" (teamOf maps "off" to G.drive, the kicking side):
+    // ten coverage dinos strung across the restraining line, five per side.
+    for (let i = 0; i < 10; i++) {
+      const p = pick(cover, i), lane = i < 5 ? i : i - 5;
+      const e = mkEnt("off", SPEC[i % 4], p.name || "", "GUN", p.spd || 82, { str: 74, tkl: 78 });
+      e.x = teeX - 18 - (i % 2) * 10;
+      e.y = MID + (i < 5 ? -1 : 1) * (36 + lane * 40);
+      e.state = "idle";
+      P.push(e);
+    }
+    // The kicker, a stride behind the tee. There is no authored "kick" cel in
+    // COMPACT_ACTION_KEYS, so the boot borrows the authored "throw" pack — a
+    // plant, a release at head height, then a forward follow-through, which is
+    // the closest thing in the sprite set to a leg swing. tickDeadEntities()
+    // runs the pose timer during "dead", so the follow-through actually plays.
+    const kk = mkEnt("off", "troodon", (kickR.kicker || {}).name || "", "K", 70, {});
+    kk.x = teeX - 34; kk.y = MID; kk.state = "idle";
+    playPose(kk, "throw", 0.52);
+    P.push(kk);
+    // Receiving team = "def": an eight-dino wall on its own 45, and three
+    // returners waiting in the end zone the ball is actually headed for. They
+    // stand and watch — a live run-back is an owner veto (ROADMAP keeper).
+    for (let i = 0; i < 8; i++) {
+      const p = pick(back, i);
+      const e = mkEnt("def", SPEC[(i + 1) % 4], p.name || "", "LB", p.spd || 80, { str: 76, tkl: 80 });
+      e.x = xAtYd(55) + (i % 2) * 12;
+      e.y = MID - 168 + i * 48;
+      e.state = "idle";
+      P.push(e);
+    }
+    for (let i = 0; i < 3; i++) {
+      const p = pick(back, i + 8);
+      const e = mkEnt("def", "deinony", p.name || "", "CB", p.spd || 88, { str: 70, tkl: 74 });
+      e.x = xAtYd(88 + i * 4); e.y = MID + (i - 1) * 96; e.state = "idle";
+      P.push(e);
+    }
+    G.players = P;
+    G.carrier = null; G.controlled = null; G.selCard = null;
+    resolvePlayerContacts();
   }
   // The kick meter deliberately has a clear makeable lane instead of making
   // players infer it from a percentage.  It is still a two-beat Dino Bowl
@@ -4823,12 +4957,56 @@
     // frozen field mid-game. Re-entry is now refused and val/power are pinned
     // finite, so a doubled press is simply ignored instead of fatal.
     if (!k || k.stage >= 2) return;
+    // MODE LATCH (see enterKick): once a pull has claimed the kick, SPACE and
+    // stray taps stop here instead of silently eating a meter beat behind the
+    // player's back. Otherwise this call IS the meter, so it claims the kick.
+    if (k.mode === "drag") return;
+    k.mode = "meter"; k.press = null;
     if (!Number.isFinite(k.val)) k.val = 50;
-    if (k.stage === 0) { k.power = k.val; k.stage = 1; k.t = 0; sfx.kick(); return; }
+    // The power beat LOCKS POWER — it is not the kick. sfx.kick() fired here,
+    // so every metered kick played a boot sound at the press and a second one
+    // when launchKick actually booted the ball (measured: 2 sfx.kick per kick,
+    // now 1). A short tick marks the lock; the boot stays with the boot.
+    if (k.stage === 0) { k.power = k.val; k.stage = 1; k.t = 0; beep(880, 0.05, "square", 0.045); return; }
     if (!Number.isFinite(k.power)) k.power = k.val;
     k.acc = k.val - 50; // -50..50, 0 is perfect
     k.stage = 2; k.t = 0;
     resolveKick();
+  }
+  // A press in the kick state is AMBIGUOUS: it can be the tap that stops the
+  // meter or the grab that starts a pull. It used to be treated as BOTH — it
+  // ran kickLocked immediately (burning the power beat and firing the kick
+  // sound) while the drag model kept accumulating on the same held pointer.
+  // The press now only ARMS the gesture and remembers the meter value at the
+  // instant of the press; kickRelease decides what it meant.
+  function kickPress() {
+    const k = G.kick;
+    if (!k || k.cpu || k.stage >= 2) return;
+    if (k.mode === "drag") return;                      // the pull owns this kick
+    if (k.mode === "meter") { kickLocked(); return; }   // meter owns it: press = beat
+    k.press = { val: Number.isFinite(k.val) ? k.val : 50 };
+  }
+  // ONE place decides what the end of a press meant. A pull past the regrip
+  // threshold is a DRAG kick. Anything shorter was a TAP, and a tap drives the
+  // meter with the value sampled AT THE PRESS — not at the release, which
+  // would hand the player a number he never stopped the bar on. Returns true
+  // when it resolved the kick, so updateKick can bail out of the frame.
+  function kickRelease() {
+    const k = G.kick;
+    if (!k || k.cpu || k.stage >= 2) { if (k) { k.drag = null; k.pull = 0; k.press = null; } return false; }
+    if (k.mode === "drag" && k.pull > 25) {
+      k.power = clamp(k.pull / 1.7, 5, 100);
+      k.acc = k.aimY || 0;
+      k.stage = 2; k.drag = null; k.press = null;
+      resolveKick();
+      return true;
+    }
+    k.drag = null; k.pull = 0;
+    // pulled back, then eased off short of the threshold — a regrip, and
+    // crucially it no longer costs the player a burned power beat
+    if (k.mode === "drag") { k.mode = null; return false; }
+    if (k.press) { k.val = k.press.val; k.press = null; kickLocked(); }
+    return false;
   }
   function launchKick(toX, toY, after, through) {
     const kk = (G.kick && G.kick.kickerEnt) || { x: xAtYd(G.losYd) - 140, y: MID };
@@ -4952,7 +5130,23 @@
         G.deadT = 1.5; G.deadNext = () => { changePossession(25); enterPlaycall(); };   // kickoff beat folded in
       } else {
         banner("FIELD GOAL MISSED", short ? "...it dies at the doorstep!" : fgDist + " yard attempt sails wide", 1.8);
-        G.deadT = 1.8; G.deadNext = () => { changePossession(100 - losYd0); enterPlaycall(); };
+        // A MISS IS SPOTTED AT THE KICK, NOT AT THE LINE. This handed the defense
+        // the ball at `100 - losYd0` — the line of scrimmage — so the shorter the
+        // chip shot you missed, the deeper you pinned them: measured before,
+        // los 97 -> their own 3, los 90 -> 10, los 85 -> 15. Every other
+        // special-teams outcome in this file is floored or fixed (made FG/XP 25,
+        // two-point 25, touchback 25, safety 30); the miss was the only one that
+        // ran to the goal line, which inverts the fourth-down calculus — a bad
+        // kick bought better field position than a punt.
+        // The real rule, and Retro Bowl's: takeover at the SPOT OF THE KICK,
+        // never closer to their own goal than the 20. The kick is taken 7 yards
+        // behind the LOS — the same 7 already baked into `fgDist = 100 - losYd +
+        // 17` (10 end zone + 7 holder) — so the spot is `losYd0 - 7` in our frame
+        // and `100 - (losYd0 - 7)` in theirs. Measured after: los 97 -> 20
+        // (floor), 90 -> 20 (floor), 85 -> 22, 80 -> 27, 60 -> 47, 45 -> 62.
+        // Spotting is not an owner keeper, so it follows the source (LESSON #22);
+        // the make/miss ruling, the goal fork and the meter are untouched.
+        G.deadT = 1.8; G.deadNext = () => { changePossession(Math.max(20, 100 - (losYd0 - 7))); enterPlaycall(); };
       }
       G.state = "dead";
     }, good);   // a made kick lights the uprights as the ball crosses the plane
@@ -5449,7 +5643,7 @@
       }
       return;
     }
-    if (S === "kick" && !G.kick.cpu) { kickLocked(); return; }
+    if (S === "kick" && !G.kick.cpu) { kickPress(); return; }
     if (S === "over") {   // tap = continue (box score first if it's open)
       if (G.showBox) { G.showBox = false; return; }
       onKey("enter"); return;
@@ -5600,6 +5794,10 @@
     }
   }
   function onRelease() {
+    // the kick has its own release rule (tap vs pull) and it must run even for a
+    // press/release that lands inside a single frame, which updateKick's
+    // mouse.down polling can never see
+    if (G.state === "kick") { G.slingAnchor = null; kickRelease(); return; }
     if (G.state !== "live") { G.slingAnchor = null; return; }
     if (G.soarAim && G.controlled) {
       const cq = G.controlled;
@@ -6208,7 +6406,10 @@
         const p = k.t / k.T;
         G.ball.x = k.fx + (k.tx - k.fx) * p;
         G.ball.y = k.fy + (k.ty - k.fy) * p;
-        G.ball.z = 12 + 300 * p * (1 - p);
+        // ...and it LANDS. The old profile returned to z 12 at p = 1, so the
+        // ball finished the arc still floating a ball's height above the turf.
+        // Bleeding the launch height out over the flight puts it on the deck.
+        G.ball.z = (1 - p) * 12 + 300 * p * (1 - p);
       }
       tickDeadEntities(dt);
       if (G.celebrate) updateCelebration(dt);
@@ -8380,20 +8581,18 @@
     // DRAG KICK (Retro Bowl style): pull back from the ball — pull length is
     // power, vertical offset is aim (fighting the wind) — release to kick.
     // SPACE still runs the classic two-beat meter as a keyboard fallback.
-    if (!k.cpu && k.stage < 2) {
+    if (!k.cpu && k.stage < 2 && k.mode !== "meter") {
       if (mouse.down) {
         if (!k.drag) k.drag = { x: mouse.x, y: mouse.y };
         k.pull = Math.max(0, k.drag.x - mouse.x);
         k.aimY = clamp((mouse.y - k.drag.y) * 0.45, -50, 50);
+        // past the regrip threshold the PULL claims the kick: from here the
+        // meter presses are dead and the bar reads out the pull instead
+        if (k.pull > 25) { k.mode = "drag"; k.press = null; }
       } else if (k.drag) {
-        if (k.pull > 25) {
-          k.power = clamp(k.pull / 1.7, 5, 100);
-          k.acc = k.aimY || 0;
-          k.stage = 2; k.drag = null;
-          resolveKick();
-          return;
-        }
-        k.drag = null; k.pull = 0;   // a twitch isn't a kick — regrip
+        // resolution lives in kickRelease so the event path and this polling
+        // path can never both resolve one gesture
+        if (kickRelease()) return;
       }
       // dawdle and the operation falls apart: snap goes bad, kick shanks
       if (k.t > 7 && k.stage === 0) { k.power = 22; k.acc = rnd(-45, 45); k.stage = 2; resolveKick(); return; }
@@ -8759,9 +8958,20 @@
     drawGoalpost(xAtYd(-8) - cam); drawGoalpost(xAtYd(108) - cam);
     // LOS + first down
     if (["presnap", "live", "playcall", "defcall", "dead", "kick", "qa"].includes(G.state)) {
-      const losX = xAtYd(G.losYd) - cam;
+      // The blue stripe marks THE SNAP, and a staged kick does not always snap
+      // from the drive's spot: kickoffs come off the 35 and extra points off the
+      // 84 (enterKick's originYd). Reading G.losYd here was only ever right by
+      // accident, because XPs used to be mis-staged AT the drive spot. Now that
+      // the extra point has its own origin, a goal-line touchdown would leave
+      // this stripe floating downfield of the kicker — measured on a TD from the
+      // 95: kicker at screen x 336, stripe at 740, ~17 yards adrift. Follow the
+      // kick's own origin. Field goals and punts are unaffected (their origin IS
+      // G.losYd), and the `state === "kick"` gate keeps a spent kick object from
+      // leaking into the next live play.
+      const snapYd = G.state === "kick" && G.kick && G.kick.originYd != null ? G.kick.originYd : G.losYd;
+      const losX = xAtYd(snapYd) - cam;
       cx.fillStyle = "rgba(60,120,255,.75)"; cx.fillRect(losX - 1, TOP, 3, BOT - TOP);
-      const fdX = xAtYd(Math.min(100, G.losYd + G.toGain)) - cam;
+      const fdX = xAtYd(Math.min(100, snapYd + G.toGain)) - cam;
       cx.fillStyle = "rgba(255,210,63,.85)"; cx.fillRect(fdX - 1, TOP, 3, BOT - TOP);
       // fresh set of downs: the new line of gain pulses gold for a beat
       if (G.fdFlash > 0) {
@@ -10345,7 +10555,12 @@
     }
     // down & distance plate ON the field at the line of scrimmage
     if (!G.patMode) {
-      const losX = xAtYd(G.losYd) - G.camX;
+      // Same reason as the LOS stripe: on an extra point the snap is at
+      // enterKick's fixed origin, not at the touchdown's line of scrimmage, so
+      // anchoring the plate to G.losYd would strand it ~17 yards downfield of
+      // the formation. Gated on state "kick" so a spent G.kick cannot drag the
+      // plate into the next drive.
+      const losX = xAtYd(G.state === "kick" && G.kick && G.kick.originYd != null ? G.kick.originYd : G.losYd) - G.camX;
       if (losX > -80 && losX < W + 80) {
         const txt = downText();
         cx.font = PF(10); cx.textAlign = "center";
@@ -10512,7 +10727,17 @@
     const powerStage = k.stage === 0;
     const laneStart = powerStage ? meter.powerMin : clamp(meter.accCenter - meter.accHalf, 0, 100);
     const laneEnd = powerStage ? 100 : clamp(meter.accCenter + meter.accHalf, 0, 100);
-    const val = powerStage ? k.val : (k.stage === 1 ? k.val : k.acc + 50);
+    // The cursor has to be the number the LATCHED model is actually using.
+    // During a pull that is the pull-derived power — the sine drives nothing
+    // then, and the bright bar used to sweep the AIM lane through the whole
+    // drag (measured: shown 98.05 on the aim lane while the kick went out at
+    // power 52.94). While a press is still undecided the cursor FREEZES on the
+    // value the press sampled, so a tap visibly stops the bar where the player
+    // stopped it even though the commit waits for the release.
+    const dragPower = k.mode === "drag" ? clamp((k.pull || 0) / 1.7, 5, 100) : null;
+    const val = dragPower != null ? dragPower
+      : k.press ? k.press.val
+        : powerStage ? k.val : (k.stage === 1 ? k.val : k.acc + 50);
     const by = 164;
     cx.fillStyle = "#6d241a"; cx.fillRect(bx, by, bw, 28);
     cx.fillStyle = "#2f8f47"; cx.fillRect(bx + bw * laneStart / 100, by, bw * (laneEnd - laneStart) / 100, 28);
@@ -10527,11 +10752,20 @@
     cx.fillStyle = "#ffd23f"; cx.fillRect(vx - 4, by - 5, 8, 38);
     cx.fillStyle = "#fff9d0"; cx.fillRect(vx - 1, by - 7, 2, 42);
     cx.font = PF(9); cx.fillStyle = "#f4f6f1";
-    const stageText = powerStage ? (k.kind === "KO" ? "KICK DEPTH — STOP IN THE GREEN" : "KICK POWER — STOP IN THE GREEN") : "AIM — STOP IN THE GREEN";
+    const stageText = k.mode === "drag"
+      ? (k.kind === "KO" ? "KICK DEPTH — PULL INTO THE GREEN" : "KICK POWER — PULL INTO THE GREEN")
+      : powerStage ? (k.kind === "KO" ? "KICK DEPTH — STOP IN THE GREEN" : "KICK POWER — STOP IN THE GREEN") : "AIM — STOP IN THE GREEN";
     cx.fillText(stageText, W / 2, 217);
     if (!k.cpu) {
       cx.font = PF(8); cx.fillStyle = "#9db0a4";
-      cx.fillText("PULL BACK & RELEASE TO KICK  ·  SPACE = METER " + (powerStage ? "POWER" : "AIM"), W / 2, 236);
+      // The footer advertised BOTH control schemes for the whole kick even
+      // though only one of them is live once a kick is latched. It now names
+      // the model that actually owns this kick, and only offers the choice
+      // while the choice is still open.
+      const hint = k.mode === "drag" ? "PULL BACK FOR POWER  ·  RELEASE TO KICK  ·  EASE OFF TO REGRIP"
+        : k.mode === "meter" ? "TAP OR SPACE TO STOP THE BAR  ·  " + (powerStage ? "POWER" : "AIM")
+          : "PULL BACK & RELEASE TO KICK  ·  OR TAP / SPACE FOR THE METER";
+      cx.fillText(hint, W / 2, 236);
     }
     // wind
     const wd = G.weather.wind;
