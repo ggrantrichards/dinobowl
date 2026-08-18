@@ -717,6 +717,40 @@
   const BLK_TETHER_TECH = { bull: 0.70, speed: 1.00, spin: 1.10 };
   const BLK_TETHER_RUN_MULT = 1.35;
   const BLK_COLLAPSE_LEFT = 0.18;     // pocket-collapse leaves this much grind
+  // --- RUN LANE: the designed hole, MAINTAINED (ROADMAP S4/S5).
+  // The hole has to be held open every frame, not opened once at the snap: an
+  // engaged blocker re-aims at his man's CURRENT position on every tick, so a
+  // one-time alignment change is erased within a few frames (ROADMAP failed
+  // attempt 4). RUN_LANE_HALF is the daylight the line works for on each side of
+  // the ball's line, measured to the defender's inside FACE, so a finished crease
+  // is 2 * RUN_LANE_HALF px between faces against a 26px carrier body.
+  // Swept on the blocking bench at seeds 4242/999, 160 carries each:
+  //   26 -> 1.09 / 1.33 yd, a fitting reachable hole on 0% of carries at +0.5s
+  //   34 -> 1.44 / 1.47 yd, 20-21%
+  //   42 -> 1.50 yd,        43%     <- CHOSEN
+  //   50 -> 1.52 yd,        45%     (inside the noise floor of 42)
+  //   58 -> 1.35 yd,        45%     (over-wide: the front fans past the tackle box)
+  // 42 drives a blocked man 58px — 2.4 yd — off the ball's line, which is a real
+  // reach block and still inside the 112px tackle box. Pass protection is
+  // untouched at every value (held-pocket hold 2.17-2.20s, merged engagement
+  // 1.052s) because runLaneY() returns null on anything that is not a run.
+  const RUN_LANE_HALF = 42;
+  const RUN_DRIVE_BASE = 44;          // px/sec a blk-75 lineman turns the pair
+  const RUN_DRIVE_PER_PT = 0.7;       // per point of blk over the rusher's str
+  const RUN_DRIVE_MIN = 18, RUN_DRIVE_MAX = 62;
+  const CLIMB_REACH = 168;            // 7 yd: past this a lineman cannot get there
+  // A LINEMAN ONLY CLAIMS A MAN HE CAN ACTUALLY REACH. An O-lineman runs
+  // spdPx(60..70) = 69 px/s measured; a linebacker runs 88 and a linebacker
+  // PURSUING the carrier leads him, so he is travelling DOWNFIELD at ~78 px/s
+  // while the blocker chases. A tail chase therefore never closes: measured on
+  // the blocking bench, seed 4242, 60 carries, a climbing lineman was in body
+  // contact with his claimed man on 1.9% of 5,840 climb frames, his closest
+  // approach all play was a median 61.7 px, and only 30% of carries saw a climb
+  // make contact at all -- while he stood in the crease on 1.16 of every carry
+  // frame. So the claim is capped at arm's length: inside this he is close
+  // enough to get hands on, outside it he seals the crease edge instead of
+  // jogging through the hole after a man he will never catch.
+  const CLIMB_GRASP = 46;
   // --- CPU CARRIER EVASION, as hazards per GAME-SECOND (LESSON #15).
   // The juke and the stiff-arm used bare per-FRAME probabilities (0.018 / 0.02)
   // rolled from cpuCarrier, which runs once per rendered frame and is already
@@ -766,6 +800,16 @@
   function blockHoldLeft(r) {
     if (!r.blockedBy || !r.blockFeed) return 0;
     return Math.max(0, (r.blockShedAt - (r.blockAcc || 0)) / r.blockFeed);
+  }
+  // The run lane: the y the football is actually travelling on. Pre-handoff the
+  // back is not the carrier yet, so his alignment stands in for it — which is
+  // also the ROADMAP's definition ("derived from RB alignment"). Returns null on
+  // anything that is not a run, so pass protection never sees this code path.
+  function runLaneY() {
+    if (!(G.curPlay && G.curPlay.type === "run")) return null;
+    if (G.carrier && G.carrier.team === "off") return G.carrier.y;
+    const bc = G.players.find((p) => p.team === "off" && (p.role === "RB" || p.role === "FB"));
+    return bc ? bc.y : MID;
   }
   // Shared shed check: grind-out OR tether break. Returns the cause tag.
   function blockShedCheck(r) {
@@ -6574,12 +6618,27 @@
     if (G.phase === "handoff" && G.playT > 0.35) {
       const rb = G.players.find((e) => e.role === "RB");
       becomeCarrier(rb);
-      // the double-team: nearest interior defender to the lane gets washed
-      const laneY = MID + ((G.curPlay && G.curPlay.lane) || 0) * 44;
+      // THE DOUBLE-TEAM, RE-AIMED AND SHORTENED. Two defects, both measured.
+      // (1) It washed the interior man nearest laneY = MID + lane * 44, a
+      // designed point the runner is not standing on: the back aligns at
+      // MID + 18.7 and the front four sit at MID -59.8 / -19.8 / +19.6 / +59.8,
+      // so that 18.7px offset lands inside a near-tie between the two interior
+      // men and gets settled by sub-pixel solver noise. At seed 4242 it washed
+      // the defender actually NEAREST the carrier on 18.8% of carries (17.5-19.4%
+      // across five seeds), and the washed man was the first to touch the ball
+      // only 20.6% of the time. The one lane-clearing mechanism in the build was
+      // aimed at a point the runner is not on, so it is now aimed at the ball.
+      // (2) A 0.55s freeze is far too long now that the run block drives the pair
+      // out of the lane every frame: a staggered man is released by his blocker,
+      // is excluded from the block pool, and therefore gets no drive either — a
+      // wash victim standing in the crease became an IMMOVABLE plug for a third
+      // of the play. 0.22s still buys the double-team its beat while handing him
+      // back to a blocker in time to be turned out.
+      const laneY = rb ? rb.y : MID + ((G.curPlay && G.curPlay.lane) || 0) * 44;
       const dt2 = G.players.filter((e) => e.team === "def" && (e.role === "DL" || e.role === "EDGE"))
         .sort((a, b) => Math.abs(a.y - laneY) - Math.abs(b.y - laneY))[0];
       if (dt2 && dt2.staggerT <= 0) {
-        dt2.staggerT = 0.55;
+        dt2.staggerT = 0.22;
         dt2.y += dt2.y > laneY ? 12 : -12;
       }
     }
@@ -7119,24 +7178,131 @@
           // with their hands inside, so the pair holds at grapple depth
           // (~55% of full separation), not at arm's length
           const gap = bodyContactRange(e, r2, 1) * 0.55;
+          // RUN DRIVE (ROADMAP S4 + S5). WHAT WAS BROKEN: on a run the five linemen
+          // played pass protection — a HOLD, not a drive. An engaged blocker aims at
+          // his man's CURRENT spot, so the pair parks wherever the defender chose to
+          // stand, while the defender's own blocked-rusher term in case "rush" walks
+          // him toward the football every frame. The ball is ON the lane, so a blocked
+          // pair actively homed ONTO the runner's path. Measured on the blocking bench
+          // (tests/blocking_bench.js, seed 4242, 160 carries): the widest gap the
+          // carrier could REACH — centre within 50px of his own line — was 0.0 / 4.6 /
+          // 4.1 px at +0.1 / +0.3 / +0.5s against a 26px body, and ZERO of 160 carries
+          // at any sample on any of five seeds had a hole he would fit through. A
+          // fitting hole existed on 100% of carries but sat 149 / 99 / 82 px off his
+          // line — always the box perimeter, never an interior lane. driveOutOfLane()
+          // owns the fix and the reasoning behind its shape.
+          const lane = e.team === "off" ? runLaneY() : null;
+          if (lane != null) driveOutOfLane(e, r2, lane, dt);
           moveToward(e, { x: r2.x + (e.team === "off" ? -gap : gap), y: r2.y }, sp * 1.05, dt);
           break;
         }
         if (e.engaged && G.ramp && G.ramp.ent === e.engaged) releaseBlock(e.engaged, { staggerBlocker: 0.8 });
-        const rushers = G.players.filter((p) => p.team !== e.team && p.state === "rush" && !p.blockedBy && !(p.freeT > 0) && !(G.ramp && G.ramp.ent === p));
+        // A STAGGERED man is not blockable, and leaving him in this pool was a
+        // silent grind killer. The engaged branch above releases the instant
+        // r2.staggerT > 0, but this filter only excluded blockedBy / freeT — so
+        // the moment the handoff wash staggered an interior defender, a DIFFERENT
+        // lineman re-latched him on the very next frame, the engaged branch let
+        // go again, and the pair oscillated for the whole 0.55s stagger.
+        // releaseBlock() zeroes blockAcc and every fresh latch re-rolls
+        // blockShedAt, so the Retro Bowl grind (RETRO_BOWL_MECHANICS §3) never
+        // ran on that defender at all. Measured on the blocking bench, seed 4242:
+        // wash-victim latch cycles median 13 (max 22) against a median of 1 for
+        // every other blocked defender, and wash-victim grind accPeak 0.246 vs
+        // 0.632 overall, with a frame trace showing one-frame-on / one-frame-off
+        // and the threshold re-rolled each cycle (185/165/198/175/181 work units)
+        // while the accumulator stayed pinned at 0. Run-only: heldPocket
+        // latches-per-rep was already exactly 1.00 with sd 0 over 480 reps.
+        const rushers = G.players.filter((p) => p.team !== e.team && p.state === "rush" && !p.blockedBy && !(p.freeT > 0) && !(p.staggerT > 0) && !(G.ramp && G.ramp.ent === p));
         rushers.sort((a, b) => dist(a, e) - dist(b, e));
         if (!rushers[0] || dist(rushers[0], e) > 120) {
           // Nothing is immediately in the gap: the five blockers move as a
           // *unit*.  On a pass they keep a clean U-shaped pocket around the
           // QB; on a run they climb in staggered lanes ahead of the carrier
           // instead of becoming five unrelated homing missiles.
-          const esc = G.carrier && G.carrier.team === e.team ? G.carrier : G.ball.holder;
+          // A run block is on the clock from the SNAP, not from the handoff. The
+          // carry sub-case used to require G.phase === "carry", and the handoff does
+          // not fire until G.playT > 0.35 — so for the first third of a second the
+          // free lineman ran the PASS-POCKET target (esc.x + 34 off the standing
+          // quarterback) and simply held his alignment inside the wall. Measured at
+          // seed 4242: the escort blocker did not start clearing until +0.35s and
+          // only reached his lane-edge spot at +0.82s, while first contact on the
+          // ball lands at +0.90s from the snap. The crease finished forming eighty
+          // milliseconds before the play was decided. Keying the run sub-case off
+          // runLaneY() instead gives it the whole play: the back is not the carrier
+          // yet pre-handoff, so his alignment is the lane and he is the anchor.
+          const run = runLaneY();
+          const esc = run != null
+            ? (G.carrier && G.carrier.team === e.team ? G.carrier
+              : G.players.find((p) => p.team === e.team && (p.role === "RB" || p.role === "FB")) || G.ball.holder)
+            : (G.carrier && G.carrier.team === e.team ? G.carrier : G.ball.holder);
           if (esc) {
             const slot = e.lineSlot == null ? 2 : e.lineSlot;
             const offset = e.lineOffset == null ? (slot - 2) * 32 : e.lineOffset;
-            if (G.phase === "carry" && esc === G.carrier) {
+            if (run != null) {
+              // SECOND LEVEL (ROADMAP S7). A hole has to LEAD somewhere, and nobody
+              // climbed. The receivers stalk whichever CB/S/LB is nearest THEM
+              // (case "runblock" ranks by distance to the receiver, and they align
+              // 100px+ outside), and an O-lineman could not block a linebacker at
+              // all: the block pool below filters on state === "rush" and a
+              // linebacker is in state "read". So the free lineman escorted the ball
+              // instead of blocking anyone. That cost nothing while no crease
+              // existed, which is why ROADMAP scored this at ~0 of the gap — but
+              // once the drive above opened one it became the binding constraint.
+              // Frame trace at seed 4242 with the crease open: the front four were
+              // turned out to MID -23 / -25 / +60 / +72 and the carrier reached
+              // +1.6 yd before an UNBLOCKED linebacker sitting at MID+7, 3.5 yd
+              // downfield, ended it. Adding this is worth +0.50 yd/carry (0.84 ->
+              // 1.34 median) and takes second-level defenders blocked or stalked
+              // from 43.6% to 85.4%. He takes the man nearest the BALL that no
+              // teammate has claimed, and stalks him with the receivers' own
+              // mechanism — same damp, same shove, same strength-scaled cap.
+              if (e.block && (e.block.blockedBy || e.block.staggerT > 0 ||
+                e.block.proneT > 0 || e.block.freeT > 0 || e.block.soarT > 0 ||
+                // ...or the man simply outran him. Without this the lineman keeps a
+                // claim forever: he never lets go, never arrives, and the `claimed`
+                // filter reserves that defender against every other blocker while he
+                // does it (LESSON #20 -- every detach path clears its own state).
+                dist(e.block, e) > CLIMB_GRASP * 1.6)) {
+                e.block = null; e.blockHold = 0;
+              }
+              if (!e.block) {
+                const ball = G.carrier || esc;
+                const claimed = G.players.filter((p) => p.team === e.team && p !== e && p.block)
+                  .map((p) => p.block);
+                // Nearest the BALL — not nearest the lane's y, and not nearest
+                // himself. Ranking by lane offset sent him after the free safety:
+                // traced at seed 4242 the safety sat 5px off the ball's line but 200px
+                // (8+ yd) downfield, so he chased a man he could never reach while the
+                // linebacker who made the tackle stood 17px off the line and 52px away.
+                // Measured that way: 110 climb frames, ZERO contacts. CLIMB_REACH caps
+                // it at 7 yd of the ball for the same reason.
+                const climb = G.players.filter((p) => p.team !== e.team && !p.blockedBy &&
+                  p.staggerT <= 0 && p.proneT <= 0 && p.soarT <= 0 && claimed.indexOf(p) < 0 &&
+                  (p.role === "LB" || p.role === "CB" || p.role === "S") &&
+                  p.x > ball.x - 10 && Math.abs(p.y - run) < 104 && dist(p, ball) < CLIMB_REACH &&
+                  dist(p, e) < CLIMB_GRASP);
+                climb.sort((a, b2) => dist(a, ball) - dist(b2, ball));
+                e.block = climb[0] || null;
+              }
+              if (e.block) { stalkBlock(e, e.block, sp, dt, run); break; }
               const laneX = 26 + Math.abs(slot - 2) * 9;
-              const laneY = clamp(esc.y + offset * 0.72, TOP + 18, BOT - 18);
+              let laneY = clamp(esc.y + offset * 0.72, TOP + 18, BOT - 18);
+              // A LINEMAN WITH NO MAN MUST NOT STAND IN THE HOLE. There are five
+              // blockers and usually four rushers, so at least one lineman a play
+              // runs this escort branch — and it sent him to esc.x + 26..44 (in
+              // FRONT of the ball) on esc.y + offset * 0.72, which for the guards
+              // is only 23px off the ball's own line: inside a 16px body radius
+              // of it. Once the engaged pairs started clearing the lane above, the
+              // free linemen became the entire remaining wall. Frame trace at seed
+              // 4242, HB DIVE: by +0.75s the engaged pairs had been turned out to
+              // -51 and +57 off MID while two UNENGAGED linemen sat at -9 and +40,
+              // leaving 17px of daylight against a 26px body. Hold him to the same
+              // RUN_LANE_HALF the drive works for, so an escort blocker seals the
+              // EDGE of the crease instead of plugging it.
+              const clear = RUN_LANE_HALF + bodyRadius(e);
+              const dy = laneY - run;
+              if (Math.abs(dy) < clear) laneY = run + (dy >= 0 ? clear : -clear);
+              laneY = clamp(laneY, TOP + 18, BOT - 18);
               moveToward(e, { x: esc.x + laneX, y: laneY }, sp * 0.84, dt);
             } else {
               moveToward(e, { x: esc.x + 34, y: clamp(esc.y + offset, TOP + 18, BOT - 18) }, sp * 0.72, dt);
@@ -7151,6 +7317,11 @@
           if (dist(e, rushers[0]) < bodyContactRange(e, rushers[0], 2)) {
             const r0 = rushers[0];
             e.engaged = r0; r0.blockedBy = e;
+            // back in the trench, so he is not claiming a second-level man any more
+            // (a stale e.block would reserve that defender against every other
+            // blocker via the `claimed` filter above — LESSON #20: every detach path
+            // clears its own state)
+            e.block = null; e.blockHold = 0;
             // RETRO BOWL BLOCK GRIND: no timer, no dice at contact. The
             // blocker's grade is the threshold, the rusher pours work into it
             // every frame, and per-snap variance lives in ONE threshold roll
@@ -7203,8 +7374,36 @@
           const push = clamp(((e.str || 80) - (e.blockedBy.str || 75)) * 0.9, -10, 30) + (e.rushTech === "bull" ? 15 : 0);
           if (qb2 && push !== 0) {
             const dx2 = qb2.x - e.x, dy2 = qb2.y - e.y, m2 = Math.hypot(dx2, dy2) || 1;
-            e.x += (dx2 / m2) * push * dt; e.y += (dy2 / m2) * push * dt;
-            e.blockedBy.x += (dx2 / m2) * push * dt; e.blockedBy.y += (dy2 / m2) * push * dt;
+            // BEING BLOCKED MUST IMPEDE PROGRESS TOWARD THE BALL (ROADMAP S3).
+            // WHAT WAS BROKEN: this push is the pair FIGHTING, and it is aimed at
+            // `qb2 = G.ball.holder || G.carrier` -- on a pass that is a quarterback
+            // standing still 100+px away, which is what it was written for, but on a
+            // run it is the BALL CARRIER about 36px away and moving. So a defender
+            // who had been beaten and wrapped up still tracked the runner LATERALLY,
+            // every frame, dragging his own blocker along with him. That is exactly
+            // ROADMAP's 29-of-30 finding ("the block latches and rides along to the
+            // ball") and exactly the S3 it asks for: separate "engaged and held" from
+            // "engaged and walking to the ball". It is also why the run-lane drive
+            // needed ~1s to clear a crease -- driveOutOfLane() turns the pair OUT at
+            // 18-62 px/s while this term pulled it straight back IN at up to 45.
+            // Measured on the blocking bench (tests/blocking_bench.js, seed 4242, 160
+            // carries) with the drive already in: 56.9-62.3% of first tacklers were
+            // ALREADY BLOCKED, and their grind was a median 0.27 of the way to a shed
+            // -- a man losing his rep three-to-one was still making the tackle.
+            // THE FIX: on a run the push keeps its x component and loses its y. A
+            // blocked lineman can still drive his blocker backward off the ball (that
+            // is a bull rush and it stays legible), but he cannot slide sideways to
+            // the football while another man has his hands on him. Not attempt 5 from
+            // the ROADMAP -- that cut the whole push to 15% and measured 0.74yd; the
+            // full-strength fight is intact here and only the homing is gone.
+            // Faithful to RETRO_BOWL_MECHANICS section 3, where a rusher spends his
+            // work on the GRIND and travel is what winning the grind buys him.
+            // Pass protection cannot see this: runLaneY() returns null off a run.
+            const pushLane = runLaneY();
+            const pdx = (dx2 / m2) * push * dt;
+            const pdy = pushLane == null ? (dy2 / m2) * push * dt : 0;
+            e.x += pdx; e.y += pdy;
+            e.blockedBy.x += pdx; e.blockedBy.y += pdy;
           }
           e.x += rnd(-8, 6) * dt; e.y += rnd(-8, 8) * dt;
           const shed = blockShedCheck(e);
@@ -7460,47 +7659,36 @@
           // accumulator to the rep is what LESSON #20 asks of an accumulation
           // model — every detach path clears its own state.
           if (b2.soarT > 0) { e.block = null; e.blockHold = 0; break; }
-          // shadow the defender on the side between him and the ball carrier
-          const ref = G.carrier || { x: xAtYd(G.losYd), y: MID };
-          const side = b2.x > ref.x ? -bodyContactRange(e, b2, 1) : bodyContactRange(e, b2, 1);
-          moveToward(e, { x: b2.x + side, y: b2.y }, sp * 0.95, dt);
-          if (dist(e, b2) < bodyContactRange(e, b2, 2)) {
-            // STALK BLOCK: bump and slide, never a hard freeze. This used to
-            // read `if (b2.staggerT <= 0) b2.staggerT = 0.12`, and that guard
-            // did NOT prevent a continuous freeze — it re-stamped on every
-            // decay. buildPlayers pushes offense into G.players before defense
-            // and updateEntity walks that array in order, so the receiver
-            // re-stamped 0.12 before the defender's own update ever reached the
-            // stagger gate near the top of updateEntity (`e.staggerT -= dt;
-            // e.vx = e.vy = 0; return;`). The defender never got one free
-            // frame — which also made the velocity damp on this very line dead
-            // code. Measured on four seeded 19-play run samples: 35-59% of
-            // stalk-contact frames at exactly vx===0 && vy===0, worst unbroken
-            // pin 94 frames (1.57s), and 10-28 of every 15-39 blocked
-            // defenders held past 2 consecutive frames. buildPlayers puts
-            // WR1/WR2/WR3/TE in `runblock` on every run play, so this fired on
-            // every carry. Now the damp is live, plus a small rating-scaled
-            // nudge off the carrier's path — 8-46 px/s against a ~91 px/s top
-            // speed, a shove and not the 180px/s wall LESSON #14 calls out.
-            // Separation itself belongs to the contact solver's soft live mode:
-            // a block must cost the defender ground and tempo, not turn him
-            // into a statue that cannot spin off (LESSON #1). Post-fix the same
-            // seeds read 0-6.5% frozen frames, and blocks still WORK — the
-            // blocked defender's closest approach to the carrier is unchanged
-            // or farther, so this removes the weld, not the block.
-            b2.vx *= 0.5; b2.vy *= 0.5;
-            const shove = clamp(26 + ((e.str || 68) - (b2.str || 70)) * 0.6, 8, 46) * dt;
-            const sdx = b2.x - e.x, sdy = b2.y - e.y, sm = Math.hypot(sdx, sdy) || 1;
-            b2.x += (sdx / sm) * shove; b2.y += (sdy / sm) * shove;
-            // stalk blocks obey the trench rules too: strength decides how long
-            // the pin lasts, and nothing stays blocked past 1.7 seconds
-            e.blockHold = (e.blockHold || 0) + dt;
-            const cap = clamp(0.9 + ((e.str || 68) - (b2.str || 70)) / 40, 0.45, 1.7);
-            if (e.blockHold > cap) {
-              e.blockHold = 0; e.block = null; e.staggerT = 0.5;
-              b2.staggerT = 0; b2.freeT = 1.0;   // the defender sheds and runs free
-            }
-          }
+          // shadow the defender on the side between him and the ball carrier,
+          // then stalk him. The move and the contact response now live in
+          // stalkBlock() so a climbing O-lineman uses the same three pieces; the
+          // measurements that shaped them are recorded here, where they were made.
+          // STALK BLOCK: bump and slide, never a hard freeze. This used to
+          // read `if (b2.staggerT <= 0) b2.staggerT = 0.12`, and that guard
+          // did NOT prevent a continuous freeze — it re-stamped on every
+          // decay. buildPlayers pushes offense into G.players before defense
+          // and updateEntity walks that array in order, so the receiver
+          // re-stamped 0.12 before the defender's own update ever reached the
+          // stagger gate near the top of updateEntity (`e.staggerT -= dt;
+          // e.vx = e.vy = 0; return;`). The defender never got one free
+          // frame — which also made the velocity damp on this very line dead
+          // code. Measured on four seeded 19-play run samples: 35-59% of
+          // stalk-contact frames at exactly vx===0 && vy===0, worst unbroken
+          // pin 94 frames (1.57s), and 10-28 of every 15-39 blocked
+          // defenders held past 2 consecutive frames. buildPlayers puts
+          // WR1/WR2/WR3/TE in `runblock` on every run play, so this fired on
+          // every carry. Now the damp is live, plus a small rating-scaled
+          // nudge off the carrier's path — 8-46 px/s against a ~91 px/s top
+          // speed, a shove and not the 180px/s wall LESSON #14 calls out.
+          // Separation itself belongs to the contact solver's soft live mode:
+          // a block must cost the defender ground and tempo, not turn him
+          // into a statue that cannot spin off (LESSON #1). Post-fix the same
+          // seeds read 0-6.5% frozen frames, and blocks still WORK — the
+          // blocked defender's closest approach to the carrier is unchanged
+          // or farther, so this removes the weld, not the block.
+          // stalk blocks obey the trench rules too: strength decides how long
+          // the pin lasts, and nothing stays blocked past 1.7 seconds
+          stalkBlock(e, b2, sp, dt);
         } else {
           moveToward(e, { x: e.x + 100, y: e.y }, sp * 0.9, dt);
         }
@@ -7512,7 +7700,32 @@
       }
       default: {
         // never stand frozen: drift with the play
-        if (G.carrier && G.carrier.team === e.team) { moveToward(e, { x: G.carrier.x + 30, y: e.y }, sp * 0.5, dt); }
+        if (G.carrier && G.carrier.team === e.team) {
+          // WHAT WAS BROKEN: a teammate with no assignment drifted toward
+          // { x: carrier.x + 30, y: e.y } — thirty pixels IN FRONT of the ball,
+          // on his own y, at half speed. On a handoff the quarterback keeps
+          // state "idle" (becomeCarrier deliberately skips role QB), he aligns
+          // at MID while the back aligns at MID+18.7, and their body radii sum
+          // to 30 — so their footprints already overlap at the snap. He then
+          // jogged into the runner's path and could never clear it, because he
+          // manages ~50 px/s against the back's 91.8. Measured on the blocking
+          // bench (tests/blocking_bench.js, seed 4242, 160 carries): the first
+          // body in the carrier's straight-ahead corridor was his OWN player on
+          // 100% of carries at +0.1s, +0.3s AND +0.5s — an OL 160/160 at +0.3s
+          // and the QUARTERBACK 160/160 at 10px at +0.5s — and the carrier was
+          // wedged into a teammate on 92.4% of his carry frames.
+          // THE FIX: an unassigned teammate may still run ahead of the ball,
+          // but never in the ball's path. While his body overlaps the runner's
+          // line he gives ground and steps off it at real running speed; once
+          // he is clear he resumes the old lazy drift. Nothing freezes and no
+          // speed is buffed — the solver still owns separation (LESSON #1).
+          const clear = bodyContactRange(e, G.carrier, 6);
+          const dy = e.y - G.carrier.y;
+          const inLane = Math.abs(dy) < clear;
+          const ty = inLane ? G.carrier.y + (dy >= 0 ? clear : -clear) : e.y;
+          moveToward(e, { x: G.carrier.x + (inLane ? -30 : 30), y: clamp(ty, TOP + 6, BOT - 6) },
+            sp * (inLane ? 0.9 : 0.5), dt);
+        }
         else if (G.carrier) { pursue(e, G.carrier, sp * 0.95, dt); }
         else { e.vx *= 0.85; e.vy *= 0.85; e.x += e.vx * dt; e.y += e.vy * dt; }
       }
@@ -7818,6 +8031,23 @@
           let shareA, shareB;
           if (mode === "contested" || (mode && a.team === b.team)) {
             shareA = 0.5; shareB = 0.5;
+            // A BLOCKER GETS OUT OF HIS OWN RUNNER'S WAY. Same-team traffic split
+            // the correction evenly, so the ball carrier absorbed half of every
+            // bump from his own linemen — and on a run that is not an edge case:
+            // measured on the blocking bench (seed 4242, 160 carries) the carrier
+            // is inside a teammate's body on 85-92% of his carry frames, because
+            // the hole is a 40-50px crease and five blockers are working in it. At
+            // a 2.5px overlap cap and pushFrac 0.5 an even split can cost him more
+            // than a pixel a frame, every frame — 60+ px/s of drag against a 91.8
+            // px/s top speed, applied by his OWN team. This is exactly the
+            // symmetric code LESSON #17 says hides a defense bias, so the man
+            // WITHOUT the ball yields. Nothing about firmness, the three contact
+            // modes, or the same-team grapple depth changes (LESSON #1): only who
+            // absorbs a correction that was already being applied.
+            if (mode && a.team === b.team && G.carrier) {
+              if (G.carrier === a) { shareA = 0.1; shareB = 0.9; }
+              else if (G.carrier === b) { shareA = 0.9; shareB = 0.1; }
+            }
           } else if (mode === "grapple") {
             shareA = a.team === "off" ? 0.32 : 0.68;
             shareB = 1 - shareA;
@@ -7871,6 +8101,74 @@
       // won/lost by the block AI's hold timers, tackles by the tackle check —
       // never by physics walls.
       resolveBodyContacts(players, 1, true, 0.5, "grapple");
+    }
+  }
+
+  // STALK BLOCK, shared by the receivers and by an O-lineman who has climbed to
+  // the second level: get between your man and the ball, then cost him ground and
+  // tempo without welding him in place. Lifted verbatim out of case "runblock" so
+  // there is ONE implementation of the damp + rating-scaled shove + strength-scaled
+  // hold cap. The long history of why each of those three pieces reads the way it
+  // does is documented at the call site in case "runblock"; the short version is
+  // LESSON #1 (a block costs the defender ground and tempo, it does not turn him
+  // into a statue) and LESSON #14 (the shove is 8-46 px/s against a ~91 px/s top
+  // speed — a shove, not a wall).
+  // Turn a blocked pair OUT of the run lane, moving BOTH bodies by the same
+  // amount. Moving both is the whole trick: the grapple overlap is unchanged, so
+  // the contact solver has nothing to undo and this works WITH the soft-contact
+  // contract instead of fighting it (LESSON #1). That is why it moves the number
+  // where ROADMAP attempts 1 and 2 did not — aiming through the man, then shoving
+  // the rusher alone, both of which the solver and his own pursuit simply erased
+  // (0.07 and 0.29 yd). It is applied EVERY frame off the CURRENT lane, which is
+  // what attempt 4 lacked: an engaged blocker re-aims at his man every tick, so a
+  // one-time alignment change is gone within a few frames (0.57 yd). Bounded at
+  // both ends — the turn stops as soon as the defender's inside face clears
+  // RUN_LANE_HALF, so a crease never becomes a boulevard, and the rate is blk vs
+  // str with hard px/sec limits rather than a roll (LESSON #15, LESSON #19).
+  function driveOutOfLane(blocker, man, lane, dt) {
+    const off = man.y - lane;
+    if (Math.abs(off) >= RUN_LANE_HALF + bodyRadius(man)) return;
+    // dead even: he works his man toward the side he lined up on
+    const side = off === 0 ? ((blocker.lineOffset || 0) >= 0 ? 1 : -1) : (off > 0 ? 1 : -1);
+    const drive = clamp(RUN_DRIVE_BASE +
+      ((blocker.blk || blocker.str || 75) - (man.str || 80)) * RUN_DRIVE_PER_PT,
+      RUN_DRIVE_MIN, RUN_DRIVE_MAX) * dt;
+    const y0 = man.y;
+    man.y = clamp(man.y + side * drive, TOP + 10, BOT - 10);
+    blocker.y = clamp(blocker.y + side * drive, TOP + 10, BOT - 10);
+    // Carry the tether anchor along with the drive, or the block sheds itself.
+    // blockShedCheck() measures drift from the world point where the grapple began
+    // against a ~38px run tether, and this turn moves the pair up to
+    // RUN_LANE_HALF + a body radius — so displacement the BLOCKER created was being
+    // read as the rusher escaping him, and merged run engagements ran 1.07s against
+    // a ~1.75s nominal grind. In the decoded source the tether is a distance
+    // between the two men in the grapple (RETRO_BOWL_MECHANICS §3, "a ~12px
+    // distance tether break"), not a leash to a spot on the turf, so only the
+    // rusher's OWN movement should spend it.
+    if (man.blockLatchY != null) man.blockLatchY += man.y - y0;
+  }
+
+  // Pass `lane` (the run crease) and the pair gets turned OUT of the crease once
+  // this blocker has his man, the same way the trench drive does. He still takes
+  // the shortest line TO him — trying to make him seal the crease edge instead of
+  // walling his man off measured 1.34 -> 1.09 yd/carry, because he stopped
+  // reaching his man at all. Getting the defender is worth more than the body the
+  // blocker occupies while doing it.
+  function stalkBlock(e, b2, sp, dt, lane) {
+    const ref = G.carrier || { x: xAtYd(G.losYd), y: MID };
+    const side = b2.x > ref.x ? -bodyContactRange(e, b2, 1) : bodyContactRange(e, b2, 1);
+    moveToward(e, { x: b2.x + side, y: b2.y }, sp * 0.95, dt);
+    if (dist(e, b2) >= bodyContactRange(e, b2, 2)) return;
+    b2.vx *= 0.5; b2.vy *= 0.5;
+    const shove = clamp(26 + ((e.str || 68) - (b2.str || 70)) * 0.6, 8, 46) * dt;
+    const sdx = b2.x - e.x, sdy = b2.y - e.y, sm = Math.hypot(sdx, sdy) || 1;
+    b2.x += (sdx / sm) * shove; b2.y += (sdy / sm) * shove;
+    e.blockHold = (e.blockHold || 0) + dt;
+    const cap = clamp(0.9 + ((e.str || 68) - (b2.str || 70)) / 40, 0.45, 1.7);
+    if (lane != null) driveOutOfLane(e, b2, lane, dt);
+    if (e.blockHold > cap) {
+      e.blockHold = 0; e.block = null; e.staggerT = 0.5;
+      b2.staggerT = 0; b2.freeT = 1.0;   // the defender sheds and runs free
     }
   }
 

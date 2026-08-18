@@ -11,6 +11,12 @@
 //   C. The kick boot-and-flight beat was the only dead beat with NO skip, and
 //      ran to 3.2s+ against a documented 1.7s intent. 15-17s of unskippable
 //      ball-watching per game, ~8% of total game time.
+//   G. TRENCH WARFARE (ROADMAP S10) - the run game gained ~0 yd/carry and five
+//      separate repairs each measured no better than baseline, because a blocked
+//      defender still walked to the ball and the blockers themselves filled the
+//      only crease. These are RATCHETS, not a victory lap: they lock in what is
+//      measured and they fail loudly in BOTH directions, because the owner's
+//      standard is that a run game gaining 8 is as broken as one gaining 0.
 //   D. Action packs shipped DEAD CELS — `shoved` had frames 2 and 3 pixel-identical
 //      in all 11 species, and `tackled`'s first two cels were near-identical
 //      uprights, so the whole upright->horizontal rotation snapped in one step.
@@ -469,6 +475,230 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
   check("F16 non-franchise modes drop the season, not just the career",
     (SRC.split("G.career = null; G.szn = null").length - 1) +
     (SRC.split("G.szn = null; G.selectFor").length - 1) >= 5);
+
+
+  // ---------------------------------------------------------------------------
+  // G. TRENCH WARFARE REGRESSION GATES (ROADMAP S10)
+  //
+  // WHY THESE EXIST. The run game gained ~0.0 yd/carry (measured: median -0.06 on
+  // tests/blocking_bench.js at seed 4242, 160 carries, reproduced on five seeds)
+  // and ROADMAP records FIVE consecutive failed repairs, each judged on ~30
+  // carries - a sample whose noise floor is 0.32 yd, i.e. as large as the effect
+  // being argued about. Two mechanisms were genuinely broken; both are fixed and
+  // both get a lock here:
+  //   1. A blocked defender kept homing on the ball. The blocked-rusher push in
+  //      case "rush" aims at `G.ball.holder || G.carrier`; on a pass that is a
+  //      stationary QB (which is what it was written for), but on a run it is the
+  //      ball carrier ~36px away, so a defender who had already lost his rep
+  //      still tracked the runner LATERALLY and dragged his blocker along. That
+  //      is ROADMAP's "in 29 of 30 forced runs the first defender to reach him is
+  //      a DL who had ALREADY been blocked" finding. Measured 100% of first
+  //      tacklers already blocked at baseline; 8-11% now.
+  //   2. The blockers were the wall. An O-lineman runs 69 px/s against a
+  //      linebacker's 88, and a linebacker PURSUING the carrier leads him, so he
+  //      travels downfield at ~78 - a tail chase never closes. A lineman who
+  //      "climbed" to the second level therefore never arrived (1.9% of 5,840
+  //      climb frames in body contact, median closest approach 61.7px) and stood
+  //      in the crease instead, on 1.16 of every carry frame. A hole the carrier
+  //      would FIT through existed on 0% of carries at baseline; 76-78% now.
+  //
+  // A gate asserting the 4-5 yd/carry TARGET band would be red today, and one
+  // asserting that ~1.3 is correct would be LESSON #18 (enshrining dead design).
+  // So the bands below are deliberately WIDE: they catch a regression back into
+  // the ~0.0 trench and they catch a runaway, and they say nothing at all about
+  // whether the target band has been reached. It has not - see ROADMAP.
+  //
+  // HOW THE PLAYS ARE STAGED, and this part is load-bearing. An earlier draft of
+  // this section picked its run off the LIVE callsheet with
+  // `callsheet.findIndex((p) => p.type === "run")`. That is wrong twice over: the
+  // sheet is mostly pass cards, so most trials were skipped outright, and the
+  // "run" it did find was whatever trick or signature card happened to be
+  // offered - SWEEP PASS (which leaks the receivers downfield at 0.9s and freezes
+  // the fooled DBs on purpose) or MONO BOWL TOSS. Measured that way the gates
+  // read 100% blocked-tacklers and 0% creases, i.e. the BASELINE numbers, purely
+  // because it was never measuring an ordinary run. So this mirrors
+  // tests/blocking_bench.js instead: synthetic HB DIVE / HB SWEEP calls fed
+  // through dbg.choosePlay, with the defensive front pinned per trial. The
+  // buildPlayers() re-call after setting G.defCall is the same path audible()
+  // uses to repoint a formation at the line, not a poke at private state.
+  // ---------------------------------------------------------------------------
+  {
+    const YPX = 24, FIELD_X0 = 10 * YPX;
+    const ydAtX = (x) => (x - FIELD_X0) / YPX;
+    const bodyRange = dbg.bodyContactRange;
+    const RUN_CALLS = [
+      { name: "HB DIVE", type: "run", tags: ["run", "short"], lane: 0 },
+      { name: "HB SWEEP UP", type: "run", tags: ["run"], lane: -1 },
+      { name: "HB SWEEP DOWN", type: "run", tags: ["run"], lane: 1 },
+    ];
+    const DEF_CALLS = [
+      { name: "MAN 2 HIGH", rush: 4, man: true, tags: ["balanced"] },
+      { name: "COVER 2 ZONE", rush: 4, man: false, tags: ["balanced"] },
+      { name: "ZONE 3 DEEP", rush: 3, man: false, tags: ["deep"] },
+      { name: "MAN BLITZ", rush: 5, man: true, tags: ["blitz", "short"] },
+    ];
+    // Pinned exactly like the bench, for the same reasons: weather scales SPEED
+    // (speedMod), the DYNAMIC difficulty row is rewritten in place mid-run off
+    // the win/loss ladder, and cpuChooseDef scouts G.recentOff - so an unpinned
+    // suite calling 40 straight runs would face a different defense on carry 40
+    // than on carry 1. Every one of those is a knob that moves yards.
+    const pinRun = () => {
+      g.diff = 1; g.humanB = false; g.playDefense = false; g.coachMode = true;
+      g.practice = false; g.patMode = false; g.ot = false; g.returnPlay = null;
+      g.quarter = 1; g.clock = 3600; g.score.A = 0; g.score.B = 0;
+      g.rampage.A = 0; g.rampage.B = 0; g.touchMove = null;
+      g.weather = { type: "CLEAR", wind: { x: 0, y: 0 }, catchMod: 0, speedMod: 1,
+        fumbleMod: 0, kickMod: 0, temp: 72, month: "SEP" };
+    };
+    const gains = [], blockedTackler = [], creaseFits = [];
+    let frozenRuns = 0, worstFrozen = 0, carriesRun = 0, contactFrames = 0;
+    for (let t = 0; t < 36; t++) {
+      g.state = "dead"; g.deadT = 0; g.deadNext = null; g.half = null;
+      g.replay = null; g.celebrate = null; g.ramp = null;
+      g.drive = "A"; g.losYd = 20; g.down = 1; g.toGain = 10;
+      pinRun();
+      dbg.enterPlaycall(); stepFor(0.25);
+      if (g.state !== "playcall") continue;
+      dbg.choosePlay(RUN_CALLS[t % RUN_CALLS.length], false);
+      for (let j = 0; j < 8 && g.state !== "presnap"; j++) step(16.7);
+      if (g.state !== "presnap") continue;
+      g.defCall = DEF_CALLS[t % DEF_CALLS.length];
+      dbg.buildPlayers();
+      const losYd0 = g.losYd;
+      key(" ");
+      if (g.state !== "live") continue;
+      const everBlocked = new Map();
+      const frozenStreak = new Map();
+      const lastPos = new Map();
+      let carrier = null, tackler = null, lastX = null, fit = 0;
+      while (g.state === "live" && g.playT < 12) {
+        step(16.7);
+        for (const e of g.players) {
+          if (e.team !== "def") continue;
+          if (e.blockedBy) everBlocked.set(e, true);
+          // LESSON #1 / P0-2: a block must cost a defender ground and tempo, not
+          // weld him in place. A previous batch measured 35-59% of STALK-CONTACT
+          // frames at exactly vx===0 && vy===0, worst unbroken pin 94 frames
+          // (1.57s), because the stalk re-stamped staggerT on every decay and the
+          // defender never got one free frame. Three things keep this gate honest
+          // rather than merely loud, and each was a false positive I measured:
+          //   - It watches POSITION, not vx/vy. A GRAPPLED rusher legitimately has
+          //     stale zero velocity: case "rush" takes the `if (e.blockedBy)`
+          //     branch, moves him with `e.x += ...` / `e.y += ...` and breaks
+          //     without ever assigning vx/vy. Scoring him on velocity flagged 2430
+          //     "pins" on the PRISTINE baseline, which has no such weld - the
+          //     signal was entirely my detector.
+          //   - Only STALK targets count, which is what the original measurement
+          //     was about. The grapple is deliberately a locked ride
+          //     (RETRO_BOWL_MECHANICS section 3), so a blocked man moving slowly
+          //     inside it is the design, not a defect.
+          //   - A staggerT freeze is itself a DESIGNED mechanic (the handoff
+          //     double-team wash, the sweep-pass sell), so a staggered man is not a
+          //     weld either. Same for prone / soaring / diving.
+          const stalked = g.players.some((pl) => pl.team !== e.team && pl.block === e);
+          if (!stalked || e.staggerT > 0 || e.proneT > 0 || e.soarT > 0 || e.diveT > 0) {
+            frozenStreak.set(e, 0); lastPos.set(e, e.x + "," + e.y);
+            continue;
+          }
+          contactFrames++;
+          const posKey = e.x + "," + e.y;
+          if (lastPos.get(e) === posKey) {
+            const n = (frozenStreak.get(e) || 0) + 1;
+            frozenStreak.set(e, n);
+            if (n > worstFrozen) worstFrozen = n;
+            if (n > 6) frozenRuns++;
+          } else frozenStreak.set(e, 0);
+          lastPos.set(e, posKey);
+        }
+        if (!carrier && g.phase === "carry" && g.carrier) carrier = g.carrier;
+        const c = g.carrier;
+        if (c) lastX = c.x;
+        if (c && g.phase === "carry") {
+          if (!tackler) {
+            const hit = g.players.find((pl) => pl.team === "def" &&
+              Math.hypot(pl.x - c.x, pl.y - c.y) < bodyRange(pl, c, 2));
+            if (hit) tackler = hit;
+          }
+          // THE CREASE: the widest y-interval ahead of him that no body occupies,
+          // measured against his 26px body DIAMETER and only counted within 60px
+          // of his own line, because a hole he cannot reach is not a hole. This is
+          // the metric that read 0.0 / 4.6 / 4.1 px at +0.1 / +0.3 / +0.5s at
+          // baseline - no lane existed by construction, on any of five seeds.
+          if (!fit && g.playT > 0.45 && g.playT < 0.8) {
+            const ys = g.players.filter((pl) => pl !== c && pl.x > c.x - 20 &&
+              pl.x < c.x + 100 && Math.abs(pl.y - c.y) < 60)
+              .map((pl) => pl.y).sort((a, b) => a - b);
+            let cur = c.y - 60;
+            for (const y of ys.concat([c.y + 60])) {
+              if (y - 16 - cur >= 26) { fit = 1; break; }
+              cur = Math.max(cur, y + 16);
+            }
+          }
+        }
+      }
+      if (!carrier || carrier.role !== "RB" || lastX == null) continue;
+      if (["SACKED!", "FUMBLE!", "INTERCEPTED!"].includes((g.lastDead && g.lastDead.reason) || "")) continue;
+      carriesRun++;
+      gains.push(ydAtX(lastX) - losYd0);
+      creaseFits.push(fit);
+      if (tackler) blockedTackler.push(everBlocked.get(tackler) ? 1 : 0);
+    }
+    const med = (xs) => {
+      const a = xs.slice().sort((x, y) => x - y);
+      return a.length ? a[(a.length - 1) >> 1] : null;
+    };
+    const share = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+    const medGain = med(gains);
+    const blkShare = share(blockedTackler), fitShare = share(creaseFits);
+    check("G0 the gate sampled real RB carries off ordinary run calls",
+      carriesRun >= 20, carriesRun + " carries");
+    // FLOOR: baseline was a median of -0.06 yd over a 160-carry bench and +0.05
+    // yd/carry over six real bot games. A median at or under 0.4 means the trench
+    // has closed back up. CEILING: the owner's standard is that "a run game
+    // gaining 8 is as broken as one gaining 0", so this fails upward too. Neither
+    // bound is a claim that the 4-5 target is met - measured median here is ~1.3
+    // on the bench (mean ~1.65), and ~0.3-0.6 in real bot games.
+    check("G1 the run game is out of the ~0.0 trench (median > 0.4 yd/carry)",
+      medGain != null && medGain > 0.4,
+      "median " + (medGain == null ? "n/a" : medGain.toFixed(2)) + " yd over " + gains.length);
+    check("G2 the run game has NOT run away (median < 5.5 yd/carry)",
+      medGain != null && medGain < 5.5,
+      "median " + (medGain == null ? "n/a" : medGain.toFixed(2)) + " yd");
+    check("G3 a BLOCKED defender is no longer the man who makes the tackle (< 45%)",
+      blkShare != null && blockedTackler.length >= 10 && blkShare < 0.45,
+      (blkShare == null ? "n/a" : (100 * blkShare).toFixed(1) + "%") + " of " + blockedTackler.length);
+    check("G4 a reachable crease exists on a real share of carries (> 25%)",
+      fitShare != null && creaseFits.length >= 10 && fitShare > 0.25,
+      (fitShare == null ? "n/a" : (100 * fitShare).toFixed(1) + "%"));
+    check("G5 a stalk-blocked defender is never welded in place (LESSON #1, P0-2)",
+      frozenRuns === 0 && contactFrames > 200,
+      frozenRuns + " pins over 6 frames, worst streak " + worstFrozen +
+      ", over " + contactFrames + " stalk-contact frames");
+  }
+  // PASS PROTECTION IS INSULATED BY CONSTRUCTION, not merely by measurement.
+  // Every run-only trench mechanism is gated on runLaneY(), which returns null
+  // unless G.curPlay.type === "run" - so driveOutOfLane, the escort run branch,
+  // the second-level climb and the blocked-rusher lateral-homing cut are all
+  // unreachable on a dropback. test_batch3 #6 owns the live 0.80-2.0s hold band;
+  // these guard the gate that keeps that band insulated, because an edit to
+  // runLaneY() is the one change that could silently expose protection to all of
+  // it without any pass assertion going red.
+  check("G6 runLaneY gates the run-only trench work on a run play type",
+    /function runLaneY\(\)\s*\{[\s\S]{0,200}?G\.curPlay\.type === "run"[\s\S]{0,60}?return null;/.test(SRC));
+  check("G7 the blocked-rusher push drops only its LATERAL term, and only on a run",
+    SRC.includes("const pushLane = runLaneY();") &&
+    SRC.includes("const pdy = pushLane == null ? (dy2 / m2) * push * dt : 0;") &&
+    SRC.includes("const pdx = (dx2 / m2) * push * dt;"));
+  // The drive is a SHOVE, not the 180px/s wall LESSON #14 calls out, and it
+  // cannot run away: it stops the moment the defender's inside face clears
+  // RUN_LANE_HALF, and its rate is a strength differential clamped at both ends
+  // rather than a per-frame roll (LESSON #15, LESSON #19).
+  check("G8 the run drive stays bounded at both ends",
+    SRC.includes("if (Math.abs(off) >= RUN_LANE_HALF + bodyRadius(man)) return;") &&
+    SRC.includes("RUN_DRIVE_MIN, RUN_DRIVE_MAX"));
+  check("G9 a lineman claims a second-level man only within reach, and releases when outrun",
+    SRC.includes("dist(p, e) < CLIMB_GRASP)") &&
+    SRC.includes("dist(e.block, e) > CLIMB_GRASP * 1.6"));
 
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
