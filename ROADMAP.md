@@ -192,6 +192,99 @@ still an empty field — same class as C2, not yet fixed.
    human-steered safety (measured zero fires on the controlled side).
    *Feel knob if it reads as a leash: charge gate 0.3 → 0.6, or reach 1.02 → 0.9.*
 
+## TRENCH WARFARE — OL vs DL, the AAA rewrite (owner-directed 2026-08-13)
+
+The run game gains ~0 yards and I failed to fix it in five separate attempts, each
+aimed at a different layer and each measured as no better than baseline. This
+section records the diagnosis, why each attempt failed, and the subtask
+decomposition that follows from the evidence. Read it before touching case "block"
+or case "rush".
+
+### What is measured and certain
+
+- The back is NOT the problem: he reaches full speed (102 vs a 91 top) and moves
+  forward on 98% of frames.
+- He is contacted 0.2-0.3s after a handoff taken 1.5yd deep, and gains 1.05yd.
+- In 29 of 30 forced run plays the first defender to reach him is a DL **who had
+  already been blocked**. Blocking is therefore COSMETIC with respect to
+  penetration -- the block latches and rides along to the ball.
+- The five OL sit 32px apart with ~14px body radii: about **4px of daylight**. The
+  line is a solid ~140px wall. No lane exists by construction.
+- Only receivers and the TE ever get a run-specific state ("runblock"). The OL stay
+  in case "block", which is pass protection -- a HOLD, not a drive.
+- Pass protection separately measures: rushers engaged 52.9% of rush-frames, median
+  engagement 0.65s against a nominal ~1.3s grind, and 39.6% of rush-frames are a
+  rusher running FREE post-shed. Retro Bowl's line, per the decoded source,
+  "virtually always wins the mutual grind" and gives only to a shed or a ~12px
+  tether break.
+
+### The five failed attempts (do not repeat these)
+
+1. Blocker aims THROUGH his man on runs -> carrier 1.05 -> 0.07yd. The contact
+   solver caps per-frame correction and enforces an equilibrium overlap, so
+   pressing into a defender cannot move him; it only parks the blocker in the lane.
+2. Explicit strength-scaled positional shove on the rusher -> 0.29yd. Undone by the
+   solver and by the rusher's own pursuit speed.
+3. Gap derived from RB alignment + carrier aims at it + OL lane-discipline sort ->
+   0.67yd, and own-traffic ROSE 48% -> 78%: aiming him at a gap that is 4px wide
+   just runs him into the two men flanking it.
+4. Step the flanking linemen aside at the snap to widen the gap -> 0.57yd.
+   **Why it failed, and this is the key insight: engaged blockers run
+   moveToward(rusher) EVERY FRAME, so the line re-converges and a one-time
+   alignment change is erased within a few frames. A lane must be MAINTAINED.**
+5. Cut the pass-rush `push` to 15% on runs (blocked rushers advance toward the ball
+   at `push` px/s, and on a run the ball is only ~36px away) -> 0.74yd.
+
+### Subtasks, in dependency order
+
+**S1 MEASUREMENT FIRST.** A real blocking instrument, because ad-hoc 30-play probes
+produced numbers noisy enough that attempts 1-5 were arguably indistinguishable.
+Needs: seeded yds/carry DISTRIBUTION (median + p90, not mean), time-to-pressure,
+sack rate as a share of dropbacks, hole width over time, pair displacement, and
+first-tackler role + whether he was blocked. Nothing downstream is trustworthy
+without this.
+
+**S2 ASSIGNMENT MODEL.** Replace "nearest unengaged rusher" globally -- which clumps
+all five blockers on one threat -- with per-play-type assignment: gap/lane
+responsibility on runs, inside-out pocket integrity on passes.
+
+**S3 PENETRATION CONTROL.** Being blocked must impede progress toward the ball.
+Separate "engaged and held" from "engaged and walking to the ball" (the 29/30
+finding). This is the single highest-value subtask.
+
+**S4 LANE MAINTENANCE.** The designed hole, derived from RB alignment, must survive
+per-frame re-convergence -- bias the flanking blockers' target continuously, do not
+move them once at the snap.
+
+**S5 DISPLACEMENT / DRIVE.** Run blocks should move defenders off the ball
+(currently ~0.6yd) via a bounded, strength-scaled mechanism that respects the
+solver's soft-contact contract (LESSON #1) rather than fighting it.
+
+**S6 SHED FIDELITY.** Attribute the 1.3s nominal vs 0.65s measured gap (per-snap
+jitter, technique feed multipliers, the tether, the derived OL blk rating) and make
+a shed read as a MOVE rather than a timer expiring.
+
+**S7 SECOND LEVEL.** Nobody blocks the linebackers; receivers stalk-block DBs. A
+hole must lead somewhere, so someone has to climb.
+
+**S8 CARRIER VISION.** cpuCarrier defaults to `ty = e.y` -- dead straight from
+alignment. He needs to aim at the hole, then read the second level.
+
+**S9 MAX PROTECT.** Retro Bowl's nTEblockers raises every OL's strength by 0.85 and
+limit by 27.5; ours gives a blocking TE no line effect at all, so keeping him in is
+not a decision.
+
+**S10 REGRESSION GATES.** Permanent assertions: test_batch3 #6's pass-protection
+hold band must hold (it uses freshPassPlay, so it is insulated from run changes),
+plus new bands for sack rate, yds/carry, and no rigid freezes.
+
+### Hard constraints for all of it
+
+The contact solver's three-mode system and the firmness rules are DO-NOT-TOUCH
+(LESSON #1: firm only at presnap / ball-in-air / loose-ball). No per-frame
+probability rolls (LESSON #15). No dice at moments of truth (LESSON #19). A run game
+gaining 8yd/carry is as broken as one gaining 0 -- the target band is 4-5.
+
 ## Read this before deleting anything
 
 **`AA_PLUS_PLAN.md` §3.7 says "remove legacy FILM cels sprites.js:671-992".
