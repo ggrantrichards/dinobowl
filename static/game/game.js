@@ -1777,6 +1777,22 @@
     }
     if (p.round >= 3) { // won the Dino Bowl!
       G.szn.phase = "done"; G.szn.champion = G.szn.team;
+      // WHAT WAS BROKEN: THE CHAMPIONSHIP WAS SILENT. Winning the Dino Bowl set
+      // two fields and returned — no confetti, no flash, no cheer, no card. The
+      // single biggest moment the game has shipped less payoff than a first
+      // down, which gets a flash, a cheer and a celebration pose.
+      // This runs from gameOver()'s onGameOver hook, so the state is "over":
+      // drawOver() paints a 55%-opacity card over the LIVE FIELD and
+      // updateParticles/drawWeatherFX both still run there, so confetti really
+      // does rain over the trophy screen. Mega tier and a 99s banner match the
+      // FINAL card that is already up. Existing emitters only.
+      banner("DINO BOWL CHAMPIONS!", TEAMS[G.szn.team][0].toUpperCase() + " RULE THE CRETACEOUS", 99, { tier: "mega" });
+      fxConfetti(G.camX + W / 2);
+      fxFlash(24);
+      crowdCheer(1.2);
+      crowdSpike = 0.16;
+      G.zoomPunch = Math.max(G.zoomPunch, 0.12);
+      sfx.td(); sfx.roar();
       // a champion unlocks the deep end of the dynamic ladder (D13-D16)
       if (!G.dyn.champ) { G.dyn.champ = true; saveDyn(); refreshDynamicDiff(); }
       return;
@@ -2182,6 +2198,20 @@
   const isHuman = (side) => side === "A" ? true : (!!G.humanB || (G.practice && false));
   const other = (side) => side === "A" ? "B" : "A";
   const teamAbbrOf = (side) => side === "A" ? G.my : G.opp;
+  // WHOSE STADIUM IS THIS. The crowd is not a neutral bed — buildCrowd() dresses
+  // the stands in TEAMS[G.stadium.home] colors, and startGame sets
+  // `G.homeAbbr = opts.home === false ? G.opp : G.my`, while the season schedule
+  // alternates (`home: i % 2 === 0`). So on a road week the people in the seats
+  // are side B's fans, and every reaction keyed off `G.drive === "A"` was
+  // cheering and groaning for the wrong team for half the schedule.
+  // This is the one place that answers the question, and it answers it from the
+  // BUILDING, not from who is holding a controller: local 2-player (G.humanB) is
+  // two humans in one stadium, and an online guest never reaches this code at
+  // all — update() returns at `if (Net.remoteView) return;` and guests only draw
+  // the host's snapshots — so "which human is local" is the wrong question and
+  // is deliberately not asked. The `!== G.my` guard keeps a same-team
+  // exhibition (my === opp) resolving to A instead of flipping the stands.
+  const crowdSide = () => (G.homeAbbr && G.homeAbbr === G.opp && G.homeAbbr !== G.my) ? "B" : "A";
 
   function enterPlaycall() {
     // SUDDEN DEATH, ENFORCED. Overtime's banner promises "next score wins", but OT
@@ -3709,7 +3739,21 @@
     G.score[scoringSide] += 6;
     G.rampage[scoringSide] = clamp(G.rampage[scoringSide] + 25, 0, 100);
     banner("FUMBLE RETURN TD!", lastName(recoverer.name) + " falls on it for six", 2.4);
-    announce("td", recoverer.name); sfx.td(); crowdCheer(scoringSide === "A" ? 1 : 0.5);
+    announce("td", recoverer.name); sfx.td();
+    // WHAT WAS BROKEN: a scoop-and-score is six points and it got a banner and
+    // a cheer — no confetti, no flash, no lens punch, no hit-stop — while an
+    // offensive touchdown three functions away got all four. This is the same
+    // event; it gets the same payoff, keyed to the STANDS (crowdSide()) rather
+    // than to side A, so on a road week the home crowd is not celebrating your
+    // defense scoring on them. The slow beat is the LESSON #23 0.2s ceiling,
+    // not touchdown()'s 0.4 ask, because F1 clamps post-whistle beats anyway.
+    const dtHome = scoringSide === crowdSide();
+    G.zoomPunch = Math.max(G.zoomPunch, 0.14);
+    impactMoment(0.05, 0.2, 0.5);
+    fxConfetti(recoverer.x);
+    if (G.stadium && G.stadium.time !== "day") fxFlash(16);
+    crowdSpike = dtHome ? 0.14 : 0.05;
+    if (dtHome) crowdCheer(1.0); else crowdAww(1.2);
     startCelebration(scoringSide, Math.random() < 0.5 ? "spike" : "hop", recoverer);
     G.deadT = 1.4;
     // Keep the current offense/defense entity labels through the celebration,
@@ -3987,12 +4031,36 @@
     G.state = "dead"; G.phase = "dead"; sfx.whistle();
     G.aim = null; G.soarAim = null; G.slingAnchor = null;
     info = info || {};
-    // the stands live and die with team A: a failed home play gets a real,
-    // proportional "awww" instead of the crowd bed ignoring the outcome
-    if (G.drive === "A" && !G.practice) {
-      if (info.turnover || reason === "INTERCEPTED!") crowdAww(1.2);
-      else if (reason === "SACKED!") crowdAww(0.85);
-      else if (["INCOMPLETE", "DROPPED!", "BROKEN UP!", "SWATTED AWAY!", "THROWN AWAY"].includes(reason)) crowdAww(0.55);
+    // WHAT WAS BROKEN: this was the ONLY in-play crowd reaction in the file and
+    // it had two bugs in four lines. (1) It was aww-ONLY — grep confirmed
+    // crowdCheer had no in-play call site outside touchdown() and the
+    // first-down block — so a sack, a pick or a strip BY your defense, the
+    // loudest thing that happens in a stadium, played nothing at all, and the
+    // same events played the DISAPPOINTMENT cue when the visitors turned it
+    // over. (2) It was hard-keyed to side A, but the stands belong to
+    // G.homeAbbr, which is side B on a road week — so half the season the crowd
+    // groaned for the wrong team.
+    // crowdSide() is the single source of truth for whose building this is.
+    // TIERING: the cheer stays UNDER a touchdown's (1.0 cheer / 0.14 spike) so a
+    // takeaway is loud without competing with six points, and the crowd BUS is
+    // untouched — the 08-06 mix law is that crowd sits under the action. These
+    // fire once per whistle, never per frame (LESSON #15), and crowdCheer /
+    // crowdAww each self-throttle (cheerBusy / awwBusy) if two land together.
+    if (!G.practice) {
+      const homeBall = G.drive === crowdSide();
+      const takeaway = !!info.turnover || reason === "INTERCEPTED!";
+      const deadPass = ["INCOMPLETE", "DROPPED!", "BROKEN UP!", "SWATTED AWAY!", "THROWN AWAY"].includes(reason);
+      if (homeBall) {
+        if (takeaway) crowdAww(1.2);
+        else if (reason === "SACKED!") crowdAww(0.85);
+        else if (deadPass) crowdAww(0.55);
+      } else {
+        // ...and here is the half that was missing: their drive just died, and
+        // that is a HOME CROWD EVENT.
+        if (takeaway) { crowdCheer(0.95); crowdSpike = Math.max(crowdSpike, 0.11); }
+        else if (reason === "SACKED!") { crowdCheer(0.75); crowdSpike = Math.max(crowdSpike, 0.08); }
+        else if (deadPass) crowdCheer(0.45);
+      }
     }
     // the replay tape keeps rolling briefly past the whistle so the actual
     // TACKLE / landing is on film, and the tackled dino hits the deck
@@ -4195,6 +4263,26 @@
       G.down += 1;
       if (G.down > 4) {
         banner("TURNOVER ON DOWNS", "", 1.8);
+        // WHAT WAS BROKEN: a fourth-down stop IS a turnover — same swing as a
+        // pick — and this branch handed the ball over with no payoff of any
+        // kind: no lens, no shake, no crowd, no ticker. Compare the pick
+        // branch a few lines up, which gets a card and a slow-mo beat.
+        // Tiered as a turnover when the HOME defense made it (crowdSide()), and
+        // a stand inside the 10 additionally earns the sparks, because a
+        // goal-line stand is the loudest stop in football. Everything here is
+        // existing vocabulary and all of it sits below a touchdown's confetti +
+        // 0.14 spike + mega card, so it cannot compete with six points.
+        const stoodUp = G.drive !== crowdSide();
+        const goalLine = G.losYd >= 90;
+        // a sack already fired its own (better) ticker line — don't stomp it
+        if (reason !== "SACKED!") announce("tackle", G.carrier && G.carrier.name);
+        if (stoodUp) {
+          crowdCheer(goalLine ? 1.0 : 0.85);
+          crowdSpike = Math.max(crowdSpike, goalLine ? 0.12 : 0.09);
+          G.zoomPunch = Math.max(G.zoomPunch, 0.09);
+          G.shake = Math.max(G.shake, 0.2);
+          if (goalLine) { sfx.roar(); fxSparks(G.carrier ? G.carrier.x : G.ball.x, G.carrier ? G.carrier.y : G.ball.y, 10); }
+        } else crowdAww(1.1);
         // down stays 5 only for this beat; downText()'s `|| "4th"` covers the
         // plate, and changePossession resets it before the next snap
         G.deadT = 1.2; G.deadNext = () => { changePossession(100 - G.losYd); enterPlaycall(); };
@@ -4298,8 +4386,14 @@
       (rainParty ? "💦 PUDDLE PARTY! · " : "") + drivePayoff, 2, { tier: "mega" });
     announce("td", G.carrier && G.carrier.name);
     sfx.td();
-    crowdSpike = t === "A" ? 0.14 : 0.05;
-    crowdCheer(t === "A" ? 1.0 : 0.5);
+    // WHAT WAS BROKEN: the stands CHEERED THE OPPONENT. A touchdown against you
+    // played crowdCheer(0.5) — a real roar, just quieter — and there was no aww
+    // anywhere on this path, so the one moment a home crowd is guaranteed to
+    // groan was the moment it applauded. And "A" is not the home side on a road
+    // week (G.homeAbbr = G.opp there), so the venue was wrong too.
+    const tdHome = t === crowdSide();
+    crowdSpike = tdHome ? 0.14 : 0.05;
+    if (tdHome) crowdCheer(1.0); else crowdAww(1.2);
     if (rainParty) {
       const c = G.carrier || G.ball;
       for (let i = 0; i < 26; i++) G.parts.push({ x: c.x + rnd(-16, 16), y: c.y + rnd(-8, 12), z: 0, vx: rnd(-60, 60), vy: rnd(-40, 40), vz: rnd(30, 110), t: rnd(0.3, 0.7), splash: true });
@@ -4361,10 +4455,43 @@
   // landed on nothing (owner play-test 2026-08-07: "clicking 1pt/2pt doesn't work")
   function ptRects() {
     const cards = [{ kind: "XP" }, { kind: "GO2" }];
-    const rects = [{ x: W / 2 - 300, y: 300 }, { x: W / 2 + 60, y: 300 }];
+    // WHAT WAS BROKEN: the player was asked to choose a conversion THROUGH an
+    // opaque card. The mega TD banner fills y = H/2-72 .. H/2+60 — 198..330 at
+    // this 540px height — at .88 alpha, and it is drawn AFTER drawPTChoice
+    // (drawBanner is the last overlay in drawFrame, by design, because a banner
+    // must never be buried). Both conversion buttons sat at y 300 h 72, so
+    // 30px of each — their entire top border and the top 42% of their body —
+    // plus the banner's 5px gold rule at y 325 were painted over. Verified by
+    // recording every fillRect of one ptchoice frame with the banner live:
+    // 3 of the card's rects intersected the banner fill, and a mid-tier banner
+    // (212..316, e.g. BEAST QUAKE) overlapped them too. The banner's DURATION
+    // and its any-input skip contract are owner-tuned, so the geometry moves
+    // instead: 356 clears the mega banner's bottom edge by 26px, and both the
+    // draw and the hit test read this one rect list, so they cannot drift.
+    const rects = [{ x: W / 2 - 300, y: 356 }, { x: W / 2 + 60, y: 356 }];
     return cards.map((c, i) => ({ x: rects[i].x, y: rects[i].y, w: 240, h: 72, c }));
   }
+  // ONE geometry for the opt-in replay chip too, same reason ptRects exists.
+  function ptReplayRect() { return { x: W / 2 - 170, y: 446, w: 340, h: 28 }; }
   function ptClick() {
+    // WHAT WAS BROKEN: startReplay had exactly ONE caller — inside
+    // throwChallenge — and G.replay is assigned nowhere else, so the replay
+    // screen, and the GIF exporter that lives on it, could only be reached by
+    // spending the once-per-game coach's challenge on a play the referee has a
+    // 38% chance of overturning. Meanwhile snapshotFrame runs on EVERY live
+    // frame to feed a tape almost nobody could watch. A touchdown is the
+    // shareable artifact of a football game, and G.tape is only cleared in
+    // snap(), so at this card the tape still holds the score: the last 126
+    // frames are the final ~1.4s of the play plus the 0.7s of celebration that
+    // deadRecT films. This is also the one beat that is ALREADY parked waiting
+    // on a human decision, so a look at the tape costs zero pacing — the owner
+    // deleted the mandatory post-TD replay on purpose and this stays OPT-IN,
+    // with the card still sitting here when the replay ends.
+    const rr = ptReplayRect();
+    if (!G.replay && G.tape.length >= 50 &&
+      mouse.x >= rr.x && mouse.x <= rr.x + rr.w && mouse.y >= rr.y && mouse.y <= rr.y + rr.h) {
+      startReplay(() => { G.state = "ptchoice"; }); return;
+    }
     for (const r2 of ptRects()) {
       if (mouse.x >= r2.x && mouse.x <= r2.x + r2.w && mouse.y >= r2.y && mouse.y <= r2.y + r2.h) {
         ptChoose(r2.c.kind === "GO2"); return;
@@ -4375,9 +4502,10 @@
     // Retro Bowl-style: the field dims and two BIG buttons own the moment
     cx.fillStyle = "rgba(5,12,8,.45)"; cx.fillRect(0, 0, W, H);
     cx.textAlign = "center"; cx.font = PF(15);
-    cx.fillStyle = "#3a63c4"; cx.fillRect(W / 2 - 280, 150, 560, 54);
-    cx.strokeStyle = "#f4f6f1"; cx.lineWidth = 2; cx.strokeRect(W / 2 - 280, 150, 560, 54);
-    cx.fillStyle = "#f4f6f1"; cx.fillText("1 or 2 point conversion?", W / 2, 186);
+    // the prompt clears the banner band too (its bottom 6px used to sit under it)
+    cx.fillStyle = "#3a63c4"; cx.fillRect(W / 2 - 280, 130, 560, 54);
+    cx.strokeStyle = "#f4f6f1"; cx.lineWidth = 2; cx.strokeRect(W / 2 - 280, 130, 560, 54);
+    cx.fillStyle = "#f4f6f1"; cx.fillText("1 or 2 point conversion?", W / 2, 166);
     ptRects().forEach((r2) => {
       const c = r2.c;
       const hov = mouse.x >= r2.x && mouse.x <= r2.x + r2.w && mouse.y >= r2.y && mouse.y <= r2.y + r2.h;
@@ -4389,6 +4517,16 @@
       cx.font = PF(7); cx.fillStyle = "rgba(244,246,241,.75)";
       cx.fillText(c.kind === "XP" ? "[1] drag-kick the extra point" : "[2] one snap from the 2", r2.x + r2.w / 2, r2.y + 58);
     });
+    // the opt-in replay/GIF chip (see ptClick for why it lives on this card).
+    // Tap OR R, so mobile gets the same door as the keyboard.
+    if (G.tape.length >= 50) {
+      const rr = ptReplayRect();
+      const hov = mouse.x >= rr.x && mouse.x <= rr.x + rr.w && mouse.y >= rr.y && mouse.y <= rr.y + rr.h;
+      cx.fillStyle = "rgba(4,10,7,.85)"; cx.fillRect(rr.x, rr.y, rr.w, rr.h);
+      cx.strokeStyle = hov ? "#ffd23f" : "#9db0a4"; cx.lineWidth = 2; cx.strokeRect(rr.x, rr.y, rr.w, rr.h);
+      cx.font = PF(7); cx.fillStyle = hov ? "#ffd23f" : "#9db0a4"; cx.textAlign = "center";
+      cx.fillText("[R] / TAP = REPLAY THAT TOUCHDOWN  ·  G = SAVE GIF", rr.x + rr.w / 2, rr.y + 18);
+    }
   }
 
   function changePossession(newLosYd) {
@@ -4752,8 +4890,22 @@
       saveRecord();
     }
     recordCpuGameResult();
-    banner(win ? TEAMS[win][0].toUpperCase() + " WIN!" : "TIE GAME", "", 99);
-    sfx.td();
+    const iWon = win === G.my, iLost = win === G.opp;
+    banner(win ? TEAMS[win][0].toUpperCase() + " WIN!" : "TIE GAME", "", 99,
+      iWon ? { tier: "mega" } : undefined);
+    // WHAT WAS BROKEN: every final whistle played sfx.td() — the SCORING
+    // FANFARE. Losing by four touchdowns triggered the same triumphant sting as
+    // winning, which is the single loudest wrong note in the game. A win keeps
+    // the fanfare and now also gets the payoff it never had (mega card, lens,
+    // crowd); a loss gets sfx.pick(), which is already written as "a sting plus
+    // the stadium inhaling", and the aww; a tie gets the flat whistle.
+    // No confetti here: the champion beat in advancePlayoffs owns the confetti
+    // so an ordinary week-6 win does not look like a trophy.
+    if (iWon) {
+      sfx.td(); crowdCheer(1.0); crowdSpike = 0.14;
+      G.zoomPunch = Math.max(G.zoomPunch, 0.1);
+    } else if (iLost) { sfx.pick(); crowdAww(1.2); }
+    else { sfx.whistle(); crowdAww(0.6); }
     // Player of the Game — biggest stat line on the field
     const lines = Object.values(G.gameStats || {});
     let best = null, bv = -1;
@@ -5206,7 +5358,26 @@
         else banner("XP MISSED!", "The ptero shanks it!", 1.4);
         G.deadT = 1.3; G.deadNext = () => { changePossession(25); enterPlaycall(); };   // kickoff beat folded in
       } else if (good) {
-        if (doink) sfx.doink(); G.score[drive0] += 3; sfx.td(); crowdCheer(0.6);
+        if (doink) sfx.doink(); G.score[drive0] += 3; sfx.td();
+        // WHAT WAS BROKEN: three points landed with a flat 0.6 cheer no matter
+        // who kicked it or what it meant — the crowd applauded the visitors'
+        // go-ahead kick, and a walk-off game-winner got the same beat as a
+        // meaningless second-quarter chip shot. fxConfetti/fxFlash had exactly
+        // one call site each (inside touchdown), so a kick could never light
+        // the place up.
+        // TIERING, per the owner: routine make = toast (lens tick + cheer),
+        // a Q4/OT go-ahead = mid card and the sparks. A make is still quieter
+        // than a touchdown: no confetti, spike capped at 0.10 vs the TD's 0.14.
+        const fgHome = drive0 === crowdSide();
+        const fgWinner = (G.quarter >= 4 || G.ot) && (G.score[drive0] - G.score[other(drive0)]) > 0 &&
+          (G.score[drive0] - G.score[other(drive0)]) <= 3;
+        G.zoomPunch = Math.max(G.zoomPunch, fgWinner ? 0.11 : 0.06);
+        if (fgHome) { crowdCheer(fgWinner ? 1.0 : 0.6); crowdSpike = Math.max(crowdSpike, fgWinner ? 0.10 : 0.05); }
+        else crowdAww(fgWinner ? 1.1 : 0.5);
+        if (fgWinner) {
+          fxSparks(xAtYd(108), MID, 12);
+          if (fgHome && G.stadium && G.stadium.time !== "day") fxFlash(10);
+        }
         banner(doink ? "DOINK!  IT'S GOOD!" : "FIELD GOAL GOOD!", (doink ? "Off the upright — " : "") + fgDist + " yards by " + lastName(k.kicker.name), 1.8);
         G.deadT = 1.5; G.deadNext = () => { changePossession(25); enterPlaycall(); };   // kickoff beat folded in
       } else {
@@ -6063,6 +6234,13 @@
     if (S === "ptchoice") {
       if (k === "1") ptChoose(false);
       if (k === "2") ptChoose(true);
+      // R = the opt-in look at the touchdown you just scored, and the only
+      // door to the GIF exporter that is not the once-per-game challenge flag.
+      // See ptClick for the full WHAT WAS BROKEN; the tap target is the chip
+      // drawn on the same card, and both routes share startReplay's contract:
+      // the replay returns to THIS card, so nothing about the conversion
+      // decision or the dead-beat pacing changes.
+      if (k === "r" && !G.replay && G.tape.length >= 50) startReplay(() => { G.state = "ptchoice"; });
     }
   }
 
@@ -6371,10 +6549,35 @@
   function loop(t) {
     const dt = Math.min(0.033, (t - lastT) / 1000 || 0.016);
     lastT = t;
+    G.rdt = dt;   // unscaled frame time — the dead-ball countdown ticks on this
     let sdt = dt;
-    // slow-mo scales LIVE action only — stretching dead beats just steals
-    // the player's time (LESSON #9 in spirit, applied to humans not tests)
-    const scalable = G.state === "live";
+    // WHAT WAS BROKEN: impactMoment deliberately accepts "dead" as well as
+    // "live", but this block only scaled while the state was "live" and it
+    // ZEROED both clocks otherwise. Every terminal moment asks for its beat on
+    // the exact frame playDead/touchdown flips the state to "dead", so the
+    // request was cancelled one frame after it was made. Measured with a
+    // per-frame (state, dt, sdt) log on a real harness game: tackle 0, sack 0,
+    // INT 0, TD 0 scaled frames after the whistle, freezeT/slowT already 0 on
+    // the whistle frame itself. The hit-stop system was fully wired and then
+    // switched off exactly where it was supposed to land.
+    // WHY IT WAS WRITTEN THAT WAY, AND WHAT STILL HOLDS: scaling a dead beat
+    // also scales G.deadT, which stretches the whistle-to-snap wait — that is
+    // the "steals the player's time" the old comment was protecting. The
+    // protection is kept, twice over, instead of by banning the beat:
+    //  (1) the S === "dead" branch of update() counts deadT/deadRecT/deadElapsed
+    //      down on G.rdt (real time), so the wait does not grow at all —
+    //      measured whistle-to-cards median 601ms before AND after; and
+    //  (2) a post-whistle request is clamped to the owner's LESSON #23
+    //      ceilings, slow-mo <= 0.2s, so the touchdown's 0.4s ask cannot
+    //      outrun the takedown budget.
+    // Both clocks still burn REAL dt, so a beat can never stall the game
+    // (LESSON #9), and any state that is neither live nor dead still throws a
+    // stale request away outright.
+    const scalable = G.state === "live" || G.state === "dead";
+    if (G.state === "dead") {
+      if (G.freezeT > 0.08) G.freezeT = 0.08;
+      if (G.slowT > 0.2) G.slowT = 0.2;
+    }
     if (scalable && G.freezeT > 0) { G.freezeT = Math.max(0, G.freezeT - dt); sdt = 0; }
     else if (scalable && G.slowT > 0) { G.slowT = Math.max(0, G.slowT - dt); sdt = dt * (G.slowScale || 0.45); }
     else if (!scalable) { G.freezeT = 0; G.slowT = 0; }
@@ -6469,7 +6672,10 @@
     // screen so any input can advance it past a short read-lockout
     if (S === "dead") {
       if (!G.deadElapsed) G.deadT0 = G.deadT;   // remember the beat's full size
-      G.deadElapsed = (G.deadElapsed || 0) + dt;
+      // real time, not scaled time (F1): this drives the input read-lockout in
+      // deadSkip(), and a post-whistle slow-mo beat must not make the player
+      // wait longer than usual before a tap can advance the beat.
+      G.deadElapsed = (G.deadElapsed || 0) + (G.rdt || dt);
     } else G.deadElapsed = 0;
     // pose chains, piles, and celebrations keep animating BEHIND the card
     // screens and the PAT choice — decision time overlaps animation time
@@ -6478,8 +6684,16 @@
       if (G.celebrate) updateCelebration(dt);
     }
     if (S === "dead") {
-      G.deadT -= dt;
-      if (G.deadRecT > 0) { G.deadRecT -= dt; snapshotFrame(); }   // film the aftermath
+      // The dead beat's own COUNTDOWN runs on real time even while a
+      // post-whistle hit-stop is scaling the action (F1). That is what keeps
+      // the beat from stealing the player's time: the tackle/pick/TD gets its
+      // frozen and slowed frames, and the whistle-to-snap wait does not grow by
+      // a millisecond — measured median 601ms both before and after. G.rdt is
+      // the loop's unscaled frame time and equals dt whenever nothing is
+      // scaling, so this is a no-op on every ordinary frame.
+      const rdt = G.rdt || dt;
+      G.deadT -= rdt;
+      if (G.deadRecT > 0) { G.deadRecT -= rdt; snapshotFrame(); }   // film the aftermath
       // the cosmetic kickoff flight: boot arc sailing into the end zone
       if (G.koFly && G.ball && G.ball.mode === "koflight") {
         const k = G.koFly;
@@ -8816,6 +9030,17 @@
           // outcome. A strip-sack should feel like a special moment, not erase
           // most otherwise well-earned pressure finishes.
           if (e.apex && e.passive === "sack" && Math.random() < 0.09) { fumble(qb, e); return; }
+          // THE SACK THE PLAYER ACTUALLY FEELS HAD NO BEAT TO SURVIVE. F1 is
+          // about a requested hit-stop being cancelled at the whistle — but on
+          // THIS path, the CPU bringing down a HUMAN quarterback in normal play,
+          // nothing was ever requested: only sfx.tackle(). The beat log measured
+          // 0 freeze and 0 slow frames on a real harness sack while tackle / INT
+          // / TD all showed a request, which is how the gap surfaced. The sibling
+          // site (the scripted CPU protection loss, ~350 lines up) already asks
+          // for exactly these numbers, and 0.12s of slow-mo is inside the
+          // LESSON #23 0.2s ceiling.
+          G.shake = Math.max(G.shake, 0.25);
+          impactMoment(0.06, 0.12, 0.45);
           playDead("SACKED!", null, false);
           return;
         }
@@ -9533,10 +9758,20 @@
       cx.fillStyle = "rgba(0,0,0,.28)";
       const shW = 16 - jump * 0.5;
       cx.fillRect(e.x - G.camX - shW / 2, e.y + 2, shW, 4);
-      // the ring IS the ball indicator: carrier or the QB holding it pre-throw
+      // the ring IS the ball indicator: carrier or the QB holding it pre-throw.
+      // Drawn as PIXELS, not a ctx.ellipse: this marker is on screen for every
+      // frame of every play, which made it the most-seen anti-aliased vector
+      // stroke in the game and a direct violation of AA_TRANSFORMATION §1
+      // ("fillRect at integer coords ... no anti-aliased vector strokes
+      // anywhere near the field"). Same 15x6 flat-oval read, eight fillRects,
+      // integer coords, no per-frame allocation.
       if (!G.qaCapture && (e === G.carrier || (e === G.ball.holder && (G.phase === "drop" || G.phase === "handoff")))) {
-        cx.strokeStyle = "rgba(255,210,63,.9)"; cx.lineWidth = 2;
-        cx.beginPath(); cx.ellipse(e.x - G.camX, e.y, 15, 6, 0, 0, Math.PI * 2); cx.stroke();
+        const rx = Math.round(e.x - G.camX), ry = Math.round(e.y);
+        cx.fillStyle = "rgba(255,210,63,.9)";
+        cx.fillRect(rx - 8, ry - 6, 17, 2); cx.fillRect(rx - 8, ry + 4, 17, 2);
+        cx.fillRect(rx - 13, ry - 5, 4, 2); cx.fillRect(rx + 9, ry - 5, 4, 2);
+        cx.fillRect(rx - 15, ry - 1, 3, 2); cx.fillRect(rx + 12, ry - 1, 3, 2);
+        cx.fillRect(rx - 13, ry + 3, 4, 2); cx.fillRect(rx + 9, ry + 3, 4, 2);
       }
       if (e.proneT > 0 && !["tackled", "shoved", "prone"].includes(pose)) {
         cx.save(); cx.translate(e.x - G.camX, e.y); cx.rotate(e.dir * Math.PI / 2);
@@ -10014,7 +10249,20 @@
   // small bespoke pixel decorations drawn around a 44px gallery sprite
   function drawQBFeature(kind, x, y, s) { // s = sprite size
     const k = s / 44;
-    const P = (bx, by, bw, bh, c) => { cx.fillStyle = c; cx.fillRect(x + bx * k, y + by * k, Math.max(1, bw * k), Math.max(1, bh * k)); };
+    // WHAT WAS BROKEN: this whole feature vocabulary IS pixel art, but on the
+    // field it is scaled by spr.w/44 — a fraction — so every rect landed at a
+    // fractional coordinate with a fractional size and the canvas anti-aliased
+    // its edges into a smear on the head of every QB and every apex rampager.
+    // Same law as the aim overlay (AA_TRANSFORMATION §1: "fillRect at integer
+    // coords, one palette"). Measured on a live QB: every feature rect was
+    // fractional in BOTH position and size (e.g. 510.09, 101.91, 8.727x1.455).
+    // The gallery (s = 44) and the pregame card (s = 88) have an integer k, so
+    // their art is byte-identical — this only snaps the in-game scaling.
+    const P = (bx, by, bw, bh, c) => {
+      cx.fillStyle = c;
+      cx.fillRect(Math.round(x + bx * k), Math.round(y + by * k),
+        Math.max(1, Math.round(bw * k)), Math.max(1, Math.round(bh * k)));
+    };
     switch (kind) {
       case "beard": P(30, 18, 8, 5, "#cfd2d6"); P(31, 23, 6, 3, "#aeb3b9"); break;          // grey chin beard
       case "cheese": P(22, -6, 18, 8, "#ffd23f"); P(24, -2, 4, 4, "#e8b820"); P(32, -4, 4, 4, "#e8b820"); break; // cheesehead wedge
@@ -10953,6 +11201,52 @@
     }
   }
 
+  // ------------------------------------------------ pixel overlay primitives
+  // WHAT WAS BROKEN: the aim overlay — the single gesture the whole game is
+  // built on — was the one thing on the field drawn as ANTI-ALIASED VECTOR ART.
+  // AA_TRANSFORMATION §1 states the law: "fillRect at integer coords, one
+  // palette, no anti-aliased vector strokes anywhere near the field", and the
+  // owner has already rejected this exact class once (the round-cap route
+  // strokes in off-palette blue/mint). Census of ONE live frame with the aim
+  // loaded, recorded through a counting ctx: 2 setLineDash + 1 ctx.arc +
+  // 1 ctx.ellipse + 20 moveTo/lineTo path vertices in the aim/soar tints, and
+  // every single one of them at a FRACTIONAL coordinate (the camera scroll is
+  // fractional, so nothing snapped). These two helpers are the pixel
+  // equivalents; the overlay now draws with nothing but fillRect on integers.
+  // A chunky dotted line. step = pixels between stamps (step <= size draws solid).
+  function pxDotLine(x0, y0, x1, y1, step, size, col) {
+    cx.fillStyle = col;
+    const n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / step));
+    const o = size >> 1;
+    for (let i = 0; i <= n; i++) {
+      const k = i / n;
+      cx.fillRect(Math.round(x0 + (x1 - x0) * k) - o, Math.round(y0 + (y1 - y0) * k) - o, size, size);
+    }
+  }
+  // A pixel RING: midpoint-circle rasterisation on 8-fold symmetry, stamped as
+  // 2px blocks with every other step skipped, so it reads as a dotted 8-bit
+  // reticle rather than a smooth outline. Centre and radius are the ones the
+  // ctx.arc used, so the AA pass's "SIZE = the real scatter" contract is intact.
+  function pxRing(cxp, cyp, r, col) {
+    cx.fillStyle = col;
+    const ox = Math.round(cxp), oy = Math.round(cyp);
+    let x = Math.max(2, Math.round(r)), y = 0, err = 1 - x, i = 0;
+    while (x >= y) {
+      if ((i++ & 1) === 0) {
+        cx.fillRect(ox + x - 1, oy + y - 1, 2, 2); cx.fillRect(ox + y - 1, oy + x - 1, 2, 2);
+        cx.fillRect(ox - y - 1, oy + x - 1, 2, 2); cx.fillRect(ox - x - 1, oy + y - 1, 2, 2);
+        cx.fillRect(ox - x - 1, oy - y - 1, 2, 2); cx.fillRect(ox - y - 1, oy - x - 1, 2, 2);
+        cx.fillRect(ox + y - 1, oy - x - 1, 2, 2); cx.fillRect(ox + x - 1, oy - y - 1, 2, 2);
+      }
+      y++;
+      if (err < 0) err += 2 * y + 1; else { x--; err += 2 * (y - x) + 1; }
+    }
+  }
+  // ONE tint ramp for every aim cue. The green is the game's own #69be28: the
+  // ring used rgba(126,214,60), a near-miss that existed nowhere else in the
+  // file, which is the same off-palette drift the owner rejected in the route art.
+  const aimTint = (risk) => risk < 0.24 ? "rgba(105,190,40,.95)" : risk < 0.56 ? "rgba(255,210,63,.95)" : "rgba(255,85,51,.95)";
+
   function drawLiveUI() {
     // grip planted but not pulled yet: coach the windup
     if (G.slingAnchor && !G.aim && G.ball.holder && mouse.down) {
@@ -10967,47 +11261,67 @@
       // can actually reach (same clamp the throw applies) — the owner found
       // balls landing short of the marker on max-range pulls (2026-08-07)
       const a = clampThrowRange(qb, { x: G.aim.x, y: G.aim.y });
+      // ...and now it does not lie about the FLIGHT either. WHAT WAS BROKEN:
+      // the preview solved its own arc and its own hang time, and the throw
+      // solved different ones. `pull` — how far back you dragged — lowers the
+      // lob's apex by up to 40% and stretches its hang time by up to 8%;
+      // drawBall applies it to the ball, throwLob stores it on the ball, and
+      // this preview ignored it. Measured across pull 0.05→1.00 at four aim
+      // depths: the drawn apex was off by −37%..+25% and the previewed hang
+      // time by −19%..+8%, so `win.risk` — the tint — was reading a flight
+      // NEITHER throw makes (the preview's T is used inside assessPassWindow's
+      // own closing-distance term, so this is the read, not decoration).
+      // ONE pull, ONE T, ONE apex, shared with throwLob and drawBall.
+      // The RING previews the LOB, because releasing this gesture throws a lob;
+      // the SPACE bullet is a different flight and gets its own cue below.
+      const pull = G.slingPull == null ? 0.7 : G.slingPull;    // throwLob's own default
+      const d = dist(qb, a);
+      const T = (0.55 + d / 470) * (0.8 + 0.28 * pull);        // == throwLob
+      const h = clamp(d * 0.17, 20, 74) * (0.6 + 0.65 * pull); // == drawBall's lob apex
       // the windup: a taut "rubber band" from the QB back toward the pull
-      cx.strokeStyle = "rgba(255,138,92,.9)"; cx.lineWidth = 3;
-      cx.beginPath(); cx.moveTo(qb.x - G.camX, qb.y);
       const bx = qb.x - (a.x - qb.x) * 0.22, by = qb.y - (a.y - qb.y) * 0.22;
-      cx.lineTo(bx - G.camX, by); cx.stroke();
-      cx.setLineDash([5, 6]); cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2;
-      cx.beginPath();
-      const n = 14;
-      const d = dist(qb, a), h = clamp(d * 0.17, 20, 74);
+      pxDotLine(qb.x - G.camX, qb.y, bx - G.camX, by, 2, 3, "rgba(255,138,92,.9)");
+      // the flight path as pixel pips on the SAME parabola the ball will fly.
+      // The old dash pattern was [5,6] — an 11px period — so the pip spacing
+      // keeps that density and the read is unchanged.
+      const n = clamp(Math.round(d / 11), 8, 48);
+      cx.fillStyle = "#ffd23f";
       for (let i = 0; i <= n; i++) {
         const k = i / n;
-        const px = qb.x + (a.x - qb.x) * k - G.camX;
-        const py = qb.y + (a.y - qb.y) * k - (h * 4 * k * (1 - k));
-        if (i === 0) cx.moveTo(px, py); else cx.lineTo(px, py);
+        cx.fillRect(Math.round(qb.x + (a.x - qb.x) * k - G.camX) - 1,
+          Math.round(qb.y + (a.y - qb.y) * k - h * 4 * k * (1 - k)) - 1, 3, 3);
       }
-      cx.stroke(); cx.setLineDash([]);
       // Retro Bowl read: a clean landing RING — the football, the routes and
       // your eyes are the interface; no labels, no targeting computer.
       // The AA pass makes the ring HONEST without adding a single word:
       // TINT = the pass window the engine already computes (green/amber/red),
       // SIZE = the real weather scatter + wind drift on this throw. Pure
       // surfaced truth (LESSON #19: the player can always see WHY).
-      const markX = a.x - G.camX, markY = a.y;
-      const dAim = dist(qb, a), TAim = 0.55 + dAim / 470;
-      const win = assessPassWindow(qb, pickPassTarget(a), a, TAim);
-      const drift = Math.hypot(G.weather.wind.x, G.weather.wind.y) * TAim * 1.6;
+      const tgt = pickPassTarget(a);
+      const win = assessPassWindow(qb, tgt, a, T);
+      const drift = Math.hypot(G.weather.wind.x, G.weather.wind.y) * T * 1.6;
       const ringR = clamp(11 + weatherScatter() * 0.5 * 0.7 + drift * 0.5, 11, 26);
-      const ringCol = win.risk < 0.24 ? "rgba(126,214,60,.9)" : win.risk < 0.56 ? "rgba(255,210,63,.9)" : "rgba(255,85,51,.92)";
-      cx.strokeStyle = ringCol; cx.lineWidth = 2;
-      cx.beginPath(); cx.arc(markX, markY, ringR, 0, Math.PI * 2); cx.stroke();
-      cx.fillStyle = ringCol; cx.fillRect(markX - 1, markY - 1, 2, 2);
+      pxRing(a.x - G.camX, a.y, ringR, aimTint(win.risk));
+      // ...and the CENTRE PIP carries the SPACE-BULLET's read, because ONE
+      // reticle serves TWO throws and one tint cannot be honest about both. A
+      // bullet flies d/430 rather than the lob's T, and over 15,400
+      // frame x receiver x pull samples the two land in DIFFERENT tint buckets
+      // 62% of the time — and the bullet is not simply the safer ball, it reads
+      // WORSE on 21% of samples (a faster ball also arrives closer to where the
+      // receiver actually is, which cuts the placement penalty). Ring = what
+      // RELEASE will throw, pip = what SPACE will throw. No new words on screen.
+      // If this reads as clutter, one line reverts it: pass aimTint(win.risk).
+      cx.fillStyle = aimTint(assessPassWindow(qb, tgt, a, d / 430).risk);
+      cx.fillRect(Math.round(a.x - G.camX) - 1, Math.round(a.y) - 1, 3, 3);
     }
 
     // soar aim — a defender launching himself wings-open at a target point
     if (G.soarAim && G.controlled) {
       const s = G.controlled, a = G.soarAim;
-      cx.setLineDash([5, 6]); cx.strokeStyle = "#8ecafc"; cx.lineWidth = 2;
-      cx.beginPath(); cx.moveTo(s.x - G.camX, s.y); cx.lineTo(a.x - G.camX, a.y); cx.stroke();
-      cx.setLineDash([]);
-      cx.strokeStyle = "#8ecafc";
-      cx.beginPath(); cx.arc(a.x - G.camX, a.y, 12, 0, Math.PI * 2); cx.stroke();
+      // same class of violation as the throw preview above, same fix: this was
+      // a dashed 2px vector stroke plus a ctx.arc, both at fractional coords
+      pxDotLine(s.x - G.camX, s.y, a.x - G.camX, a.y, 9, 3, "#8ecafc");
+      pxRing(a.x - G.camX, a.y, 12, "#8ecafc");
       cx.font = PF(8); cx.fillStyle = "#8ecafc"; cx.textAlign = "center";
       cx.fillText("RELEASE TO SOAR", a.x - G.camX, a.y - 20);
     }
