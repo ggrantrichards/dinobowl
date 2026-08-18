@@ -392,6 +392,84 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     !!seen && sawTackled > 0 && sawGetup > 0,
     seen ? "grounded=" + sawTackled + " getup=" + sawGetup : "no carrier");
 
+  // ---------------------------------------------------------------------------
+  // F. BATCH D — RULES CORRECTNESS (shipped 2026-08-13)
+  // Save-corrupting bugs, so each gets an explicit assertion. A drawn game used
+  // to be booked as YOUR loss and THEIR win -- the season records had no tie
+  // column at all -- and in the playoffs a tie eliminated you. Overtime promised
+  // "next score wins" while actually playing a full timed 5th quarter.
+  // ---------------------------------------------------------------------------
+  {
+    dbg.newSeason("KC");
+    g.szn.phase = "regular"; g.szn.week = 1;
+    const oppT = g.szn.schedule[0].opp;
+    const l0 = g.szn.records["KC"].l, w0 = g.szn.records[oppT].w;
+    g.score.A = 21; g.score.B = 21;
+    g.gameStats = {}; g.stats = { passYds: 0, rushYds: 0, tds: 0 };
+    dbg.seasonAfterGame();
+    check("F1 a drawn game is not charged as your loss", g.szn.records["KC"].l === l0);
+    check("F2 a drawn game is not credited as their win", g.szn.records[oppT].w === w0);
+    check("F3 both teams are credited a tie",
+      (g.szn.records["KC"].t || 0) === 1 && (g.szn.records[oppT].t || 0) === 1,
+      "you " + (g.szn.records["KC"].t || 0) + " them " + (g.szn.records[oppT].t || 0));
+
+    dbg.newSeason("KC"); g.szn.phase = "regular"; g.szn.week = 1;
+    const oppW = g.szn.schedule[0].opp;
+    g.score.A = 28; g.score.B = 10;
+    g.gameStats = {}; g.stats = { passYds: 0, rushYds: 0, tds: 0 };
+    dbg.seasonAfterGame();
+    check("F4 a win still records W/L normally",
+      g.szn.records["KC"].w === 1 && g.szn.records[oppW].l === 1);
+
+    g.szn = null; g.practice = false; g.patMode = false;
+    g.state = "dead"; g.deadT = 0; g.deadNext = null;
+    g.ot = true; g.quarter = 5; g.clock = 90; g.score.A = 24; g.score.B = 21;
+    dbg.enterPlaycall();
+    check("F5 a lead in overtime ends the game (sudden death)", g.state === "over", "state=" + g.state);
+
+    g.state = "dead"; g.deadT = 0; g.deadNext = null;
+    g.ot = true; g.quarter = 5; g.clock = 90; g.score.A = 21; g.score.B = 21;
+    dbg.enterPlaycall();
+    check("F6 a level overtime keeps playing", g.state !== "over", "state=" + g.state);
+
+    g.state = "dead"; g.deadT = 0; g.deadNext = null;
+    g.ot = false; g.quarter = 3; g.clock = 90; g.score.A = 14; g.score.B = 7;
+    dbg.enterPlaycall();
+    check("F7 a lead in REGULATION does not end the game", g.state !== "over", "state=" + g.state);
+
+    dbg.newSeason("KC"); g.szn.phase = "playoffs";
+    g.ot = true; g.quarter = 5; g.clock = 0; g.score.A = 17; g.score.B = 17;
+    g.state = "dead"; g.deadT = 0; g.deadNext = null; g.patMode = false; g.practice = false;
+    dbg.enterPlaycall();
+    check("F8 a level playoff overtime replays OT rather than ending",
+      g.state !== "over" && g.quarter >= 6, "state=" + g.state + " q=" + g.quarter);
+
+    dbg.newSeason("KC"); g.szn.phase = "regular"; g.szn.week = 1;
+    g.ot = true; g.quarter = 5; g.clock = 0; g.score.A = 17; g.score.B = 17;
+    g.state = "dead"; g.deadT = 0; g.deadNext = null;
+    g.gameStats = {}; g.stats = { passYds: 0, rushYds: 0, tds: 0 };
+    dbg.enterPlaycall();
+    check("F9 a level regular-season overtime may end in a tie", g.state === "over", "state=" + g.state);
+    g.szn = null; g.ot = false;
+  }
+  check("F10 the season records carry a tie column",
+    SRC.includes("records[t] = { w: 0, l: 0, t: 0 }"));
+  check("F11 seeding counts a tie as half a win",
+    SRC.includes("(G.szn.records[b].t || 0) * 0.5"));
+  check("F12 a drawn game takes its own branch, not the loss branch",
+    SRC.includes("const tied = G.score.A === G.score.B;") &&
+    SRC.includes("} else if (won) { G.szn.records[G.szn.team].w++;"));
+  check("F13 sudden death is enforced where every scoring path funnels",
+    SRC.includes('if (G.ot && G.score.A !== G.score.B && !G.patMode && !G.practice) { gameOver(); return; }'));
+  check("F14 a playoff game cannot end level",
+    SRC.includes('const mustDecide = !!(G.szn && G.szn.phase === "playoffs");'));
+  check("F15 team yardage is split into the field that is true",
+    SRC.includes("if (G.playPass && G.playPass.receiver) G.stats.passYds += gained;") &&
+    SRC.includes("else G.stats.rushYds += gained;"));
+  check("F16 non-franchise modes drop the season, not just the career",
+    (SRC.split("G.career = null; G.szn = null").length - 1) +
+    (SRC.split("G.szn = null; G.selectFor").length - 1) >= 5);
+
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
   process.exitCode = fail ? 1 : 0;

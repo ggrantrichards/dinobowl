@@ -1037,7 +1037,7 @@
       // host picks the teams; the game streams to the guest from there
       setTimeout(() => {
         if (Net.cancelled) return;
-        G.mode = "online"; G.humanB = true; G.career = null; G.selectFor = "exh";
+        G.mode = "online"; G.humanB = true; G.career = null; G.szn = null; G.selectFor = "exh";
         G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
       }, 1100);
     });
@@ -1586,7 +1586,10 @@
     const others = ABBRS.filter((t) => t !== team && !rivals.includes(t)).sort(() => Math.random() - 0.5);
     const opps = rivals.concat(rivals, others.slice(0, 11)).sort(() => Math.random() - 0.5);
     const records = {};
-    ABBRS.forEach((t) => (records[t] = { w: 0, l: 0 }));
+    // Ties need a column. Without one, seasonAfterGame's `won = A > B` booked a
+    // drawn game as a LOSS for you and a WIN for your opponent, and the standings
+    // had nowhere to put the truth.
+    ABBRS.forEach((t) => (records[t] = { w: 0, l: 0, t: 0 }));
     G.szn = {
       team, week: 1, phase: "regular",
       schedule: opps.map((o, i) => ({ opp: o, home: i % 2 === 0 })),
@@ -1653,6 +1656,12 @@
 
   function seasonAfterGame() {
     const won = G.score.A > G.score.B;
+    // A DRAWN GAME IS NOT A LOSS. Every branch below used to key off `won` alone,
+    // so a tie handed the opponent a win, charged you a loss, and -- in the
+    // playoffs -- eliminated you. Ties are reachable whenever overtime expires
+    // level; a playoff game now replays overtime instead (see endQuarter), so in
+    // practice `tied` is a regular-season outcome.
+    const tied = G.score.A === G.score.B;
     // dynamic ladder moves on franchise results only (exhibitions don't count)
     bumpDynamicLadder();
     // TRAIN points: 2 for a win, 1 for showing up, +1 for a 250-yard day
@@ -1673,7 +1682,10 @@
     if (G.szn.phase === "regular") {
       const sched = G.szn.schedule[G.szn.week - 1];
       G.szn.results.push({ week: G.szn.week, opp: sched.opp, home: sched.home, my: G.score.A, them: G.score.B });
-      if (won) { G.szn.records[G.szn.team].w++; G.szn.records[sched.opp].l++; }
+      if (tied) {
+        G.szn.records[G.szn.team].t = (G.szn.records[G.szn.team].t || 0) + 1;
+        G.szn.records[sched.opp].t = (G.szn.records[sched.opp].t || 0) + 1;
+      } else if (won) { G.szn.records[G.szn.team].w++; G.szn.records[sched.opp].l++; }
       else { G.szn.records[sched.opp].w++; G.szn.records[G.szn.team].l++; }
       simWeekOthers();
       G.szn.week++;
@@ -1686,7 +1698,9 @@
 
   function seeds(conf) {
     return ABBRS.filter((t) => conferenceOf(t) === conf)
-      .sort((a, b) => (G.szn.records[b].w - G.szn.records[a].w) || (teamOvr(b) - teamOvr(a)))
+      // a tie is half a win for seeding, the standard football convention
+      .sort((a, b) => ((G.szn.records[b].w + (G.szn.records[b].t || 0) * 0.5) -
+        (G.szn.records[a].w + (G.szn.records[a].t || 0) * 0.5)) || (teamOvr(b) - teamOvr(a)))
       .slice(0, 7);
   }
   function startPlayoffs() {
@@ -2087,7 +2101,7 @@
 
   // ------------------------------------------------------------- practice mode
   function startPractice() {
-    G.mode = "practice"; G.practice = true; G.humanB = false; G.career = null;
+    G.mode = "practice"; G.practice = true; G.humanB = false; G.career = null; G.szn = null;
     G.practiceSide = "A"; // A = offense drill, B = defense drill
     G.my = ABBRS[(Math.random() * 32) | 0];
     do { G.opp = ABBRS[(Math.random() * 32) | 0]; } while (G.opp === G.my);
@@ -2126,6 +2140,15 @@
   const teamAbbrOf = (side) => side === "A" ? G.my : G.opp;
 
   function enterPlaycall() {
+    // SUDDEN DEATH, ENFORCED. Overtime's banner promises "next score wins", but OT
+    // was an ordinary timed quarter -- you could kick a go-ahead field goal and then
+    // watch the opponent drive back with the clock still running, the exact opposite
+    // of what the game just told the player. Every scoring path (touchdown, PAT,
+    // two-point try, field goal, safety, defensive score) funnels through a dead
+    // beat and back into the play-call, so this one check covers all of them without
+    // touching a single scoring routine. patMode is excluded so a conversion try
+    // after an overtime touchdown still resolves before the whistle.
+    if (G.ot && G.score.A !== G.score.B && !G.patMode && !G.practice) { gameOver(); return; }
     if (G.patMode) {
       // a conversion try exists outside the clock entirely
     } else if (!G.practice) {
@@ -4035,7 +4058,13 @@
     if (G.carrier && !info.turnover) {
       if (G.drive === "A" && gained > 0) {
         G.rampage.A = clamp(G.rampage.A + gained * 2.2, 0, 100);
-        G.stats.passYds += gained;
+        // Split into the field that is actually true. Every positive gain used to
+        // land in `passYds` regardless of play type, leaving `rushYds` permanently
+        // zero and the name a lie -- the "YOUR DAY" total and the 250-yard TRAIN
+        // bonus were only right because they add the two together. The SUM is
+        // unchanged; each half now means what it says.
+        if (G.playPass && G.playPass.receiver) G.stats.passYds += gained;
+        else G.stats.rushYds += gained;
       }
       if (G.drive === "B" && gained > 0) G.rampage.B = clamp(G.rampage.B + gained * 2.2, 0, 100);
     }
@@ -4644,14 +4673,22 @@
         G.state = "dead"; G.deadT = 1.6; G.deadNext = secondHalf;
       }
     } else if (G.quarter >= 4) {
-      if (G.score.A === G.score.B && !G.ot) {
-        G.ot = true; G.quarter = 5; G.clock = (G.qlen || QUARTER_LEN);
+      // A PLAYOFF GAME CANNOT END LEVEL. Overtime was a single timed 5th quarter,
+      // so if it expired still tied the game just ended -- in the playoffs that is
+      // a drawn elimination game, and via the old `won` check it counted as your
+      // loss. Keep playing overtimes until someone leads. A regular-season tie is
+      // legal and still stands after one overtime.
+      const mustDecide = !!(G.szn && G.szn.phase === "playoffs");
+      if (G.score.A === G.score.B && (!G.ot || mustDecide)) {
+        const otNo = G.ot ? (G.quarter - 4) + 1 : 1;
+        G.ot = true; G.quarter = 4 + otNo; G.clock = (G.qlen || QUARTER_LEN);
         // OVERTIME is a fresh sudden-death possession from the 25 — the old
         // code silently continued whatever mid-drive down/distance the 4th
         // quarter died on, deciding OT by clock luck
         const otBall = Math.random() < 0.5 ? "A" : "B";
         G.drive = otBall; G.losYd = 25; G.down = 1; G.toGain = 10; G.hashY = MID;
-        banner("OVERTIME!", TEAMS[teamAbbrOf(otBall)][0].toUpperCase() + " wins the toss — next score wins", 2.2);
+        banner(otNo > 1 ? "OVERTIME " + otNo + "!" : "OVERTIME!",
+          TEAMS[teamAbbrOf(otBall)][0].toUpperCase() + " wins the toss — next score wins", 2.2);
         G.state = "dead"; G.deadT = 2.2; G.deadNext = enterPlaycall;
       } else {
         gameOver();
@@ -6084,16 +6121,16 @@
     G.humanB = false; G.practice = false;   // reset; versus/practice re-enable below
     const pick = opts[G.menuIdx][0];
     if (pick === "EXHIBITION") {
-      G.mode = "exhibition"; G.selectFor = "exh"; G.career = null; G.humanB = false;
+      G.mode = "exhibition"; G.selectFor = "exh"; G.career = null; G.szn = null; G.humanB = false;
       G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
     } else if (pick === "2-PLAYER VERSUS") {
-      G.mode = "versus"; G.selectFor = "exh"; G.career = null; G.humanB = true;
+      G.mode = "versus"; G.selectFor = "exh"; G.career = null; G.szn = null; G.humanB = true;
       G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
     } else if (pick === "QUICK MATCH") {
-      G.mode = "online"; G.selectFor = "exh"; G.career = null; G.humanB = true;
+      G.mode = "online"; G.selectFor = "exh"; G.career = null; G.szn = null; G.humanB = true;
       startQuickMatch();     // sets G.state = "online_wait" and queues us
     } else if (pick === "ONLINE (LINK)") {
-      G.mode = "online"; G.selectFor = "exh"; G.career = null; G.humanB = true;
+      G.mode = "online"; G.selectFor = "exh"; G.career = null; G.szn = null; G.humanB = true;
       startOnlineHost();
       G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
     } else if (pick === "PRACTICE") {
