@@ -6656,7 +6656,15 @@
     initCrowd();
     if (crowdGain) {
       crowdSpike = Math.max(0, crowdSpike - dt * 0.08);
-      const inGame = ["live", "presnap", "dead", "kick", "playcall", "defcall", "ptchoice"].includes(G.state);
+      // "kickfly" was missing from this list, so the stadium fell SILENT for the
+      // entire 1.7s flight of every field goal, extra point, punt and kickoff --
+      // the crowd cut to zero exactly while the ball was in the air and everyone
+      // was watching it. It is the one moment in a kick that wants a crowd.
+      // (Batch C was credited with this fix and did not actually deliver it; the
+      // gate is a single list and it still omitted the state.) The mix law from
+      // the 08-06 play-test is unchanged -- crowd stays UNDER the action at the
+      // non-live 0.012 level, it simply is not muted.
+      const inGame = ["live", "presnap", "dead", "kick", "kickfly", "playcall", "defcall", "ptchoice"].includes(G.state);
       const close = (G.quarter >= 4) && Math.abs(G.score.A - G.score.B) <= 8;
       let vol = !inGame || muted ? 0 : (G.state === "live" ? 0.026 : 0.012);
       if (close && inGame && !muted) vol += 0.04;
