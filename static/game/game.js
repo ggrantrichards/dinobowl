@@ -3745,11 +3745,13 @@
     // offensive touchdown three functions away got all four. This is the same
     // event; it gets the same payoff, keyed to the STANDS (crowdSide()) rather
     // than to side A, so on a road week the home crowd is not celebrating your
-    // defense scoring on them. The slow beat is the LESSON #23 0.2s ceiling,
-    // not touchdown()'s 0.4 ask, because F1 clamps post-whistle beats anyway.
+    // defense scoring on them. It gets touchdown()'s full 0.4s payoff beat:
+    // the 0.2 here was written to match F1's post-whistle clamp, and that
+    // clamp was my own misreading of LESSON #23 (a tackle budget) — so this
+    // was a defensive score being denied the beat its own comment promises.
     const dtHome = scoringSide === crowdSide();
     G.zoomPunch = Math.max(G.zoomPunch, 0.14);
-    impactMoment(0.05, 0.2, 0.5);
+    impactMoment(0.05, 0.4, 0.5);
     fxConfetti(recoverer.x);
     if (G.stadium && G.stadium.time !== "day") fxFlash(16);
     crowdSpike = dtHome ? 0.14 : 0.05;
@@ -6567,16 +6569,26 @@
     //  (1) the S === "dead" branch of update() counts deadT/deadRecT/deadElapsed
     //      down on G.rdt (real time), so the wait does not grow at all —
     //      measured whistle-to-cards median 601ms before AND after; and
-    //  (2) a post-whistle request is clamped to the owner's LESSON #23
-    //      ceilings, slow-mo <= 0.2s, so the touchdown's 0.4s ask cannot
-    //      outrun the takedown budget.
+    //  (2) a post-whistle request is still ceilinged, so a stray or runaway
+    //      ask cannot sit on the game — but the ceiling is the largest
+    //      LEGITIMATE ask (0.4s, the touchdown's), not the takedown's.
+    //      CORRECTION: F1 originally clamped this to 0.2s "per LESSON #23".
+    //      That was wrong. #23's 0.2s slow-mo figure is a TACKLE budget — it
+    //      is owner-tuned alongside the tackled cel and proneT, all takedown
+    //      numbers. Applied blanket to every dead-ball beat it hit exactly
+    //      two call sites, the touchdown (0.4) and the interception (0.34),
+    //      which are the two payoff beats batch F existed to make reachable.
+    //      Every other request is already <= 0.2 and is untouched either way,
+    //      so the clamp did nothing except undo the feature. The whistle-to-
+    //      snap wait is protected by (1) alone, which is real-time and
+    //      independent: measured whistle-to-cards median 601ms regardless.
     // Both clocks still burn REAL dt, so a beat can never stall the game
     // (LESSON #9), and any state that is neither live nor dead still throws a
     // stale request away outright.
     const scalable = G.state === "live" || G.state === "dead";
     if (G.state === "dead") {
-      if (G.freezeT > 0.08) G.freezeT = 0.08;
-      if (G.slowT > 0.2) G.slowT = 0.2;
+      if (G.freezeT > 0.08) G.freezeT = 0.08;   // a FREEZE stops the game; hard cap
+      if (G.slowT > 0.4) G.slowT = 0.4;         // the largest legitimate ask (touchdown)
     }
     if (scalable && G.freezeT > 0) { G.freezeT = Math.max(0, G.freezeT - dt); sdt = 0; }
     else if (scalable && G.slowT > 0) { G.slowT = Math.max(0, G.slowT - dt); sdt = dt * (G.slowScale || 0.45); }

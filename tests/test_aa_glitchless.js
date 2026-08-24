@@ -700,6 +700,44 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     SRC.includes("dist(p, e) < CLIMB_GRASP)") &&
     SRC.includes("dist(e.block, e) > CLIMB_GRASP * 1.6"));
 
+  // -------------------------------------------------------------------- H
+  // THE SCORING PAYOFF BEAT. Batch F made post-whistle hit-stop reachable at
+  // all — every terminal beat had been cancelled one frame after it was asked
+  // for, because the scaling block only ran while the state was "live" and
+  // playDead flips it to "dead" on the very frame the beat is requested.
+  // F1 then clamped the dead-ball slow-mo to 0.2s "per LESSON #23", and that
+  // was a misreading: #23 0.2s figure is a TACKLE budget, owner-tuned next
+  // to the tackled cel (0.42s) and proneT (0.4). Applied blanket to every
+  // dead-ball beat it hit exactly two call sites — touchdown() at 0.4 and
+  // intercepted() at 0.34 — which are precisely the two beats batch F existed
+  // to deliver. Every other request in the file is already <= 0.2 and was
+  // unaffected either way, so the clamp did nothing except undo the feature.
+  // Measured scaled frames after the whistle, before -> after:
+  //   tackle 9 -> 9 (untouched)  interception 12 -> 21  touchdown 12 -> 24
+  //   and a runaway 2.0s ask still stops at 24 frames rather than 120.
+  // These pin all three halves: the takedown budget, the payoff, the guard.
+  check("H1 the dead-ball slow-mo ceiling is the largest legitimate ask, not the takedown one",
+    SRC.includes("if (G.slowT > 0.4) G.slowT = 0.4;") &&
+    !SRC.includes("if (G.slowT > 0.2) G.slowT = 0.2;"));
+  check("H2 a FREEZE is still hard-capped — it stops the game outright",
+    SRC.includes("if (G.freezeT > 0.08) G.freezeT = 0.08;"));
+  check("H3 the touchdown keeps its full slow payoff beat",
+    SRC.includes("impactMoment(0.05, 0.4, 0.5);   // the goal-line cross gets a slow payoff beat"));
+  // Same event, same payoff: a defensive/return score reaches the same
+  // scoreboard by a different route and its own comment promises parity.
+  check("H4 a defensive score gets the SAME payoff as an offensive touchdown",
+    SRC.split("impactMoment(0.05, 0.4, 0.5)").length - 1 >= 2);
+  check("H5 the takedown beat is untouched by the raised ceiling (LESSON #23)",
+    SRC.includes("impactMoment(hardHit ? 0.04 : 0.02, hardHit ? 0.2 : 0.11, 0.5);"));
+  // The whistle-to-snap wait is what the original clamp was really guarding,
+  // and it is guarded independently and better: the dead branch counts down on
+  // G.rdt (REAL time), so scaling a dead beat cannot stretch the wait at all.
+  // That is why raising the slow ceiling costs the player nothing.
+  check("H6 the dead-ball countdown ticks on REAL time, so a longer beat cannot steal the wait",
+    SRC.includes("G.rdt = dt;") &&
+    SRC.includes("const rdt = G.rdt || dt;") &&
+    SRC.includes("G.deadT -= rdt;"));
+
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
   process.exitCode = fail ? 1 : 0;
