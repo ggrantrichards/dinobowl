@@ -344,7 +344,18 @@ const CLEAR_WX = () => ({
       i, call: call.name, def: st.defCall.name, my: g.my, opp: g.opp, losYd0,
       holes: {}, handoffT: null, contactT: null, maxAdvYd: 0, gainYd: null,
       reason: null, td: 0, ownBlockerContactFrames: 0, carryFrames: 0,
+      endT: null, yacYd: null, yacSec: null, tacklersInvolved: 0, contacts: [],
     };
+    // THE YAC LEDGER (stage-1). The bench could already say WHERE the carrier
+    // was first touched; it could not say what happened next, which is the only
+    // thing the tackle model controls. An engagement EPISODE opens the frame a
+    // defender enters body range and closes once he has been out of it for more
+    // than 5 frames, so a one-frame solver jitter does not read as a broken
+    // tackle. Episodes are the unit for "how many men did it take" and for
+    // "which contacts did not finish the play".
+    const tackleEpisodes = [];
+    const epOf = new Map();          // def -> his currently open episode
+    const lastTouchF = new Map();    // def -> last frame he was in body range
     const everBlocked = new Map();    // def -> true if .blockedBy was ever set
     const everStalked = new Map();    // def -> true if ever someone's .block
     const latchCycles = new Map();    // def -> number of separate latches
@@ -493,6 +504,25 @@ const CLEAR_WX = () => ({
             }
           }
         }
+        for (const d of g.players) {
+          if (d.team !== "def" || d.proneT > 0) continue;
+          const lf = lastTouchF.get(d);
+          if (D(d, carrier) <= bodyRange(d, carrier, 0)) {
+            if (lf == null || frames - lf > 5) {
+              const ep = { def: d, role: d.role, t0: g.playT, tEnd: g.playT, shed: 0 };
+              tackleEpisodes.push(ep); epOf.set(d, ep);
+            } else {
+              const ep = epOf.get(d); if (ep) ep.tEnd = g.playT;
+            }
+            lastTouchF.set(d, frames);
+          } else if (lf != null && d.staggerT > 0) {
+            // Every escape branch in checkTackles (juke, truck, shed charge,
+            // YAC passive, stiff-arm, shrug-off) pushes the tackler off with
+            // staggerT, so a staggered EX-tackler is the engine's own "he broke
+            // free" signal rather than an inference from geometry.
+            const ep = epOf.get(d); if (ep) ep.shed = 1;
+          }
+        }
         rec.__endX = carrier.x;
         const near = g.players.filter((d) => d.team === "def" && d.proneT <= 0)
           .sort((a, b) => D(a, carrier) - D(b, carrier))[0];
@@ -503,6 +533,7 @@ const CLEAR_WX = () => ({
         }
       }
     }
+    rec.endT = g.playT;
     g.touchMove = null;
     for (const [e, r] of openRep) {
       reps.push({
@@ -524,6 +555,21 @@ const CLEAR_WX = () => ({
     const spot = Math.max(0, Math.min(100, ydAtX(rec.__endX)));
     rec.gainYd = spot - losYd0;
     rec.td = spot >= 100 ? 1 : 0;
+    // YARDS AFTER CONTACT. A run gain is first-contact depth + YAC, and only
+    // the second term belongs to the tackle model. Same spot convention as the
+    // gain, so the two components always add back up to it.
+    rec.yacYd = rec.contactAdvYd == null ? null : R2(rec.gainYd - rec.contactAdvYd, 3);
+    rec.yacSec = rec.contactT == null ? null : R2(rec.endT - rec.contactT, 3);
+    const tacklerSet = new Set(tackleEpisodes.map((ep) => ep.def));
+    rec.tacklersInvolved = tacklerSet.size;
+    rec.firstTacklerFinishedAlone = tacklerSet.size === 1 ? 1 : 0;
+    // A BROKEN TACKLE is an episode the carrier walked away from: the tackler
+    // was staggered off, or contact ended and the play stayed live for another
+    // quarter second. Both are things the player can actually see happen.
+    rec.contacts = tackleEpisodes.map((ep) => ({
+      role: ep.role, shed: ep.shed,
+      broken: (ep.shed || rec.endT - ep.tEnd > 0.25) ? 1 : 0,
+    }));
     rec.reps = reps;
     rec.ownBlockerContactPct = rec.carryFrames ? rec.ownBlockerContactFrames / rec.carryFrames : null;
     // grind health: did the accumulator ever get anywhere, and how many times
@@ -572,6 +618,7 @@ const CLEAR_WX = () => ({
   function passTrial(i, mode) {
     const st = stage(i, passPlay);
     if (!st) return { reject: "stage" };
+    const losYd0 = g.losYd;
     if (mode === "resolve") {
       const wr = g.players.find((e) => e.team === "off" && e.role === "WR1");
       if (!wr) return { reject: "nowr" };
@@ -581,7 +628,16 @@ const CLEAR_WX = () => ({
     key(" ");
     if (g.state !== "live") return { reject: "nosnap" };
 
-    const rec = { i, mode, def: st.defCall.name, my: g.my, opp: g.opp, pressureT: null, reason: null, throwT: null };
+    const rec = {
+      i, mode, def: st.defCall.name, my: g.my, opp: g.opp, pressureT: null, reason: null, throwT: null,
+      // PASSING MUST NOT INFLATE, so the same instrument that measures rusher
+      // YAC measures RECEIVER YAC and the three outcome rates the balance spec
+      // names (comp %, INT/att, yds/att). The catch gather trims receiver YAC
+      // on purpose, so the two YAC columns are never pooled into one number.
+      airT: null, catchT: null, catchYd: null, catchRole: null,
+      rcvContactT: null, rcvContactRole: null, rcvContactYd: null, rcvEndYd: null,
+    };
+    let rcv = null;
     const everBlocked = new Map();
     const openRep = new Map();
     const lastBlockedF = new Map();
@@ -597,6 +653,26 @@ const CLEAR_WX = () => ({
     while (g.state === "live" && g.playT < 16.4) {
       step(16.7); f++;
       if (g.lastErr) return { reject: "error", err: g.lastErr };
+      if (rec.airT == null && g.phase === "air") rec.airT = g.playT;
+      if (rec.catchT == null && g.phase === "carry" && g.carrier &&
+          g.carrier.team === "off" && g.carrier.catchT != null) {
+        rcv = g.carrier;
+        rec.catchT = g.playT; rec.catchRole = rcv.role;
+        rec.catchYd = ydAtX(rcv.x) - losYd0;
+      }
+      if (rcv && g.carrier === rcv) {
+        rec.rcvEndYd = ydAtX(rcv.x) - losYd0;
+        if (rec.rcvContactT == null) {
+          for (const d of g.players) {
+            if (d.team !== "def" || d.proneT > 0) continue;
+            if (D(d, rcv) <= bodyRange(d, rcv, 0)) {
+              rec.rcvContactT = g.playT; rec.rcvContactRole = d.role;
+              rec.rcvContactYd = ydAtX(rcv.x) - losYd0;
+              break;
+            }
+          }
+        }
+      }
       const qb = g.ball.holder;
       const inDrop = g.phase === "drop" && qb;
       if (rec.throwT == null && g.phase !== "drop" && g.phase !== "presnap") rec.throwT = g.playT;
@@ -633,6 +709,22 @@ const CLEAR_WX = () => ({
     rec.reason = (g.lastDead && g.lastDead.reason) || null;
     rec.sack = rec.reason === "SACKED!" ? 1 : 0;
     rec.sackT = rec.sack ? g.playT : null;
+    rec.endT = g.playT;
+    // An ATTEMPT is a ball that actually left the hand (phase "air"), so sacks
+    // and aborted dropbacks are not booked as incompletions — the same
+    // distinction the sack-attribution fix had to make for rushing.
+    rec.attempt = rec.airT != null ? 1 : 0;
+    rec.completion = rec.catchT != null ? 1 : 0;
+    rec.intercepted = rec.reason === "INTERCEPTED!" ? 1 : 0;
+    rec.passGainYd = rec.attempt
+      ? (rec.completion && rec.rcvEndYd != null
+        ? Math.max(-losYd0, Math.min(100 - losYd0, rec.rcvEndYd)) : 0)
+      : null;
+    rec.rcvYacFromContactYd = (rec.rcvContactYd != null && rec.rcvEndYd != null)
+      ? R2(rec.rcvEndYd - rec.rcvContactYd, 3) : null;
+    rec.rcvYacFromCatchYd = (rec.catchYd != null && rec.rcvEndYd != null)
+      ? R2(rec.rcvEndYd - rec.catchYd, 3) : null;
+    rec.rcvYacSec = rec.rcvContactT != null ? R2(rec.endT - rec.rcvContactT, 3) : null;
     rec.dropFrames = dropFrames;
     rec.reps = reps;
     rec.latchCycles = Array.from(latchCycles.values());
@@ -850,6 +942,54 @@ const CLEAR_WX = () => ({
         },
         pctOfCarryFramesWedgedIntoOwnBlocker: R2(100 * mean(runs.map((r) => r.ownBlockerContactPct).filter((v) => v != null)), 1),
       },
+      yardsAfterContact: {
+        note: "THE STAGE-1 METRIC. A run gain decomposes as advanceAtFirstContactYd + this. rusherYd uses the same spot convention as ydsPerCarry, so the two components always add back to the gain. secFromContactToWhistle is the screen time the grind occupies, and LESSON #23 caps the takedown at under a second of it.",
+        rusherYd: summary(runs.map((r) => r.yacYd), 3),
+        secFromContactToWhistle: summary(runs.map((r) => r.yacSec), 3),
+        byTacklerRole: (() => {
+          const o = {};
+          for (const role of ["DL", "EDGE", "LB", "CB", "S"]) {
+            const set = runs.filter((r) => r.contactRole === role);
+            if (!set.length) continue;
+            o[role] = {
+              carries: set.length,
+              yacYd: summary(set.map((r) => r.yacYd), 3),
+              yacSec: summary(set.map((r) => r.yacSec), 3),
+              gainYd: summary(set.map((r) => r.gainYd), 2),
+            };
+          }
+          return o;
+        })(),
+      },
+      gangTackling: {
+        note: "tacklersInvolved counts DISTINCT defenders who reached body range of the carrier at any point in the play. If a second-level tackler is deliberately slowed down, someone else has to close the play out or open-field runs never end — this is the number that says whether help actually arrives.",
+        tacklersPerCarry: summary(runs.map((r) => r.tacklersInvolved), 2),
+        pctFirstTacklerFinishedAlone: shareOf(runs.map((r) => r.firstTacklerFinishedAlone)),
+        distribution: tally(runs.map((r) => r.tacklersInvolved)),
+      },
+      brokenTackles: {
+        note: "an engagement EPISODE (defender enters body range; closed after 5 frames clear) that the carrier walked away from — the tackler was staggered off by an escape branch, or contact ended and the play stayed live 0.25s longer. 'shed' is the subset where checkTackles itself pushed the tackler off, so it is the legible-to-the-player share.",
+        episodesPerCarry: summary(runs.map((r) => r.contacts.length), 2),
+        brokenPerCarry: summary(runs.map((r) => r.contacts.reduce((a, c) => a + c.broken, 0)), 2),
+        pctOfEpisodesBroken: (() => {
+          const all = flat(runs.map((r) => r.contacts));
+          return all.length ? R2(100 * all.filter((c) => c.broken).length / all.length, 1) : null;
+        })(),
+        byRole: (() => {
+          const all = flat(runs.map((r) => r.contacts)), o = {};
+          for (const role of ["DL", "EDGE", "LB", "CB", "S"]) {
+            const set = all.filter((c) => c.role === role);
+            if (!set.length) continue;
+            o[role] = {
+              episodes: set.length,
+              broken: set.filter((c) => c.broken).length,
+              brokenPct: R2(100 * set.filter((c) => c.broken).length / set.length, 1),
+              shedPct: R2(100 * set.filter((c) => c.shed).length / set.length, 1),
+            };
+          }
+          return o;
+        })(),
+      },
       firstContact: {
         note: "the first defender to reach body range of the carrier — the '29 of 30' finding",
         roleMix: tally(runs.map((r) => r.contactRole)),
@@ -908,6 +1048,28 @@ const CLEAR_WX = () => ({
     },
     pass: {
       note: "TWO configurations. Read 'resolving' for the sack rate and 'heldPocket' for protection quality. A protection number taken off the resolving config is meaningless: cpuQB throws at a median ~1.07s, so the ball is gone before the rush arrives and the sack rate is 0% by construction.",
+      outcomes: (() => {
+        const att = resolves.filter((p) => p.attempt);
+        const comp = att.filter((p) => p.completion);
+        const ints = att.filter((p) => p.intercepted);
+        return {
+          note: "read off the RESOLVING config only (cpuQB actually throws). The balance spec is comp 72-80%, INT/att 5-8%. A tackle-model change moves RECEIVER yards as well as rusher yards, so these rates are the guard that passing did not inflate on the way past.",
+          attempts: att.length,
+          completions: comp.length,
+          completionPct: att.length ? R2(100 * comp.length / att.length, 1) : null,
+          interceptions: ints.length,
+          intPerAttemptPct: att.length ? R2(100 * ints.length / att.length, 1) : null,
+          ydsPerAttempt: summary(att.map((p) => p.passGainYd), 2),
+          ydsPerCompletion: summary(comp.map((p) => p.passGainYd), 2),
+          airYdsAtCatch: summary(comp.map((p) => p.catchYd), 2),
+          receiverYardsAfterContact: summary(comp.map((p) => p.rcvYacFromContactYd), 3),
+          receiverYardsAfterCatch: summary(comp.map((p) => p.rcvYacFromCatchYd), 3),
+          receiverSecFromContactToWhistle: summary(comp.map((p) => p.rcvYacSec), 3),
+          receiverFirstContactRoleMix: tally(comp.map((p) => p.rcvContactRole)),
+          catchRoleMix: tally(comp.map((p) => p.catchRole)),
+          whistleReasons: tally(resolves.map((p) => p.reason)),
+        };
+      })(),
       resolving: passBlock(resolves, resolveRejects,
         "QB driven by cpuQB; the play ends in a throw or a sack. This is the SACK RATE configuration."),
       heldPocket: passBlock(holds, holdRejects,
