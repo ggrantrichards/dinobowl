@@ -308,9 +308,14 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     tackleDead.length === 0, tackleDead.slice(0, 6).join(", "));
 
   // the tackled arc must be four DISTINCT reads: fold -> deeper fold -> lay -> settle
+  // The arc now spends ALL FOUR cels on the fold curve (0.40 / 0.60 / 0.80 /
+  // 1.00) instead of handing the last two to a flatten. Frame 0 must still not
+  // sample phase 0, which read as visually STANDING — that was the original D4
+  // defect and it is still guarded by the 0.40 floor.
   check("D4 the tackled collapse samples a real fold arc, not phase 0 (which stood up)",
-    /const layFrom = kind === "prone" \? 0 : Math\.max\(1, count - 2\);/.test(SPRITES_SRC) &&
-    /const foldP = layFrom <= 1 \? 1 : 0\.40 \+ 0\.60 \* \(fi \/ \(layFrom - 1\)\);/.test(SPRITES_SRC) &&
+    SPRITES_SRC.includes('const layFrom = kind === "prone" ? 0 : count;') &&
+    SPRITES_SRC.includes("const foldP = 0.40 + 0.60 * (fi / Math.max(1, count - 1));") &&
+    !SPRITES_SRC.includes("Math.max(1, count - 2)") &&
     !/if \(kind === "prone" \|\| phase >= 0\.5\)/.test(SPRITES_SRC));
   check("D5 `shoved` reels through four distinct leans, not -2/-3/-2/-2",
     /fi === 0 \? -2 : fi === 1 \? -4 : fi === 2 \? -3 : -1/.test(SPRITES_SRC));
@@ -361,17 +366,42 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     if (sh.actions.prone) settled.push(...sh.actions.prone.R.map((f, i) => ["prone#" + i, f]));
     if (sh.actions.tackled) { const R = sh.actions.tackled.R; settled.push(["tackled#" + (R.length - 1), R[R.length - 1]]); }
     for (const [label, fr] of settled) {
-      if (bodyMass(fr) < standMass) massLoss.push(k + " " + label + " " + bodyMass(fr) + "/" + standMass);
+      if (bodyMass(fr) < standMass * 0.80) massLoss.push(k + " " + label + " " +
+        Math.round(100 * bodyMass(fr) / standMass) + "% (" + bodyMass(fr) + "/" + standMass + ")");
       if (headMass(fr) < standHead) headLoss.push(k + " " + label + " " + headMass(fr) + "/" + standHead);
     }
   }
-  check("I1 a settled/laid-out cel never loses body pixels (was 64.5% of the standing body)",
+  // THRESHOLD, NOT EQUALITY. The fold helpers have always shed a few pixels
+  // (the pre-existing fold cels measure 89-97% of the standing body) and that
+  // has never been visible. The defect was an order of magnitude worse: the
+  // flattened cels ran 60.4-67.7%. The fold cels now run 87-106%, so 80%
+  // separates the two with clear margin in both directions — reverting to
+  // either the transpose+squash or the sprawl fails this.
+  check("I1 a laid-out cel keeps its body (the flatten kept 64.5%, min 60.4%)",
     massLoss.length === 0, massLoss.slice(0, 6).join(", "));
   check("I2 the HEAD survives being laid out (was 14->7 on trike, 3->1 on stego)",
     headLoss.length === 0, headLoss.slice(0, 6).join(", "));
-  check("I3 the settle spills instead of dropping on collision",
+  // actionLayFlat now serves only `dive`, where a body pitched nose-first
+  // through the air IS the intended read, and it is only ever called with
+  // settle=false. The spill stays as the correct collision rule regardless.
+  check("I3 actionLayFlat spills instead of dropping on collision",
     SPRITES_SRC.includes("while (ny > 0 && out[ny][nx] !== \".\") ny--;") &&
     !SPRITES_SRC.includes("&& out[ny][nx] === \".\") out[ny][nx] = ch;"));
+  // THE LAW: actionBackfallPosture states that a tackled carrier "stays a
+  // full, intact, roughly upright dinosaur that doubles over as it is driven
+  // down ... nothing is scaled or piled into a shallow band", and that the
+  // pitch is gentle because "owner: full pitch read as a pancake at field
+  // scale". Two separate attempts violated it — a 90-degree transpose (which
+  // stood a dino on its neck, since carno goes 14x14 -> 14x14) and a
+  // shear-and-collapse sprawl (which smeared the helmet into a bar on 6 of 12
+  // species). Both are gone; the tackled cels are folds end to end.
+  check("I8 the tackled/prone cels are FOLDS — no flatten reaches them",
+    !/kind === "tackled" \|\| kind === "prone"[\s\S]{0,3000}?actionLayFlat\(/.test(SPRITES_SRC) &&
+    !SPRITES_SRC.includes("function actionSprawl"));
+  // and the flatten that remains is reachable only from `dive`
+  check("I9 actionLayFlat is only ever called with settle=false now",
+    (SPRITES_SRC.match(/actionLayFlat\(sourceMap, false\)/g) || []).length ===
+    (SPRITES_SRC.match(/actionLayFlat\(/g) || []).length - 1);
 
   // A TACKLE KEEPS THE DIRECTION IT HAPPENED IN. beginTackleImpact computes a
   // real 2D hit vector from the tackler's momentum and then used to collapse

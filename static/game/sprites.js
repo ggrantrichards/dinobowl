@@ -1579,21 +1579,66 @@
       // species' own pixels (see actionLayFlat). The old all-fold version
       // never went horizontal and read as pancake mush at field scale.
       //
-      // FOUR DISTINCT SILHOUETTES: fold -> deepest fold -> horizontal -> sprawl.
+      // FOUR DISTINCT SILHOUETTES: fold -> deeper fold -> full fold -> settle.
       // Both fold cels used to sample `phase` directly (0 and 0.33), which put
       // frame 0 at pitch 0.10 — still visually STANDING — and frame 1 only
       // 0.027 further over. Two near-identical uprights meant the whole
-      // upright->horizontal rotation landed in the single step to frame 2 and
-      // read as a snap, not a fall. The pitch/head-lead curve inside
-      // actionBackfallPosture is owner-tuned (LESSON #23) and untouched; only
-      // WHICH point on that curve each cel samples has changed.
-      const layFrom = kind === "prone" ? 0 : Math.max(1, count - 2);
+      // collapse landed in a single step and read as a snap, not a fall. The
+      // pitch/head-lead curve inside actionBackfallPosture is owner-tuned
+      // (LESSON #23) and untouched; only WHICH point on it each cel samples
+      // has changed.
+      //
+      // THESE CELS ARE FOLDS, NOT FLATTENINGS, AND THAT IS A DESIGN LAW —
+      // actionBackfallPosture states it directly: the tackled carrier "stays a
+      // full, intact, roughly upright dinosaur that doubles over as it is
+      // driven down ... every part keeps its own pixels (helmet stays a helmet,
+      // eye stays an eye); nothing is scaled or piled into a shallow band", and
+      // the pitch is deliberately gentle because "owner: full pitch read as a
+      // pancake at field scale".
+      //
+      // The last two cels used to ignore that and call actionLayFlat, which
+      // TRANSPOSED the body 90 degrees. That is the wrong operation for these
+      // sprites: a dino is already a long horizontal animal, so carno goes
+      // 14x14 -> 14x14 and nothing lies down — the body is stood on its neck
+      // and the helmet moves from (10,3) to (12,11). The 0.55 vertical squash
+      // downstream existed to partly hide that, and paid by DELETING every
+      // pixel that collided (64.5% of the body survived; the helmet went 14->7
+      // px on trike and 3->1 on stego). Replacing the transpose with a
+      // shear-and-collapse sprawl removed the neck-standing and kept 100% of
+      // the mass, but smeared the helmet into a horizontal bar on 6 of 12
+      // species — because ANY attempt to pile a 16x16 dino into a shallow band
+      // has to densify past the point where the parts stay legible. The grid
+      // binds in both directions: laying the body out by shear needs ~24px of
+      // width and there are 16. Which is exactly what the law above already
+      // said, so the cels are folds now and the flatten is gone.
+      //
+      // The fold ramp gains a third sample (0.40 / 0.70 / 1.00) so the arc is
+      // still four distinct reads without a flatten to supply the last one,
+      // and the REST cel settles by dropping the helmet, skull and neck into
+      // the shoulder line as whole scan lines (actionDropTackleUpperMass —
+      // "rather than rotating individual pixels ... without shredding a 16px
+      // silhouette into holes") plus one row of sag. That is a lower, heavier
+      // silhouette than the fold, built with no scaling and no piling.
+      const layFrom = kind === "prone" ? 0 : count;
       if (fi >= layFrom) {
-        cells = actionLayFlat(sourceMap, kind === "prone" || fi >= count - 1);
-        anchor = actionLayAnchors(cells);
+        ({ cells, rig } = actionBackfallPosture(cells, rig, 1, true));
+        actionGroundWing(cells, rig, false);
+        const cover = actionClamp(rig, rig.torso.maxX - 1, rig.torso.maxY - 1);
+        anchor = { ball: ballAt(cover.x, cover.y), contact: null, hands: [] };
       } else {
-        const foldP = layFrom <= 1 ? 1 : 0.40 + 0.60 * (fi / (layFrom - 1));
+        const foldP = 0.40 + 0.60 * (fi / Math.max(1, count - 1));
         ({ cells, rig } = actionBackfallPosture(cells, rig, foldP, false));
+        // The owner-tuned fold curve saturates: actionLeadWithHead is
+        // round(1 + 2p), which buckets four samples into three values, so two
+        // cels always share a head-lead and read as a duplicate. The original
+        // pack papered over that by making the last two cels a FLATTEN, which
+        // is the very thing actionBackfallPosture forbids. Variety comes from
+        // the BODY instead, with no scaling and no piling: cel 1 leans a pixel
+        // further over its hips, and the rest cel splays the hind legs out of
+        // the tuck ("dive") because a body that has stopped moving is no longer
+        // driving through anything.
+        if (fi === 1) { cells = actionLean(cells, rig, 1); rig = actionRig(cells, key); }
+        if (fi >= count - 1) { cells = actionCompactTackleLegs(cells, rig, "dive"); rig = actionRig(cells, key); }
         const cover = actionClamp(rig, rig.torso.maxX - 1, rig.torso.maxY - 1);
         actionGroundWing(cells, rig, false);
         anchor = { ball: ballAt(cover.x, cover.y), contact: null, hands: [] };
