@@ -2537,6 +2537,7 @@
       // player movement or collision; they only exempt that named contact
       // from the separation solver while the shoulder wrap is on screen.
       tackleImpactT: 0, tackleImpactWith: 0, tackleImpactRole: "", tackleFallDir: 0, tackleFallPending: false,
+      layQ: 0,
       // unique athletic profile: jump derives from the name so every dino differs
       jump: 55 + (seedHash(name || species) % 30),
     }, extra || {});
@@ -2584,7 +2585,7 @@
     if (!e || !(e.tackleImpactT > 0)) return;
     e.tackleImpactT = Math.max(0, e.tackleImpactT - dt);
     if (!e.tackleImpactT) {
-      e.tackleImpactWith = 0; e.tackleImpactRole = ""; e.tackleFallDir = 0;
+      e.tackleImpactWith = 0; e.tackleImpactRole = ""; e.tackleFallDir = 0; e.layQ = 0;
     }
   }
   function beginTackleImpact(tackler, carrier, duration, options) {
@@ -2600,7 +2601,40 @@
     let d = Math.hypot(dx, dy);
     if (d < 0.001) { dx = tackler.dir || 1; dy = 0; d = 1; }
     const nx = dx / d, ny = dy / d;
-    const fallDir = Math.abs(nx) > 0.18 ? (nx >= 0 ? 1 : -1) : (carrier.dir || tackler.dir || 1);
+    // THE HIT IS A 2D VECTOR AND IT HAS TO STAY ONE. (nx, ny) is computed
+    // correctly above from the tackler's real momentum, and then the old line
+    // here threw all of it away except the SIGN OF nx. Two things broke.
+    //
+    // (a) ny was discarded outright, so a defender driving the carrier ACROSS
+    //     the field laid him out along the sideline anyway — the body fell a
+    //     direction the hit never travelled.
+    // (b) worse, when the hit was near-vertical (|nx| <= 0.18) the fall
+    //     direction fell back to carrier.dir — whichever way the carrier
+    //     HAPPENED TO BE FACING before contact. That is a stale value with no
+    //     relationship to the tackle, and it is the "tackle animation loses
+    //     its direction" the owner reported: hit a man square from downfield
+    //     and he flops along his old heading.
+    //
+    // fallDir is now only the MIRROR (which way the art faces), and when the
+    // hit gives no horizontal signal it comes from the geometry between the
+    // two bodies — never from a stale facing.
+    let fallDir;
+    if (Math.abs(nx) > 0.18) fallDir = nx >= 0 ? 1 : -1;
+    else {
+      const gx = carrier.x - tackler.x;
+      fallDir = Math.abs(gx) > 0.001 ? (gx >= 0 ? 1 : -1) : (tackler.dir || carrier.dir || 1);
+    }
+    // layQ is the quarter-turn the BODY LIES ALONG: 0 = down the sideline
+    // (which is how the laid-out cel is authored), +1/-1 = across the field.
+    // Quantized to quarter turns deliberately. imageSmoothingEnabled is false
+    // everywhere in this game, so a quarter turn is a lossless move on the
+    // pixel grid, while an arbitrary angle resamples a 16x16 sprite into
+    // uneven pixel sizes and reads as damage rather than as rotation. Four
+    // directions is the most a pixel-art body can lie in and stay crisp.
+    // The 1.6 factor is hysteresis: only a decisively cross-field hit changes
+    // the layout, so the ordinary tackle still looks exactly as it did.
+    const layQ = Math.abs(ny) > Math.abs(nx) * 1.6 ? (ny >= 0 ? 1 : -1) : 0;
+    tackler.layQ = layQ; carrier.layQ = layQ;
     tackler.tackleImpactT = dur; carrier.tackleImpactT = dur;
     tackler.tackleImpactWith = carrier.bodyId; carrier.tackleImpactWith = tackler.bodyId;
     tackler.tackleImpactRole = "driver"; carrier.tackleImpactRole = "carrier";
@@ -2748,7 +2782,7 @@
         e.pose = ""; e.poseT = 0; e.poseDur = 0; e.jumpT = 0; e.proneT = 0;
         e.impactT = 0; e.impactLead = false; e.catchDiveT = 0; e.fdCeleb = 0;
         e.tackleImpactT = 0; e.tackleImpactWith = 0; e.tackleImpactRole = "";
-        e.tackleFallDir = 0; e.tackleFallPending = false;
+        e.tackleFallDir = 0; e.tackleFallPending = false; e.layQ = 0;
         e.soarT = 0; e.soarCd = 0; e.soarCharge = 0.35; e.controlled = false;
       }
     };
@@ -9796,6 +9830,19 @@
       if (e.proneT > 0 && !["tackled", "shoved", "prone"].includes(pose)) {
         cx.save(); cx.translate(e.x - G.camX, e.y); cx.rotate(e.dir * Math.PI / 2);
         cx.drawImage(img, -drawW / 2, -drawH + 6); cx.restore();
+      } else if (e.layQ && (pose === "tackled" || pose === "prone")) {
+        // A body driven ACROSS the field lies across the field. The laid-out
+        // cel is authored horizontal (head to the right in the R pack), so a
+        // single lossless quarter turn aims it up- or down-field instead of
+        // snapping every tackle onto the sideline axis. beginTackleImpact set
+        // layQ from the hit vector, and it is cleared where the impact clears.
+        // Accessories are deliberately not drawn on this path, for the same
+        // reason the proneT fallback above skips them: bling and QB features
+        // are positioned against the STANDING pack head fraction and would
+        // land off-body on a rotated cel.
+        cx.save(); cx.translate(e.x - G.camX, e.y - drawH / 2 + 3);
+        cx.rotate(e.layQ * Math.PI / 2);
+        cx.drawImage(img, -drawW / 2, -drawH / 2); cx.restore();
       } else if (e.spinT > 0) {
         // spin-move: a quick full rotation through the cut
         cx.save(); cx.translate(e.x - G.camX, e.y - spr.h / 2 + 3 - jump);

@@ -1399,19 +1399,47 @@
     const bw = b.maxX - b.minX + 1, bh = b.maxY - b.minY + 1;
     const ox = Math.max(0, Math.round((W2 - bw) / 2));
     // mid-fall keeps the dramatic head-first pike (full rotated height);
-    // the SETTLED body compresses vertically toward the turf so the rest
-    // frame reads as a sprawled dinosaur, not a body standing on its snout
+    // the SETTLED body collapses toward the turf so the rest frame reads as
+    // a sprawled dinosaur, not a body standing on its snout.
+    //
+    // WHAT WAS BROKEN. The settle used to multiply each row offset by 0.55
+    // and write through an `out[ny][nx] === "."` guard. Several source rows
+    // therefore mapped onto one destination row, the first writer won, and
+    // every later pixel in that cell was silently thrown away. Because the
+    // loop paints from the turf upward, the pixels discarded were always the
+    // ones FURTHEST FROM THE GROUND — and on a body rotated onto its side
+    // the axis being squashed is back-to-belly, so what got deleted was the
+    // dorsal ridge (sail, plates, frill) and the top of the skull.
+    // Measured across all 11 species: the settled cel kept 64.5% of the
+    // standing body, and the helmet went 14 -> 7 px on trike, 3 -> 1 on
+    // stego, 11 -> 6 on allo and spino. The owner reported it as characters
+    // "condensed into pancakes" whose "body and/or head ceases to exist",
+    // which is exactly what the numbers say.
+    //
+    // THE FIX: SETTLE BY SPILLING, NOT BY DELETING. A body dropping onto turf
+    // compresses — the hollow space between the legs and under the belly
+    // closes up — and it BULGES where the mass has nowhere to go. It does not
+    // evaporate. So each column is packed down onto the ground and a pixel
+    // whose row is already taken climbs to the nearest free row above it.
+    // Because the scan still runs turf-side first, the body keeps its
+    // back-to-belly ORDER (the dorsal ridge stays on top of the belly) while
+    // every single pixel survives: mass is preserved exactly, by construction.
     const squash = settle ? 0.55 : 1;
     const bhOut = Math.max(5, Math.round((bh - 1) * squash) + 1);
     const ground = H2 - 2;
     const oy = Math.max(0, ground - (bhOut - 1));
-    // paint from the ground row upward so turf-side pixels win collisions
+    // paint from the ground row upward so turf-side pixels settle first
     for (let y = b.maxY; y >= b.minY; y--) for (let x = b.minX; x <= b.maxX; x++) {
       const ch = rot[y][x];
       if (ch === ".") continue;
       const dyBot = Math.round((b.maxY - y) * squash);
-      const nx = ox + (x - b.minX), ny = oy + (bhOut - 1) - dyBot;
-      if (nx >= 0 && nx < W2 && ny >= 0 && ny < H2 && out[ny][nx] === ".") out[ny][nx] = ch;
+      const nx = ox + (x - b.minX);
+      if (nx < 0 || nx >= W2) continue;
+      let ny = oy + (bhOut - 1) - dyBot;
+      if (ny >= H2) ny = H2 - 1;
+      // climb away from the turf until this pixel has a row of its own
+      while (ny > 0 && out[ny][nx] !== ".") ny--;
+      if (out[ny][nx] === ".") out[ny][nx] = ch;
     }
     return out;
   }

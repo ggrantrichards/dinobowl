@@ -323,6 +323,83 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
   check("D7 all 11 land species still carry 4 tackled cels",
     packSizes.every((n) => n === 4), packSizes.join(","));
 
+  // -------------------------------------------------------------------- I
+  // THE TACKLED BODY KEEPS ITS BODY. Owner report: tackled characters were
+  // "condensed into pancakes ... their body and/or head doesn't cease to
+  // exist". Cause: actionLayFlat's settle multiplied each row offset by 0.55
+  // and wrote through an `out[ny][nx] === "."` guard, so several source rows
+  // collided on one destination row, the first writer won, and the rest were
+  // discarded. The scan paints turf-side first, so what was thrown away was
+  // always the pixels FURTHEST from the ground — on a body rotated onto its
+  // side that is the dorsal ridge and the top of the skull.
+  // Measured before the fix: the settled cel kept 64.5% of the standing body
+  // (min 60.4%), and the helmet went 14 -> 7 px on trike, 3 -> 1 on stego,
+  // 11 -> 6 on allo and spino, 11 -> 7 on five others. Every land species.
+  // The fix settles by SPILLING (a taken row pushes the pixel to the nearest
+  // free row away from the turf), so mass is preserved BY CONSTRUCTION.
+  // These are pixel assertions, not source greps: they would catch any future
+  // change that starts dropping body pixels again by any mechanism.
+  function bodyMass(fr) {
+    let n = 0;
+    for (let i = 3; i < fr.px.length; i += 4) if (fr.px[i] > 0) n++;
+    return n;
+  }
+  function headMass(fr) {   // the helmet is the near-white block
+    let n = 0;
+    for (let i = 0; i < fr.px.length; i += 4) {
+      if (fr.px[i + 3] > 0 && fr.px[i] > 200 && fr.px[i + 1] > 200 && fr.px[i + 2] > 200) n++;
+    }
+    return n;
+  }
+  const massLoss = [], headLoss = [];
+  for (const k of SPECIES) {
+    const sh = sheets[k];
+    if (!sh || !sh.actions) continue;
+    const standMass = bodyMass(sh.R[0]), standHead = headMass(sh.R[0]);
+    // the cels actionLayFlat SETTLES: every prone cel, and the last tackled one
+    const settled = [];
+    if (sh.actions.prone) settled.push(...sh.actions.prone.R.map((f, i) => ["prone#" + i, f]));
+    if (sh.actions.tackled) { const R = sh.actions.tackled.R; settled.push(["tackled#" + (R.length - 1), R[R.length - 1]]); }
+    for (const [label, fr] of settled) {
+      if (bodyMass(fr) < standMass) massLoss.push(k + " " + label + " " + bodyMass(fr) + "/" + standMass);
+      if (headMass(fr) < standHead) headLoss.push(k + " " + label + " " + headMass(fr) + "/" + standHead);
+    }
+  }
+  check("I1 a settled/laid-out cel never loses body pixels (was 64.5% of the standing body)",
+    massLoss.length === 0, massLoss.slice(0, 6).join(", "));
+  check("I2 the HEAD survives being laid out (was 14->7 on trike, 3->1 on stego)",
+    headLoss.length === 0, headLoss.slice(0, 6).join(", "));
+  check("I3 the settle spills instead of dropping on collision",
+    SPRITES_SRC.includes("while (ny > 0 && out[ny][nx] !== \".\") ny--;") &&
+    !SPRITES_SRC.includes("&& out[ny][nx] === \".\") out[ny][nx] = ch;"));
+
+  // A TACKLE KEEPS THE DIRECTION IT HAPPENED IN. beginTackleImpact computes a
+  // real 2D hit vector from the tackler's momentum and then used to collapse
+  // it to sign(nx), discarding ny entirely; worse, a near-vertical hit fell
+  // back to carrier.dir — the carrier's STALE pre-contact facing, which has no
+  // relationship to the tackle. Hit a man square from downfield and he flopped
+  // along his old heading. fallDir is now only the mirror and comes from the
+  // hit (or the body geometry) and never from a stale facing; layQ is the
+  // quarter-turn the body lies along, so a cross-field hit lays him out across
+  // the field. Quarter turns only: imageSmoothingEnabled is false everywhere,
+  // so a quarter turn is lossless on the pixel grid while an arbitrary angle
+  // resamples a 16x16 sprite into uneven pixels and reads as damage.
+  // Probed over 12 hit angles x both stale facings: 12 layouts along the
+  // sideline, 12 across the field, 0 inheriting the stale facing.
+  check("I4 the fall direction is never taken from the carrier's stale facing",
+    !SRC.includes("(carrier.dir || tackler.dir || 1);") &&
+    SRC.includes("fallDir = Math.abs(gx) > 0.001 ? (gx >= 0 ? 1 : -1) : (tackler.dir || carrier.dir || 1);"));
+  check("I5 the layout carries the hit's CROSS-FIELD component, quantized to quarter turns",
+    SRC.includes("const layQ = Math.abs(ny) > Math.abs(nx) * 1.6 ? (ny >= 0 ? 1 : -1) : 0;") &&
+    SRC.includes("tackler.layQ = layQ; carrier.layQ = layQ;"));
+  check("I6 a laid-out body is actually DRAWN along that quarter turn",
+    SRC.includes('} else if (e.layQ && (pose === "tackled" || pose === "prone")) {') &&
+    SRC.includes("cx.rotate(e.layQ * Math.PI / 2);"));
+  // LESSON #20: the latch resets where the play resets, or the next tackle
+  // inherits the previous one's layout.
+  check("I7 layQ is cleared where the tackle impact clears",
+    SRC.includes('e.tackleImpactRole = ""; e.tackleFallDir = 0; e.layQ = 0;'));
+
   // ---------------------------------------------------------------------------
   // E. THE ANIMATION BATCH (ROADMAP A3, shipped 2026-08-12)
   //   E1-E3  a tackled/sacked carrier RISES instead of holding a 90-rotated walk
