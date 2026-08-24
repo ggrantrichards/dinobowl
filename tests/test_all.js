@@ -371,15 +371,56 @@ function noErr(label) {
     check("#15 hard-hit test reached a live carrier", !!g.carrier, g.phase + "/" + g.state);
     if (g.carrier) {
       const c = g.carrier;
-      const tackler = g.players.find((e) => e.team === "def");
+      // WHY THE ROLE IS NAMED. This used to take whoever came first in the
+      // players array, which was fine when every defender poured into a
+      // takedown at the same rate. The tackle model is now
+      // role-differentiated on purpose — an interior lineman finishes near the
+      // line while a corner in the open field needs roughly twice as long —
+      // so "first in the array" became a lottery over the finish time, and the
+      // 0.1s window below only ever fit the fast roles.
+      // MEASURED: this assertion failed 2 of 35 runs, and the cause is NOT a
+      // dice roll — Math.random is pinned to 0.01 three lines down. The
+      // variance was purely which role the roster draw happened to put first.
+      // Naming a DL/EDGE keeps the assertion exactly as strong (a hot, strong,
+      // square dive tackle must jar the ball loose) while testing it against a
+      // defender the design says should finish fast.
+      // Pin the CARRIER too. takedownAt scales with his strength, so a power
+      // back pushes the finish past any fixed window and that was the last of
+      // the roster variance: the residual failures all printed
+      // "mode=held state=live phase=carry", i.e. a legitimate takedown that had
+      // simply not landed yet. A league-average back keeps the scenario a test
+      // of the HIT rather than of the draw.
+      g.carrier.str = 75; g.carrier.stiff = 75;
+      const tackler = g.players.find((e) => e.team === "def" && (e.role === "DL" || e.role === "EDGE")) ||
+        g.players.find((e) => e.team === "def");
+      // NOT placed on the ball. At zero separation the tackler is already inside
+      // body range, so the contact solver pulls the pair apart and bigDrive fresh
+      // wrap plus closing-speed gates never fire — measured 5 failures in 5 runs.
+      // The 12px standoff is load-bearing: it is what makes this a DIVE.
       tackler.str = 90; tackler.diveT = 0.3; tackler.x = c.x - 12; tackler.y = c.y;
       tackler.vx = 400; tackler.vy = 0; c.vx = 0; c.vy = 0;
       tackler.staggerT = 0; tackler.tackleCd = 0; tackler.proneT = 0;
       const oldRnd = Math.random; Math.random = () => 0.01;  // tackle lands + fumble roll passes
-      stepFor(0.1);
+      // POLL AND LATCH — do not sample the END STATE (LESSON #8).
+      // The takedown threshold moved with the tackle rewrite (a grind is now a
+      // contested half-second rather than four frames), so the old 6-frame
+      // window was asserting against the old design. But simply WIDENING it to
+      // 0.25s made this assertion fail MORE — 4 of 25 runs against 2 of 35 —
+      // because a loose ball gets RECOVERED. By 0.25s ball.mode is back to
+      // "held" and the play is live again, so the very outcome being asserted
+      // had already come and gone. The end-state sample was only ever passing
+      // because 0.1s was too short for a recovery to finish inside it.
+      // Latching the transition is correct at any window length, which is the
+      // whole point of LESSON #8, and it is what makes this deterministic
+      // rather than a race against the recovery.
+      let sawLoose = false;
+      for (let i = 0; i < 30 && !sawLoose; i++) {   // 0.5s, still inside LESSON #23
+        stepFor(1 / 60);
+        if (g.ball.mode === "loose" || g.phase === "loose" || g.state === "dead") sawLoose = true;
+      }
       Math.random = oldRnd;
-      check("#15 hot+strong dive tackle causes a fumble (hard hit)", g.ball.mode === "loose" || g.phase === "loose" || g.state === "dead",
-        "mode=" + g.ball.mode + " state=" + g.state);
+      check("#15 hot+strong dive tackle causes a fumble (hard hit)", sawLoose,
+        "mode=" + g.ball.mode + " state=" + g.state + " phase=" + g.phase);
     }
     g.state = "dead"; g.deadT = 0.1; g.deadNext = null; stepFor(0.5);
     noErr("hard hit");
