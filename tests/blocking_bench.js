@@ -345,6 +345,7 @@ const CLEAR_WX = () => ({
       holes: {}, handoffT: null, contactT: null, maxAdvYd: 0, gainYd: null,
       reason: null, td: 0, ownBlockerContactFrames: 0, carryFrames: 0,
       endT: null, yacYd: null, yacSec: null, tacklersInvolved: 0, contacts: [],
+      punchBandFrames: new Map(), punchAttempts: 0,
     };
     // THE YAC LEDGER (stage-1). The bench could already say WHERE the carrier
     // was first touched; it could not say what happened next, which is the only
@@ -503,6 +504,21 @@ const CLEAR_WX = () => ({
               break;
             }
           }
+        }
+        // STRIKE-BAND DWELL. checkTackles decides an AI strip attempt with
+        // Math.random() < dt * 0.02 evaluated on EVERY frame a defender sits
+        // 18-40px from the carrier. That is a per-frame probability roll
+        // (LESSON #15) whose true rate is set by DWELL TIME, which couples
+        // strip attempts to how long contact lasts. Mirror the exact gate.
+        for (const d of g.players) {
+          if (d.team !== "def") continue;
+          const dd = D(d, carrier);
+          if (!d.controlled && (d.punchCd || 0) <= 0 && (d.punching || 0) <= 0 &&
+              !d.punchedThisPlay && (d.proneT || 0) <= 0 && (d.staggerT || 0) <= 0 &&
+              dd > 18 && dd < 40) {
+            rec.punchBandFrames.set(d, (rec.punchBandFrames.get(d) || 0) + 1);
+          }
+          if (d.punchedThisPlay && !d.__punchCounted) { d.__punchCounted = 1; rec.punchAttempts++; }
         }
         for (const d of g.players) {
           if (d.team !== "def" || d.proneT > 0) continue;
@@ -895,6 +911,30 @@ const CLEAR_WX = () => ({
     geomCheck,
     run: {
       carriesSampled: runs.length,
+      strikeBand: (() => {
+        // What an equivalent ONCE-PER-ENTRY draw has to reproduce, derived
+        // from the measured dwell instead of assumed. p_defender =
+        // 1 - (1 - dt*rate)^frames, averaged over every defender entry.
+        const frames = [];
+        let attempts = 0;
+        for (const r of runs) {
+          attempts += r.punchAttempts || 0;
+          if (!r.punchBandFrames) continue;
+          for (const [, f] of r.punchBandFrames) frames.push(f);
+        }
+        const DTF = 1 / 60, RATE = 0.02;
+        const p = frames.length
+          ? frames.reduce((a, f) => a + (1 - Math.pow(1 - DTF * RATE, f)), 0) / frames.length
+          : 0;
+        return {
+          note: "Replace Math.random() < dt*0.02 with a single draw on band entry at equivalentOncePerEntryP to keep the strip rate while removing the dwell coupling (LESSON #15).",
+          defenderEntries: frames.length,
+          entriesPerCarry: runs.length ? Math.round(100 * frames.length / runs.length) / 100 : 0,
+          framesInBand: summary(frames, 1),
+          equivalentOncePerEntryP: Math.round(1e5 * p) / 1e5,
+          attemptsPerCarry: runs.length ? Math.round(1e3 * attempts / runs.length) / 1e3 : 0,
+        };
+      })(),
       rejected: runRejects.length,
       rejectReasons: tally(runRejects),
       realHandoffGuarantee: "a carry counts only if the play reached phase 'carry' with an RB carrier, the carrier never changed (no fumble, no lateral), and the whistle was not SACKED!/INTERCEPTED!/FUMBLE!/INCOMPLETE. QB keepers and scrambles are excluded by construction: only HB DIVE / HB SWEEP are called and qbKeep is never set.",

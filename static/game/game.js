@@ -735,6 +735,30 @@
   // untouched at every value (held-pocket hold 2.17-2.20s, merged engagement
   // 1.052s) because runLaneY() returns null on anything that is not a run.
   const RUN_LANE_HALF = 42;
+  // AI STRIP ATTEMPT: ONE DRAW PER PLAY, taken when the first defender reaches
+  // strike range, and then the question is settled for the whole play.
+  //
+  // THREE SCHEMES, AND WHY THIS IS THE THIRD. Originally the game rolled
+  // Math.random() < dt * 0.02 on EVERY frame a defender sat 18-40px from the
+  // carrier — a per-frame probability roll (LESSON #15) whose real rate is set
+  // by DWELL TIME. Lengthening the grind therefore raised the fumble rate all
+  // by itself, with the fumble gate untouched: three independent tackle-model
+  // rewrites each took turnovers from 0.14% to 0.49-0.76% per carry and all
+  // three mistook it for their own doing.
+  // Moving to one draw per DEFENDER on band entry removed the dwell coupling
+  // but not the coupling: measured over 1434 carries at nine seeds, attempts
+  // went to 0.0176/carry against a 0.0063 baseline, because a longer grind
+  // means more defenders reach strike range — the entry count tracks
+  // tacklers/carry, which the same change took from 2.01 to 6.42. The rate was
+  // no longer a function of time, but it was still a function of pile size.
+  // Once per PLAY is the only form with no such handle: the attempt rate is a
+  // property of the down, not of how the tackle happens to unfold. It also
+  // matches what the original comment always claimed the mechanic was — "a
+  // real punch-out is a rare, high-risk play, not every rep".
+  // Calibrated straight to the measured baseline, since attempts/carry is now
+  // just this probability: 0.0063 over 1596 carries (~10 events, so +/-32%
+  // Poisson — the decoupling is the certain part, the exact rate is not).
+  const AI_PUNCH_P = 0.0063;
   const RUN_DRIVE_BASE = 44;          // px/sec a blk-75 lineman turns the pair
   const RUN_DRIVE_PER_PT = 0.7;       // per point of blk over the rusher's str
   const RUN_DRIVE_MIN = 18, RUN_DRIVE_MAX = 62;
@@ -2525,7 +2549,7 @@
       state: "idle", path: null, pathI: 0, endMode: "stop",
       engaged: null, engageT: 0, staggerT: 0, jukeT: 0, jukeCd: 0, diveT: 0, proneT: 0,
       hands: 75, agi: 75, tkl: 75, acc: 75, arm: 75, controlled: false, cover: null, zone: null,
-      tackleCd: 0, soarT: 0, soarCd: 0, soarCharge: 0.35, punching: 0, punchCd: 0, spinCd: 0, throwT: 0, jumpT: 0,
+      tackleCd: 0, soarT: 0, soarCd: 0, soarCharge: 0.35, punching: 0, punchCd: 0, punchRolled: false, spinCd: 0, throwT: 0, jumpT: 0,
       stiffT: 0, stiffCd: 0, stamNow: 1, coldT: 0,
       // Visual action state is deliberately separate from gameplay timers.
       // It shifts the original compact species sprite for a dive, high-point
@@ -2671,12 +2695,44 @@
       // blasts the carrier well back; a standing/arm tackle barely moves him;
       // lunging backward against his own run (negative drive) moves him least.
       const drive = opt.drive || 0;
-      const knockback = opt.knockback != null ? opt.knockback
-        : Math.max(3, Math.min(16, Math.round(4 + drive * 0.1)));
-      carrier.x += nx * knockback; carrier.y += ny * knockback;
+      // THE PILE FALLS WHERE THE POWER CONTEST SAYS.
+      // WAS: knockback = 4 + drive*0.1 px applied along `nx` — the TACKLER'S
+      // momentum — so at the whistle the carrier was teleported 3-16px in
+      // whatever direction the defender happened to be moving, and playDead
+      // spots the ball at ydAtX(carrier.x) on the very next statement. Measured
+      // on the blocking bench (seed 4242, 158 carries) that ONE frame was worth
+      // -0.41 yd median, i.e. MORE than the entire -0.28 median YAC: the wrapped
+      // carrier was already gaining ground during the grind and then giving all
+      // of it back in the collapse.
+      // It also INVERTED the role table, which is how it was found. A DL who is
+      // engaged is being driven off the ball by his blocker, so his vx points
+      // DOWNfield and `nx` knocked the carrier FORWARD (measured DL YAC +0.112);
+      // a free safety arriving downhill has vx pointing upfield, so the identical
+      // line of code took yards away (S YAC -0.291). A safety alone in the open
+      // field was stopping the carrier better than a defensive tackle in traffic
+      // purely because of the sign of the tackler's velocity.
+      // NOW: the FALL still reads along the hit — nx/ny drive the cel, the facing
+      // and the y-fold, so LESSON #2 and the LESSON #23 cel budget are untouched
+      // — but the ground the carrier KEEPS is a contested pile push along the
+      // field axis: +x when he wins the power contest, -x only when he genuinely
+      // loses it. Forward is always +x for whoever has the ball (playDead spots
+      // at ydAtX and scores at >= 100), so "he fell forward" is a real
+      // forward-progress spot and a tackle for loss is a contest he lost.
+      // No dice anywhere in here (LESSON #15 / LESSON #19): it is strength plus
+      // stiff-arm plus agility against strength plus tackling and the defender's
+      // own measured closing drive — every term is on the ratings screen.
+      const pilePow = ((carrier.str || 75) + (carrier.stiff || carrier.str || 75) + (carrier.agi || 75) * 0.5) / 2.5;
+      const pileForce = ((tackler.str || 75) + (tackler.tkl || 75)) / 2;
+      const contest = opt.contest != null ? opt.contest
+        : clamp((pilePow - pileForce) / 20 + 0.5 - clamp(drive, 0, 160) / 120, -1, 1);
+      // opt.knockback stays an explicit override for the scripted QA scenes and
+      // keeps its old meaning there (px straight back along the hit).
+      const push = opt.knockback != null ? -opt.knockback : contest * 10;
+      carrier.x += push;
+      carrier.y += ny * Math.min(4.5, Math.abs(push) * 0.4);
       // Carry a little of that momentum into the carrier so the dead-ball
       // settle drifts with the hit instead of stopping dead on contact.
-      carrier.vx += nx * drive * 0.25; carrier.vy += ny * drive * 0.25;
+      carrier.vx += push * 3.5; carrier.vy += ny * Math.abs(drive) * 0.12;
       // NO TELEPORTING: the tackler may be nudged into the wrap by at most a
       // few pixels. If he is farther out than that, he keeps his real spot
       // and momentum and simply rides in — a wrap must never look like the
@@ -3439,7 +3495,15 @@
     // pancake is a once-per-PLAY beat, so a latch that outlived the snap would
     // silently downgrade it to once per GAME (LESSON #20 — a latch or
     // accumulator model has to be reset wherever the play resets).
-    for (const e of G.players) { e.punchedThisPlay = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; }
+    G.punchDrawn = false;   // the strip question is asked once per play (LESSON #20)
+    for (const e of G.players) { e.punchedThisPlay = false; e.punchRolled = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; }
+    // The takedown ledger, the escape ledger and the per-play contact clock are
+    // latches, so they reset where the play resets — LESSON #20, which is exactly
+    // what the loop above already exists to honour.
+    for (const e of G.players) {
+      e.firstContactT = null; e.breakAcc = 0; e.wrapClock = 0; e.brokeFree = false;
+      e.tackleAcc = 0; e.grappledT = 0; e.wrapTop = 0; e.wrapN = 0; e.wrapStampT = null;
+    }
     G.qbImprov = false;
     if (offenseIsUser()) G.snapTaught = (G.snapTaught || 0) + 1;   // coach bubble fades after 3 snaps
     const qb = G.players.find((e) => e.role === "QB");
@@ -7231,10 +7295,17 @@
     }
     // grapple fight bookkeeping (RB takedown model): pulling out of the wrap
     // drains the accumulated takedown quickly and re-arms the shrug roll
-    if (e.grappledT > 0) e.grappledT -= dt;
-    else if (e.tackleAcc > 0) {
-      e.tackleAcc = Math.max(0, e.tackleAcc - dt * 170);
-      if (e.tackleAcc <= 0) { e.grappleRolled = false; e.hardHitTaken = false; }
+    if (e.grappledT > 0) { e.grappledT -= dt; e.wrapClock = (e.wrapClock || 0) + dt; }
+    else if (e.tackleAcc > 0 || e.breakAcc > 0) {
+      // Decay stays COHERENT with the pour: the pour dropped by roughly the same
+      // factor when the role rate landed, so a carrier who pulls out of the wrap
+      // still clears the whole accumulator in about half a second rather than
+      // instantly. The escape ledger drains on the same clock as the takedown
+      // ledger it races — a half-finished break must not survive a trip through
+      // open field and cash in on the next contact.
+      e.tackleAcc = Math.max(0, e.tackleAcc - dt * 110);
+      e.breakAcc = Math.max(0, (e.breakAcc || 0) - dt * 110);
+      if (e.tackleAcc <= 0) { e.grappleRolled = false; e.hardHitTaken = false; e.wrapClock = 0; }
     }
 
     let passMod = 1;
@@ -7277,7 +7348,47 @@
       const ct = G.playT - e.catchT;
       if (ct >= 0 && ct < 0.45) gather = 0.55 + ct;
     }
-    const speedMod = G.weather.speedMod * (e.grappledT > 0 ? 0.42 : 1) * (e.diveT > 0 ? 1.9 : 1) *
+    // LEG DRIVE IN THE WRAP — the carrier's side of the takedown.
+    // WAS: a flat 0.42. Every wrapped carrier crawled at 42% of his legs, so a
+    // 250-pound power back held by one corner and a scatback held by a defensive
+    // tackle moved at exactly the same rate, and nothing in the file told
+    // updateEntity who had hold of him. One constant cannot express "he is moving
+    // the pile" or "he was stood up at the line", which are the two things a run
+    // through contact is supposed to read as — and it is slow enough that the
+    // contact solver's own separation push could out-run his forward progress, so
+    // he was not fighting for yards, he was being processed.
+    // NOW it is the contest the wrap publishes in checkTackles. `legs` is the
+    // carrier's power plant — strength, the stiff-arm rating, and enough agility
+    // to keep his feet — against the anchored force of the man who actually has
+    // him. Both normalise to ~75 at league average, and the band is set so the
+    // middle of the league lands above the old constant while a losing matchup
+    // drops well below it: going backward is now something the carrier has to
+    // LOSE (the floor, plus the defenders standing on his downfield face) rather
+    // than the default.
+    // Read one frame stale on purpose — grappledT is read the same way, and
+    // checkTackles by construction runs after all movement for the tick is
+    // chosen. Deterministic and legible (LESSON #15 / LESSON #19); this changes
+    // only how fast the man with the ball may move, never firmness, contact mode
+    // or grapple depth (LESSON #1).
+    let wrapDrive = 1;
+    if (e.grappledT > 0) {
+      const legs = ((e.str || 75) + (e.stiff || e.str || 75) * 0.6 + (e.agi || 75) * 0.3) / 1.9;
+      const resist = e.wrapTop > 0 ? e.wrapTop : 75;
+      // A RECEIVER IS NOT A RUNNING BACK, AND THE PASS GAME IS GUARDED. The
+      // owner's play-test finding was that receivers do NOT slow down after
+      // receiving, and the catch-gather ramp a few lines below exists to TRIM
+      // receiver YAC; leg drive is the same lever pointed the other way, so
+      // handing it to a receiver undoes that work. Measured: the run-game tuning
+      // alone took receiver yards-after-catch from a 1.05 median to 1.91. A back
+      // hits the hole with his pads down and his legs already churning; a
+      // receiver is catching, turning, and then absorbing the hit. `catchT` is
+      // the engine's own marker for "this man received the ball on this play" —
+      // the same field the gather ramp keys off — so the two corrections stay on
+      // one switch instead of drifting apart.
+      const wrapGrit = e.catchT != null ? 0.36 : 1;
+      wrapDrive = wrapGrit * clamp(0.86 + (legs - resist) / 150, 0.16, 0.92);
+    }
+    const speedMod = G.weather.speedMod * wrapDrive * (e.diveT > 0 ? 1.9 : 1) *
       (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - longCarryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather;
     if (e.jukeT > 0) e.jukeT -= dt;
     if (e.diveT > 0) {
@@ -8319,6 +8430,33 @@
           } else if (mode === "grapple") {
             shareA = a.team === "off" ? 0.32 : 0.68;
             shareB = 1 - shareA;
+            // A BALL CARRIER IN A WRAP IS THE MAN DRIVING, SO HE STOPS PAYING THE
+            // SEPARATION TAX. Same defect and same fix as the same-team clause
+            // directly above, found the same way.
+            // The grappler RIDES the carrier to bodyContactRange * 0.58 every
+            // frame (updateEntity's grapT block), which is exactly `minD` for a
+            // cross-team grapple pair. So the wrap parks a body on the carrier's
+            // downfield face, the carrier then drives INTO it, and that overlap is
+            // corrected against him — 0.32 of it, every frame, once per defender
+            // in the pile. Instrumented per frame on the blocking bench with the
+            // finish rate already slowed to 17 frames of grind: the carrier's own
+            // movement was +0.49 yd and the solver took -0.33 yd of it straight
+            // back, 67% of his forward progress, scaling with every frame of grind
+            // added. That is the term that made a longer takedown pointless.
+            // The tackle is already priced twice — the accumulator says when he
+            // goes down, wrapDrive says how fast he moves while held — so charging
+            // him a third time in the physics solver is double counting, and it is
+            // why contact read as "processed" instead of "fought". The defenders
+            // in the pile absorb it instead: that IS moving the pile, and the
+            // accumulator still bounds how long he gets to.
+            // NOTHING about firmness, contact mode or grapple depth changes
+            // (LESSON #1) — minD, the 2.5px overlap cap and pushFrac are all
+            // untouched. Only who absorbs a correction that was already applied.
+            if (G.carrier && G.carrier.grappledT > 0 && a.team !== b.team &&
+                (G.carrier === a || G.carrier === b)) {
+              if (G.carrier === a) { shareA = 0.04; shareB = 0.96; }
+              else { shareB = 0.04; shareA = 0.96; }
+            }
           } else {
             const ia = 1 / Math.max(0.01, bodyMass(a));
             const ib = 1 / Math.max(0.01, bodyMass(b));
@@ -8755,6 +8893,22 @@
   function checkTackles(dt) {
     if (G.phase === "carry" && G.carrier) {
       const c = G.carrier;
+      // FIRST TOUCH, stamped from geometry alone. The grind ramp below is the
+      // hard guarantee behind LESSON #23's one-second takedown budget, and it is
+      // only as good as the moment it starts counting from. Stamped inside the
+      // wrap branch it missed every frame the loop skipped for another reason —
+      // a defender still `blockedBy` and not yet at true overlap, the 0.40s
+      // catch grace, a tackleCd — so a carrier could be in among bodies for half
+      // a second before the clock even started, and a measured play ran 1.39s
+      // from first contact to the whistle with the ramp never engaging. This is
+      // the same body-range test the blocking bench uses to define first contact,
+      // so the clock and the metric now start on the same frame.
+      if (c.firstContactT == null) {
+        for (const q of G.players) {
+          if (q.team === c.team || q.proneT > 0) continue;
+          if (dist(q, c) <= bodyContactRange(q, c, 0)) { c.firstContactT = G.playT; break; }
+        }
+      }
       // --- peanut punch resolves FIRST with a generous strike range, so a
       // wound-up swing actually connects instead of losing to the wrap-up
       for (const e of G.players) {
@@ -8764,10 +8918,27 @@
         // play, per defender, and only a small fraction of the time.
         if (!e.controlled && e.punchCd <= 0 && e.punching <= 0 && !e.punchedThisPlay) {
           const dd0 = dist(e, c);
-          if (dd0 > 18 && dd0 < 40 && Math.random() < dt * 0.02) {
-            e.punchedThisPlay = true;
-            timedJump(e);
-            startPunch(e);
+          // WHAT WAS BROKEN: this was `Math.random() < dt * 0.02` evaluated on
+          // EVERY frame the defender sat in the 18-40px strike band. That is a
+          // per-frame probability roll (LESSON #15), and its real rate is set
+          // by DWELL TIME — so strip attempts were coupled to how long contact
+          // lasted. Measured dwell: mean 8.4 frames, max 45. The consequence is
+          // that ANY change lengthening the grind raises the fumble rate on its
+          // own, with the fumble gate itself untouched: three independent
+          // tackle-model rewrites each took turnovers from 0.14% to 0.49-0.76%
+          // per carry, and all three mistook it for their own doing.
+          //
+          // Now the decision is made ONCE per defender per play, the frame he
+          // enters strike range, and stays decided (punchRolled is latched for
+          // the play and cleared in snap(), LESSON #20). A strip attempt is a
+          // property of the play, not of how long the tackle takes.
+          if (dd0 > 18 && dd0 < 40 && !G.punchDrawn) {
+            G.punchDrawn = true;
+            if (Math.random() < AI_PUNCH_P) {
+              e.punchedThisPlay = true;
+              timedJump(e);
+              startPunch(e);
+            }
           }
         }
         if (e.punching > 0 && (e.jumpT > 0 || e.soarT > 0) && dist(e, c) < 26 && !(G.ramp && G.ramp.ent === c)) {
@@ -8928,8 +9099,26 @@
           // against his own run. It drives knockback distance, tackle odds,
           // and part of the strip chance.
           const eDrive = (evx * (c.x - e.x) + evy * (c.y - e.y)) / Math.max(1, dc);
+          // A DE-CLEATER IS AN ARRIVAL, NOT A FINISH. bigDrive tests the
+          // carrier's own speed against 0.45 of his top end — and a wrapped
+          // carrier used to be pinned at a flat 0.42, i.e. permanently just under
+          // that line, so during a grapple bigDrive was effectively off. Giving
+          // the carrier real leg drive below pushed him over it and the flag came
+          // on for every frame of every wrap: measured, "FLATTENED!" went from 8%
+          // of carries to 39%, and because hardHit is also an input to the
+          // ball-strip check at takedown, a tuning pass on the RUN GAME was
+          // quietly turning up the fumble pressure. Neither was intended and
+          // neither is football: a de-cleater is a defender arriving with
+          // momentum into a runner who is still running free; once he is wrapped
+          // it is a grind, not a blast. The window is the first tenth of a second
+          // of the wrap rather than literally frame one, so a second man arriving
+          // into the same collision can still blow it up — gating on frame one
+          // alone cut "FLATTENED!" to 1%, well under the 8% it started at.
+          // c.hardHitTaken already latches the flag for the frame it fires on,
+          // and that is what the takedown presentation reads, so a play that
+          // STARTS with a de-cleater still ENDS "FLATTENED!".
           const bigDrive = (e.str || 75) >= 84 && eSpeed > c.spd * 0.55 &&
-            cSpeed > c.spd * 0.45 && align > 0.4;
+            cSpeed > c.spd * 0.45 && align > 0.4 && (c.wrapClock || 0) <= 0.12;
           // Dive momentum is partially spent turning into the tackle, so the
           // closing threshold must be attainable after the approach step.
           // This also fixes the visible "arrived but missed" CPU tackle.
@@ -8961,20 +9150,72 @@
           // nearly impossible to shed. Deliberately uncommon, like the NFL.
           const carrierPower = ((c.str || 75) + (c.stiff || c.str || 75) + (c.agi || 75) * 0.5) / 2.5;
           const defForce = ((e.str || 75) + (e.tkl || 75)) / 2;
-          let breakP = 0.045 + (carrierPower - defForce) / 300     // stat differential
+          // ---- BREAKING A TACKLE IS A CONTEST HE WINS, NOT A COIN FLIP.
+          // WAS: one Math.random() roll per grapple against a base of 0.045,
+          // from which a square full-speed hit subtracted up to 0.15 — so on most
+          // real contacts breakP clamped to exactly ZERO, and on the rest it was
+          // a ~5% shot. Measured: 0.03 broken tackles per carry, 1.2% of
+          // engagement episodes, and DL / EDGE / CB / S never broke a single one
+          // across the whole bench. A good NFL back breaks 0.15-0.25 a carry.
+          // Worse than the rate, it was a die at the moment of truth
+          // (LESSON #19): the player could not see why one hit bounced off and an
+          // identical-looking one did not, because there was nothing to see.
+          // NOW it is the mirror image of the takedown accumulator and the two
+          // RACE. The defender pours strength into bringing him down; the carrier
+          // pours leg drive into getting out; whichever ledger fills first is
+          // what the player watches happen. Every term is legible: his power and
+          // balance against this defender's force, how square and how fast the
+          // hit was, how many other men already have hold of him, and how long he
+          // has been held. Deterministic end to end, no per-frame roll anywhere
+          // (LESSON #15, LESSON #19).
+          // `held` is counted inline rather than read off the wrap stamp so it
+          // cannot depend on which defender this loop happens to reach first.
+          if (c.firstContactT == null) c.firstContactT = G.playT;
+          let held = 0;
+          for (const q of G.players) {
+            if (q === e || q.team === c.team || q.staggerT > 0 || q.proneT > 0) continue;
+            if (dist(q, c) <= bodyContactRange(q, c, 2)) held++;
+          }
+          const breakEdge = 0.45 + (carrierPower - defForce) / 26
             // Hit quality: a square, full-speed drive (high eDrive) is nearly
             // unbreakable; a soft, poorly-angled or against-the-grain arm
             // tackle (low/negative eDrive) is what actually gets shed.
-            - clamp((eDrive - 22) / 340, -0.08, 0.15)
-            + ((c.apex && c.passive === "truck") ? 0.05 : 0)   // power backs shed more
-            - ((e.diveT > 0 || e.soarT > 0) ? 0.03 : 0)        // a committed dive wraps up better
-            - ((e.apex && e.passive === "tackle") ? 0.03 : 0); // HEAT-SEEKER hangs on
-          breakP = clamp(breakP, 0, 0.30);
+            - clamp((eDrive - 22) / 120, -0.3, 0.85)
+            - held * 0.18                                      // you do not shed a gang tackle
+            + ((c.apex && c.passive === "truck") ? 0.4 : 0)    // power backs shed more
+            - ((e.diveT > 0 || e.soarT > 0) ? 0.22 : 0)        // a committed dive wraps up better
+            - ((e.apex && e.passive === "tackle") ? 0.2 : 0)   // HEAT-SEEKER hangs on
+            // ...and he gets out on the first beat or he is going down. This
+            // reads the PER-PLAY contact clock, not the current wrap: keyed to
+            // the wrap, a shed reset its own window, escapes chained, and one
+            // measured play ran 1.77s from first contact to the whistle. One
+            // escape early is a broken tackle; four in a row is a different
+            // sport.
+            - clamp((G.playT - c.firstContactT - 0.12) / 0.25, 0, 1.1);
+          c.breakAcc = (c.breakAcc || 0) + Math.max(0, breakEdge) * dt * 230;
           // A shrug-off only applies to an actual wrap-up attempt — not while
           // the defender is mid-punch (that's the ball-strip mechanic) — and
           // not on a dead-on airborne dive already committed past the point of
           // being shed.
-          if (e.punching <= 0 && !c.grappleRolled && (c.grappleRolled = true) && Math.random() < breakP) {
+          // ONE ESCAPE PER PLAY. The escape resets the takedown ledger, so
+          // without a latch a back who keeps winning the contest keeps restarting
+          // the fight: measured, chained escapes ran first-contact-to-whistle out
+          // to 1.39s, which LESSON #23's one-second takedown budget does not have
+          // room for even with the grind ramp maxed. One broken tackle is a
+          // highlight; three in a row is a different sport. Reset per play with
+          // the other latches (LESSON #20).
+          // ...and the escape window CLOSES. The soft late-grind term above is a
+          // slope, and a truck-passive power back could out-run it: measured, one
+          // such back broke free late enough that the refill pushed
+          // first-contact-to-whistle to 1.27s. The window is the same order as the
+          // slope, so it only ever catches the outlier, and with it the whole
+          // takedown is provably inside LESSON #23's one-second budget: last
+          // possible escape 0.45s, and the grind ramp finishes a from-scratch
+          // refill inside another 0.4s.
+          if (e.punching <= 0 && c.breakAcc >= 60 && !c.brokeFree &&
+              G.playT - c.firstContactT < 0.45) {
+            c.brokeFree = true;
+            c.breakAcc = 0; c.tackleAcc = 0; c.wrapClock = 0;
             // Shove scales with how badly the carrier out-powered the hit.
             shrugOffTackle(c, e, clamp(0.4 + (carrierPower - defForce) / 120, 0.3, 1));
             const brkLines = [
@@ -9000,11 +9241,110 @@
           // getting dragged for extra yards — until the takedown lands or a
           // move (juke/stiff-arm/shrug) physically breaks him off
           e.grappling = c; e.grapT = 0.22;
-          const pour = ((e.str || 75) / 75) * (0.55 + clamp(p, 0.2, 1) * 0.6) * dt * 300 *
-            (e.diveT > 0 || e.soarT > 0 ? 1.5 : 1) * (e.controlled ? 1.15 : 1);
-          c.tackleAcc = (c.tackleAcc || 0) + pour + (hardHit && !c.hardHitTaken ? 46 : 0);
+          // WHO FINISHES A TACKLE, AND HOW LONG IT TAKES.
+          // WAS: one flat rate for every defender on the field. At dt = 1/60 the
+          // pour was ~4.55/frame against a 60 threshold = 13 frames = 0.22s, and
+          // the +46 hard-hit chunk finished it in FOUR frames — measured median
+          // contact-to-whistle 0.15s, max 0.30s. Real football is 0.5-1.5s and
+          // LESSON #23's budget is a full second, so the takedown was running at
+          // about a fifth of the screen time it is allowed.
+          // Three things were wrong. (a) Nothing distinguished a 300-pound tackle
+          // wrapping a back in a phone booth from a corner trying to drag him
+          // down in the open field; the decoded Retro Bowl source prices exactly
+          // that at DL 5.1 against CB/S 2.6, a 2x spread, where `e.str` alone
+          // only spans 1.5x from a 90 to a 60. (b) The +46 chunk was a takedown
+          // by fiat: 46 of the 60 needed, in one frame, with nothing the carrier
+          // could do about it. (c) Additive pouring made slowing the rate down
+          // self-defeating — MORE defenders simply arrived and poured in parallel,
+          // so 2.01 distinct tacklers per carry became 3.89 and the median grind
+          // stalled at 0.23s instead of the 0.5s the rate was set for. Football
+          // answer: the FIRST man wraps and the rest pile ON. The second defender
+          // genuinely helps; the fourth is arriving at a tackle already decided.
+          // So the pour is sub-additive (1, 0.45, 0.29, 0.22 — summing to about
+          // two men however many show up), it carries an explicit role rate, and
+          // the big hit STAGGERS the grind forward instead of ending it.
+          // Still no rolls anywhere (LESSON #15 / LESSON #19): a deterministic
+          // accumulator whose rate is stats, role, momentum and the clock.
+          const ROLE_FINISH = { DL: 1.35, EDGE: 1.1, LB: 0.68, CB: 0.4, S: 0.34 };
+          // A committed AIRBORNE dive is not a role skill — it is a man leaving
+          // his feet to take the runner's legs out — so it gets a floor rather
+          // than a corner's finish rate.
+          const roleFinish = airborne
+            ? Math.max(ROLE_FINISH[e.role] || 0.8, 1.2)
+            : (ROLE_FINISH[e.role] || 0.8);
+          // The wrap is re-stamped every frame: how many men have hold of him,
+          // and the anchored force of the strongest one. Frame-stamped, so it is
+          // a plain per-frame count and not a hidden accumulator.
+          if (c.wrapStampT !== G.playT) { c.wrapStampT = G.playT; c.wrapN = 0; c.wrapTop = 0; }
+          const gang = 1 / (1 + (c.wrapN || 0) * 1.2);
+          // WRAP_ANCHOR is the finish table read as MASS rather than as tempo: a
+          // tackle in the phone booth is an anchor, a corner in the open field
+          // gets dragged. Deliberately the strongest SINGLE wrapper and not the
+          // sum — the pile in this engine is big (median 3, up to 9 defenders
+          // inside body range on one frame), so a summed resistance ran to a
+          // median of 159 against a carrier's ~79 of legs, pinned every wrapped
+          // runner to the floor, and measured WORSE than the flat constant it
+          // replaced (YAC median 0.50 -> 0.33). Gang size is already priced in
+          // the sub-additive pour above and in the contact solver; pricing it a
+          // third time here just re-created the original bug. What this term is
+          // FOR is the matchup: a power back against a corner versus a scatback
+          // against a defensive tackle.
+          const WRAP_ANCHOR = { DL: 1.12, EDGE: 1.04, LB: 0.96, CB: 0.84, S: 0.82 };
+          c.wrapTop = Math.max(c.wrapTop || 0,
+            (((e.str || 75) + (e.tkl || 75)) / 2) * (WRAP_ANCHOR[e.role] || 0.95));
+          c.wrapN = (c.wrapN || 0) + 1;
+          // HOW LONG THIS PLAY HAS BEEN IN CONTACT — and the guarantee that the
+          // takedown cannot outrun LESSON #23's one-second screen-time budget.
+          // Every term that lengthens the grind (role rate, sub-additive pile,
+          // leg drive, an escape that restarts the fight) pushes at that ceiling
+          // from a different direction, and they DO line up badly: keyed to the
+          // current wrap this ramp measured a 1.77s outlier because a chain of
+          // escapes kept resetting it. So the clock is stamped once per play, at
+          // first contact, and nothing resets it until the next snap. Past ~0.55s
+          // the play is no longer "he is fighting for yards", it is "he is
+          // wrapped up and it is over", and the pour ramps hard to say so. A
+          // bound, not a mechanic.
+          if (c.firstContactT == null) c.firstContactT = G.playT;
+          const grindRamp = 1 + clamp((G.playT - c.firstContactT - 0.55) / 0.1, 0, 6);
+          // LEG DRIVE IS WHAT RESISTS A TAKEDOWN, so a carrier with no legs under
+          // him has nothing to resist with. This is the same idea as the leg-drive
+          // block in updateEntity, read from the other side: a back churning at
+          // full stride is hard to put down, and a man stood up at the line or
+          // caught flat-footed goes straight to the ground. It is also why a
+          // committed airborne DIVE is a takedown rather than a grind — nobody
+          // churns for half a second with a defender wrapped round his ankles —
+          // and it is what test_all #15 is asserting when it drives a 90-strength
+          // diving tackler into a stationary carrier and expects the play over.
+          const standUp = 1.9 - clamp(Math.hypot(c.vx, c.vy) / Math.max(1, c.spd), 0, 1) * 0.9;
+          const pour = gang * roleFinish * ((e.str || 75) / 75) * (0.55 + clamp(p, 0.2, 1) * 0.6) * dt * 66 *
+            (e.diveT > 0 || e.soarT > 0 ? 3.8 : 1) * (e.controlled ? 1.15 : 1) * grindRamp * standUp;
+          // THE HARD-HIT CHUNK, kept only where it is actually the play. The old
+          // flat +46 was 46 of the 60 needed in ONE frame for any hard hit, which
+          // is a takedown by fiat and is why the measured median grind was four
+          // frames. But a full-speed AIRBORNE dive that connects genuinely is a
+          // knockdown — nobody churns for half a second with a defender wrapped
+          // round his ankles — so the airborne branch keeps a decisive chunk while
+          // a standing de-cleater now has to finish the grind like everyone else.
+          // (test_all #15 asserts exactly this case, and it is unseeded, so this
+          // needs real margin rather than a boundary pass.)
+          c.tackleAcc = (c.tackleAcc || 0) + pour +
+            (hardHit && !c.hardHitTaken ? (airborne ? 40 : 12) : 0);
           if (hardHit) c.hardHitTaken = true;
-          const takedownAt = 60 + ((c.str || 75) - 75) * 1.1 + ((c.apex && c.passive === "truck") ? 16 : 0);
+          // WHOSE GRIND IS THIS. A back churning in traffic and a receiver caught
+          // in the open field are not the same football event, and the whole point
+          // of the owner's catch-gather work (the ramp in updateEntity) was that
+          // receiver YAC had to be TRIMMED, not grown. Lengthening the takedown
+          // for everybody handed the pass game a running back's contact balance:
+          // measured, receiver contact-to-whistle went 0.45s -> 1.04s and receiver
+          // yards-after-catch nearly doubled — precisely the regression the
+          // passing guard exists to catch. So the threshold carries the carrier's
+          // own body. A back or a QB has to be brought down; a receiver goes down
+          // closer to when he is hit. A rating-shaped constant per position, not a
+          // roll, and it reads correctly the other way too: this is why a fullback
+          // is harder to put on the ground than a slot receiver.
+          const CARRIER_HOLD = { RB: 1, FB: 1.05, QB: 0.85, TE: 0.24, WR: 0.13, WR1: 0.13, WR2: 0.13, WR3: 0.13 };
+          const carrierHold = CARRIER_HOLD[c.role] == null ? 0.8 : CARRIER_HOLD[c.role];
+          const takedownAt = (60 + ((c.str || 75) - 75) * 1.1 + ((c.apex && c.passive === "truck") ? 16 : 0)) * carrierHold;
           if (c.tackleAcc >= takedownAt) {
             c.tackleAcc = 0;
             c.impactT = 0.5;
@@ -9015,17 +9355,28 @@
             // along the defender's momentum, so the pair falls the way the hit
             // is actually travelling instead of a fixed screen direction.
             beginTackleImpact(e, c, 0.34, { hit: hitVec || undefined, drive: eDrive });
+            // A takedown that BEGAN with a de-cleater still presents as one, even
+            // though the flag itself now only fires on the arrival window —
+            // c.hardHitTaken is what has always latched that. PRESENTATION ONLY:
+            // tryStripAtTakedown is handed exactly the same `hardHit` it always
+            // was, so the fumble gate's input is untouched by this rewrite.
+            const bigFinish = hardHit || !!c.hardHitTaken;
             // a SHORT beat (owner: the collapse must not linger)
+            // Deliberately still keyed to hardHit and NOT to bigFinish: the
+            // hit-stop belongs to the frame the collision happens on, and by the
+            // time a de-cleater's grind finishes half a second later that moment
+            // has passed. It is also the line test_aa_glitchless H5 pins
+            // character-for-character as the owner-tuned takedown beat.
             impactMoment(hardHit ? 0.04 : 0.02, hardHit ? 0.2 : 0.11, 0.5);
             if (tryStripAtTakedown(c, e, { hardHit, bigDrive, freshCatch, align })) {
-              if (hardHit) { G.shake = Math.max(G.shake, 0.5); G.zoomPunch = Math.max(G.zoomPunch, 0.1); fxSparks(e.x, e.y, 10); announce("bighit", e.name); sfx.roar(); }
+              if (bigFinish) { G.shake = Math.max(G.shake, 0.5); G.zoomPunch = Math.max(G.zoomPunch, 0.1); fxSparks(e.x, e.y, 10); announce("bighit", e.name); sfx.roar(); }
               fumble(c, e); return;
             }
-            if (hardHit) { G.shake = Math.max(G.shake, 0.4); G.zoomPunch = Math.max(G.zoomPunch, 0.08); fxSparks(e.x, e.y, 8); announce("bighit", e.name); sfx.roar(); }
+            if (bigFinish) { G.shake = Math.max(G.shake, 0.4); G.zoomPunch = Math.max(G.zoomPunch, 0.08); fxSparks(e.x, e.y, 8); announce("bighit", e.name); sfx.roar(); }
             // the sound of the hit scales with the defender's actual drive
-            sfx.tackle(hardHit ? 2 : 0.85 + Math.max(0, eDrive) / 220);
+            sfx.tackle(bigFinish ? 2 : 0.85 + Math.max(0, eDrive) / 220);
             addStat(e, "tkl");
-            playDead(hardHit ? "FLATTENED!" : "TACKLED", null, false);
+            playDead(bigFinish ? "FLATTENED!" : "TACKLED", null, false);
             return;
           }
           // No dazed-and-detach branch and no random bounce-off: a big hit
