@@ -346,6 +346,8 @@ const CLEAR_WX = () => ({
       reason: null, td: 0, ownBlockerContactFrames: 0, carryFrames: 0,
       endT: null, yacYd: null, yacSec: null, tacklersInvolved: 0, contacts: [],
       punchBandFrames: new Map(), punchAttempts: 0,
+      jukes: 0, stiffs: 0, jukeWindowFrames: new Map(), stiffWindowFrames: new Map(),
+      jukeStaggers: 0, prevJukeT: 0, prevStiffT: 0,
     };
     // THE YAC LEDGER (stage-1). The bench could already say WHERE the carrier
     // was first touched; it could not say what happened next, which is the only
@@ -510,6 +512,28 @@ const CLEAR_WX = () => ({
         // 18-40px from the carrier. That is a per-frame probability roll
         // (LESSON #15) whose true rate is set by DWELL TIME, which couples
         // strip attempts to how long contact lasts. Mirror the exact gate.
+        // JUKE / STIFF-ARM. cpuCarrier rolls Math.random() < dt * RATE on every
+        // frame the nearest defender is inside 28px (juke) / 26px (stiff), so
+        // like the strip roll its real rate is DWELL TIME. Count both the moves
+        // themselves and the frames of opportunity that produced them.
+        if ((carrier.jukeT || 0) > 0 && rec.prevJukeT <= 0) rec.jukes++;
+        if ((carrier.stiffT || 0) > 0 && rec.prevStiffT <= 0) rec.stiffs++;
+        rec.prevJukeT = carrier.jukeT || 0;
+        rec.prevStiffT = carrier.stiffT || 0;
+        {
+          const ds = g.players.filter((q) => q.team === "def" && (q.proneT || 0) <= 0 && (q.staggerT || 0) <= 0)
+            .sort((a, b) => D(a, carrier) - D(b, carrier));
+          const nn = ds[0];
+          if (nn && nn.x > carrier.x - 10 && D(nn, carrier) < 95) {
+            const dd2 = D(nn, carrier);
+            if (dd2 < 28 && (carrier.jukeCd || 0) <= 0) {
+              rec.jukeWindowFrames.set(nn, (rec.jukeWindowFrames.get(nn) || 0) + 1);
+            }
+            if (dd2 < 26 && (carrier.stiffCd || 0) <= 0) {
+              rec.stiffWindowFrames.set(nn, (rec.stiffWindowFrames.get(nn) || 0) + 1);
+            }
+          }
+        }
         for (const d of g.players) {
           if (d.team !== "def") continue;
           const dd = D(d, carrier);
@@ -911,6 +935,33 @@ const CLEAR_WX = () => ({
     geomCheck,
     run: {
       carriesSampled: runs.length,
+      evasion: (() => {
+        // What a once-per-OPPORTUNITY draw has to reproduce. p_opportunity =
+        // 1 - (1 - dt*rate)^frames averaged over every defender window, which
+        // is the closed form for the current per-frame roll.
+        const jf = [], sf = [];
+        let jukes = 0, stiffs = 0;
+        for (const r of runs) {
+          jukes += r.jukes || 0; stiffs += r.stiffs || 0;
+          if (r.jukeWindowFrames) for (const [, f] of r.jukeWindowFrames) jf.push(f);
+          if (r.stiffWindowFrames) for (const [, f] of r.stiffWindowFrames) sf.push(f);
+        }
+        const DTF = 1 / 60;
+        const eq = (arr, rate) => arr.length
+          ? Math.round(1e5 * arr.reduce((a, f) => a + (1 - Math.pow(1 - DTF * rate, f)), 0) / arr.length) / 1e5
+          : 0;
+        const n = runs.length || 1;
+        return {
+          note: "jukes/stiffs actually performed per carry, plus the opportunity windows that produced them. equivalentOncePerOpportunityP is what a single draw on window entry must use to reproduce the current per-frame rate.",
+          jukesPerCarry: Math.round(1e3 * jukes / n) / 1e3,
+          stiffArmsPerCarry: Math.round(1e3 * stiffs / n) / 1e3,
+          jukeOpportunitiesPerCarry: Math.round(100 * jf.length / n) / 100,
+          stiffOpportunitiesPerCarry: Math.round(100 * sf.length / n) / 100,
+          jukeWindowFrames: summary(jf, 1),
+          stiffWindowFrames: summary(sf, 1),
+          equivalentOncePerOpportunityP: { juke: eq(jf, 1.08), stiff: eq(sf, 1.2) },
+        };
+      })(),
       strikeBand: (() => {
         // What an equivalent ONCE-PER-ENTRY draw has to reproduce, derived
         // from the measured dwell instead of assumed. p_defender =

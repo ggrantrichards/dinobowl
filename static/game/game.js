@@ -793,9 +793,36 @@
   // the agility term (agi-75)/900 per frame x 60 = (agi-75)/15 per second.
   // Re-measured after: 0.95-1.08 per game-second across those same three frame
   // times, and 1.2 with slow-mo on.
-  const JUKE_RATE = 1.08;             // base juke attempts/sec inside 28px
-  const JUKE_AGI_PER_PT = 1 / 15;     // +0.067/sec per agility point over 75
-  const STIFF_RATE = 1.2;             // stiff-arm attempts/sec inside 26px
+  // EVASION: ONE DECISION PER CLOSING DEFENDER, NOT A PER-FRAME ROLL.
+  // These were rates per game-second, tested every frame the nearest defender
+  // sat inside the window. That is LESSON #15, and its real rate is DWELL
+  // TIME — which the tackle rewrite just tripled, so the old numbers no longer
+  // meant what they were tuned to mean. The window is now entered ONCE per
+  // defender and the question is asked once, so the rate is a property of the
+  // matchup rather than of how long contact happens to last.
+  // CALIBRATED, not guessed: blocking_bench measures 3.43 opportunities per
+  // carry with a mean dwell of 9 frames, and the closed form of the old roll,
+  // 1-(1-dt*RATE)^9 averaged over 546 windows, is 0.142 for the juke and 0.155
+  // for the stiff-arm. So an average back keeps the rate he had.
+  const JUKE_P_BASE = 0.14;           // at 75 agility — matches the old rate
+  const JUKE_P_PER_AGI = 0.008;       // and elite agility earns more of them
+  const JUKE_P_MIN = 0.04, JUKE_P_MAX = 0.55;
+  // The stiff-arm used to be a CLIFF: only a carrier at 85+ strength could ever
+  // throw the paw, and below that the move did not exist. It is a gradient now,
+  // so a 90 back does it often, a 78 receiver does it rarely, and nobody is
+  // locked out of their own animation by one integer.
+  const STIFF_P_BASE = 0.04;          // at 75 strength
+  const STIFF_P_PER_STR = 0.011;      // 85 -> 0.15, matching the old elite rate
+  const STIFF_P_MIN = 0, STIFF_P_MAX = 0.45;
+  // THE COST OF THE MOVE, which is what keeps either of them from being free.
+  // A real juke is a PLANT: the back stops going forward, redirects, and has to
+  // rebuild speed. That is the trade — you beat the man in front of you and pay
+  // for it in ground, so cutting into traffic is punished rather than rewarded.
+  // The stiff-arm costs less because you are extending an arm, not changing
+  // direction, but it still costs something: you are not pumping that arm.
+  // Both ramp back linearly rather than snapping, so the recovery reads.
+  const JUKE_PLANT_T = 0.38, JUKE_PLANT_SPEED = 0.55;
+  const STIFF_PLANT_T = 0.22, STIFF_PLANT_SPEED = 0.82;
   // One release path for every way a block can end. The old code cleared
   // blockedBy/engaged by hand at six sites and one of them leaked a stale
   // blockedBy on the rusher (permanently speed-capped, filtered out of the
@@ -2551,6 +2578,7 @@
       hands: 75, agi: 75, tkl: 75, acc: 75, arm: 75, controlled: false, cover: null, zone: null,
       tackleCd: 0, soarT: 0, soarCd: 0, soarCharge: 0.35, punching: 0, punchCd: 0, punchRolled: false, spinCd: 0, throwT: 0, jumpT: 0,
       stiffT: 0, stiffCd: 0, stamNow: 1, coldT: 0,
+      jukePlantT: 0, stiffPlantT: 0, stiffConsidered: null,
       // Visual action state is deliberately separate from gameplay timers.
       // It shifts the original compact species sprite for a dive, high-point
       // catch, stiff-arm, tackle aftermath, or celebration—never a generic
@@ -3496,7 +3524,7 @@
     // silently downgrade it to once per GAME (LESSON #20 — a latch or
     // accumulator model has to be reset wherever the play resets).
     G.punchDrawn = false;   // the strip question is asked once per play (LESSON #20)
-    for (const e of G.players) { e.punchedThisPlay = false; e.punchRolled = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; }
+    for (const e of G.players) { e.punchedThisPlay = false; e.punchRolled = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; e.stiffConsidered = null; e.jukePlantT = 0; e.stiffPlantT = 0; }
     // The takedown ledger, the escape ledger and the per-play contact clock are
     // latches, so they reset where the play resets — LESSON #20, which is exactly
     // what the loop above already exists to honour.
@@ -6347,9 +6375,22 @@
   function doJuke(e) {
     if (e.jukeCd > 0 || e.proneT > 0) return;
     e.jukeT = 0.32; e.jukeCd = 2.1; e.spinT = 0.32; sfx.juke();
+    // THE PLANT — the trade. Shared by the player-input juke and the CPU one,
+    // so both pay it. See JUKE_PLANT_T.
+    e.jukePlantT = JUKE_PLANT_T;
     // the cut: snap velocity to the opposite lateral side (a real cutback)
     const cutY = e.vy >= 0 ? -1 : 1;
     e.vy = cutY * Math.max(60, Math.abs(e.vy) + 40);
+    // THE PLANT FOOT. Dust fires from where he actually pushed off — the side
+    // he is cutting AWAY from — instead of from under his centre, so the cut
+    // reads as a direction and not as a puff. A second, smaller burst trails a
+    // few pixels behind along the new line.
+    fxDust(e.x - e.dir * 3, e.y + 4 - cutY * 3, 4);
+    fxDust(e.x - e.dir * 7, e.y + 5, 3);
+    // a cut this hard shifts the camera a touch — the same language the other
+    // contact beats use, at the smallest size in the file so it never competes
+    // with a takedown.
+    G.shake = Math.max(G.shake || 0, 0.07);
     // a juke has to be TIMED: it only shakes defenders who are right on top
     // of you and closing hard — soaring tacklers can't be juked at all
     fxDust(e.x, e.y + 4, 5);   // cleats bite the turf on the cut
@@ -6376,8 +6417,24 @@
   function startStiffArm(e) {
     if (e.stiffCd > 0 || e.proneT > 0 || e !== G.carrier) return;
     e.stiffT = 0.35; e.stiffCd = 1.5; e.swingT = 0.3;
+    // the paw costs less ground than a cut — you are extending an arm, not
+    // changing direction — but it is not free either.
+    e.stiffPlantT = STIFF_PLANT_T;
     playPose(e, "stiff", 0.52);
     sfx.juke();
+    // The strike reads on the DEFENDER too, not just on the carrier: the arm
+    // goes out toward the man being warded off, so the dust and the small beat
+    // land between them rather than under the carrier.
+    let near = null, nd = 1e9;
+    for (const d of G.players) {
+      if (d.team === e.team || d.proneT > 0) continue;
+      const dd = dist(d, e);
+      if (dd < nd) { nd = dd; near = d; }
+    }
+    if (near && nd < 34) {
+      fxDust((e.x + near.x) / 2, (e.y + near.y) / 2 + 3, 3);
+      if (Math.abs(near.x - e.x) > 2) e.dir = near.x >= e.x ? 1 : -1;
+    }
   }
   // A broken tackle: the carrier `c` shrugs off tackler `e`. The tackler is
   // driven back off-balance along the line of contact and left staggering,
@@ -7278,6 +7335,8 @@
     if (e.spinCd > 0) e.spinCd -= dt;
     if (e.punchCd > 0) e.punchCd -= dt;
     if (e.stiffT > 0) e.stiffT -= dt;
+    if (e.jukePlantT > 0) e.jukePlantT -= dt;
+    if (e.stiffPlantT > 0) e.stiffPlantT -= dt;
     if (e.stiffCd > 0) e.stiffCd -= dt;
     // a locked-on grappler rides the carrier (drag-the-pile): he is pulled
     // along at wrap distance rather than re-running pursuit every frame
@@ -7388,7 +7447,14 @@
       const wrapGrit = e.catchT != null ? 0.36 : 1;
       wrapDrive = wrapGrit * clamp(0.86 + (legs - resist) / 150, 0.16, 0.92);
     }
-    const speedMod = G.weather.speedMod * wrapDrive * (e.diveT > 0 ? 1.9 : 1) *
+    // THE PLANT. A cut or a thrown paw costs forward speed and then rebuilds it,
+    // so evasion buys you the defender in front of you and charges you ground
+    // for it. Ramped, not a step: (1 - plantFraction) eases back to full over
+    // the window so the recovery is visible rather than a snap.
+    let plant = 1;
+    if (e.jukePlantT > 0) plant *= JUKE_PLANT_SPEED + (1 - JUKE_PLANT_SPEED) * (1 - e.jukePlantT / JUKE_PLANT_T);
+    if (e.stiffPlantT > 0) plant *= STIFF_PLANT_SPEED + (1 - STIFF_PLANT_SPEED) * (1 - e.stiffPlantT / STIFF_PLANT_T);
+    const speedMod = G.weather.speedMod * wrapDrive * plant * (e.diveT > 0 ? 1.9 : 1) *
       (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - longCarryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather;
     if (e.jukeT > 0) e.jukeT -= dt;
     if (e.diveT > 0) {
@@ -8726,14 +8792,28 @@
       // moment the cooldown lapsed. Keyed to the man like punchedThisPlay,
       // freed when he drops off, and cleared at the snap so it can never
       // survive into the next play as a stale one-shot throttle (LESSON #20).
-      if (dist(n, e) > 44 && e.jukeConsidered === n.bodyId) e.jukeConsidered = null;
-      if (dist(n, e) < 28 && e.jukeCd <= 0 && e.jukeConsidered !== n.bodyId &&
-        Math.random() < dt * (JUKE_RATE + Math.max(0, (e.agi - 75)) * JUKE_AGI_PER_PT)) {
-        e.jukeConsidered = n.bodyId;
-        doJuke(e);
+      // ONE DECISION PER CLOSING DEFENDER. The latch is now set when the
+      // question is ASKED, not when the answer happens to be yes — the old code
+      // only latched inside the success branch, so a failed roll simply rolled
+      // again next frame and the whole thing stayed dwell-coupled despite the
+      // comment claiming otherwise. Freed when he drops off past 44px, and
+      // cleared at the snap so it can never survive into the next play
+      // (LESSON #20).
+      if (dist(n, e) > 44) {
+        if (e.jukeConsidered === n.bodyId) e.jukeConsidered = null;
+        if (e.stiffConsidered === n.bodyId) e.stiffConsidered = null;
       }
-      // …and only a true STIFF-ARM artist (85+) throws the paw, rarely
-      else if (dist(n, e) < 26 && e.stiffCd <= 0 && (e.stiff || e.str || 75) >= 85 && Math.random() < dt * STIFF_RATE) startStiffArm(e);
+      if (dist(n, e) < 28 && e.jukeCd <= 0 && e.jukeConsidered !== n.bodyId) {
+        e.jukeConsidered = n.bodyId;   // asked and answered, win or lose
+        const jp = clamp(JUKE_P_BASE + ((e.agi || 75) - 75) * JUKE_P_PER_AGI, JUKE_P_MIN, JUKE_P_MAX);
+        if (Math.random() < jp) doJuke(e);
+      }
+      // …and the paw is a STRENGTH gradient now, not a hard 85 cutoff
+      else if (dist(n, e) < 26 && e.stiffCd <= 0 && e.stiffConsidered !== n.bodyId) {
+        e.stiffConsidered = n.bodyId;
+        const sp2 = clamp(STIFF_P_BASE + ((e.stiff || e.str || 75) - 75) * STIFF_P_PER_STR, STIFF_P_MIN, STIFF_P_MAX);
+        if (Math.random() < sp2) startStiffArm(e);
+      }
     }
     // A goal-line dive can score before contact.  Do not auto-dive at the
     // sticks: that used to whistle an untouched CPU carrier dead the instant

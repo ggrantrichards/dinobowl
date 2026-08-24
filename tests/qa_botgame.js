@@ -249,6 +249,18 @@ const GAMES = Number(process.argv[2] || 2);
     t.pct = t.att ? Math.round(100 * t.cmp / t.att) : 0;
     return t;
   };
+  // RUSHING was collected per game all along (the `rush` lines above) and then
+  // never aggregated, so the file could not answer the one question a change to
+  // the run game or to evasion actually raises. blocking_bench cannot answer it
+  // either: its carrier is USER-controlled, so cpuCarrier never runs and a juke
+  // never fires there. This is the only instrument that sees a CPU ball carrier.
+  const allRush = reports.flatMap((r) => r.rush);
+  const rushAgg = (side) => {
+    const rs = allRush.filter((q) => q.side === side);
+    const t = rs.reduce((a, q) => ({ car: a.car + q.car, yds: a.yds + q.yds }), { car: 0, yds: 0 });
+    t.ypc = t.car ? Math.round(100 * t.yds / t.car) / 100 : 0;
+    return t;
+  };
   const tele = {};
   for (const t of (g.qaTele || [])) { const k = t.drive + "|" + t.tag; tele[k] = (tele[k] || 0) + 1; }
   console.log(JSON.stringify({
@@ -256,6 +268,7 @@ const GAMES = Number(process.argv[2] || 2);
     tele,
     games: reports,
     passing: { A_pilot: agg("A"), B_cpu: agg("B") },
+    rushing: { A_pilot: rushAgg("A"), B_cpu: rushAgg("B") },
     physics: { engagedBlockOverlapPct: Math.round(ov * 1000) / 10, samples: overlapSamples.length },
   }, null, 2));
   process.exit(0);
