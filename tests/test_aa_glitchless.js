@@ -845,6 +845,56 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     SRC.includes("const rdt = G.rdt || dt;") &&
     SRC.includes("G.deadT -= rdt;"));
 
+  // -------------------------------------------------------------------- J
+  // THE PLAYER'S EVASION MOVES. Both were reported from live play: "the user
+  // cant seem to go up or down" and "spinning off the d line doesnt seem to
+  // get them out of the block".
+  //
+  // J1 IS THE ONE THAT MATTERS. cutT/cutCd/cutSlowT/cutDir appeared ONLY at
+  // their use site and were never initialised on an entity. The dodge-cut gate
+  // reads `if (wantCut && e.cutCd <= 0)`, and `undefined <= 0` is FALSE — so
+  // the player-driven cut could never fire, for any carrier, in any build that
+  // ever shipped. The same block sets e.vy = 0 unconditionally, so vertical
+  // input did literally nothing and W/S read as "he cannot go up or down".
+  // A whole mechanic was dead behind four missing zeroes, which is exactly the
+  // failure mode a source assertion cannot see and a behavioural one can.
+  {
+    const g = G();
+    const proto = g.players && g.players[0];
+    check("J1 the dodge cut state is INITIALISED (undefined <= 0 is false, so the cut never fired)",
+      !!proto && typeof proto.cutCd === "number" && typeof proto.cutT === "number" &&
+      typeof proto.cutSlowT === "number" && typeof proto.cutDir === "number",
+      proto ? ("cutCd=" + typeof proto.cutCd + " cutT=" + typeof proto.cutT) : "no players");
+    check("J2 every carrier gets the cut — it is gated on being the carrier, not on a role",
+      SRC.includes("const isCarrier = e === G.carrier;") &&
+      SRC.includes("if (isCarrier && e.diveT <= 0) {"));
+    // timed right it makes him MISS, and only against a man who has committed
+    check("J3 a cut only beats a CLOSE and CLOSING defender",
+      SRC.includes("if (gap >= CUT_BEAT_RANGE) continue;") &&
+      SRC.includes("if (closing <= CUT_BEAT_CLOSING) continue;"));
+    check("J4 how badly he is beaten scales with AGILITY",
+      SRC.includes('0.34 + Math.max(0, ((e.agi || 75) - (df.agi || 75))) / 240'));
+    // …and it costs something, ramped back rather than snapped. It used to be
+    // a flat 0.95 — a 5% tax nobody could feel, on a mechanic that never ran.
+    check("J5 the cut costs speed and the cost RAMPS back",
+      SRC.includes("CUT_SLOW_SPEED + (1 - CUT_SLOW_SPEED) * (1 - e.cutSlowT / CUT_SLOW_T)") &&
+      !SRC.includes("(e.cutSlowT > 0 ? 0.95 : 1)"));
+
+    // THE SPIN. This was `Math.random() < 0.4 + strGap/110`, so in an even
+    // matchup three spins in five did NOTHING: the cel played, the 1.3s
+    // cooldown burned, the block held, and the player could not tell a failed
+    // spin from a mistimed one. Dice at a moment of truth, LESSON #19. It now
+    // pours into the same grind ledger blockShedCheck already reads, so every
+    // spin is progress: an even rep covers 42% of the grind, a +30 strength
+    // edge covers 75%, a -15 deficit only 25%.
+    check("J6 the spin-off-block dice roll is GONE (LESSON #19)",
+      !SRC.includes("Math.random() < 0.4 + ((c2.str || 80) - (c2.blockedBy.str || 75)) / 110"));
+    check("J7 a spin always POURS into the grind ledger, then re-checks the shed",
+      SRC.includes("c2.blockAcc = (c2.blockAcc || 0) + chunk;") &&
+      SRC.includes("const shed = blockShedCheck(c2);") &&
+      SRC.includes("SPIN_CHUNK_BASE + clamp(gap * SPIN_CHUNK_PER_STR"));
+  }
+
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
   process.exitCode = fail ? 1 : 0;

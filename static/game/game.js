@@ -826,6 +826,21 @@
   // Both ramp back linearly rather than snapping, so the recovery reads.
   const JUKE_PLANT_T = 0.38, JUKE_PLANT_SPEED = 0.55;
   const STIFF_PLANT_T = 0.22, STIFF_PLANT_SPEED = 0.82;
+  // THE PLAYER-DRIVEN DODGE CUT (W/S, or a vertical flick of the stick).
+  // Every ball carrier gets it — QB, RB, TE, WR — and the cost is the same
+  // shape as the AI juke: brief, ramped, and paid AFTER the cut lands, so a
+  // cut is a change of momentum rather than a free sidestep. Shorter and
+  // cheaper than a full juke because it is a step, not a spin.
+  const CUT_BURST = 2.1;              // lateral multiple of run speed
+  const CUT_T = 0.16;                 // how long the burst lasts
+  const CUT_CD = 0.34;                // before another cut is available
+  const CUT_SLOW_T = 0.30, CUT_SLOW_SPEED = 0.78;
+  const CUT_BEAT_RANGE = 26;          // a cut only beats a COMMITTED man
+  const CUT_BEAT_CLOSING = 30;
+  // A SPIN OFF A BLOCK ALWAYS MAKES PROGRESS. See the SHIFT handler.
+  const SPIN_CHUNK_BASE = 0.42;       // fraction of the grind it pours
+  const SPIN_CHUNK_PER_STR = 1 / 90;
+  const SPIN_TECH_BONUS = 1.25;       // a spin specialist does it better
   // One release path for every way a block can end. The old code cleared
   // blockedBy/engaged by hand at six sites and one of them leaked a stale
   // blockedBy on the rusher (permanently speed-capped, filtered out of the
@@ -2720,6 +2735,13 @@
       tackleCd: 0, soarT: 0, soarCd: 0, soarCharge: 0.35, punching: 0, punchCd: 0, punchRolled: false, spinCd: 0, throwT: 0, jumpT: 0,
       stiffT: 0, stiffCd: 0, stamNow: 1, coldT: 0,
       jukePlantT: 0, stiffPlantT: 0, stiffConsidered: null,
+      // WHAT WAS BROKEN: these four were never initialised anywhere. The cut
+      // guard reads `if (wantCut && e.cutCd <= 0)`, and `undefined <= 0` is
+      // FALSE — so the player-driven dodge cut could never fire, on any
+      // carrier, in any build that has ever shipped. Vertical input did
+      // nothing at all: the same block sets e.vy = 0 unconditionally, so W/S
+      // read as "the carrier cannot go up or down".
+      cutT: 0, cutCd: 0, cutSlowT: 0, cutDir: 0,
       // Visual action state is deliberately separate from gameplay timers.
       // It shifts the original compact species sprite for a dive, high-point
       // catch, stiff-arm, tackle aftermath, or celebration—never a generic
@@ -6618,10 +6640,29 @@
         }
         // blocked pass-rusher: SHIFT = spin/swim move to try to shed the block
         else if (!offenseIsUser() && G.controlled && G.controlled.blockedBy && G.controlled.spinCd <= 0) {
-          const c2 = G.controlled;
+          const c2 = G.controlled, bl = c2.blockedBy;
           c2.spinCd = 1.3; c2.spinT = 0.3; sfx.juke();
-          if (Math.random() < 0.4 + ((c2.str || 80) - (c2.blockedBy.str || 75)) / 110) {
-            releaseBlock(c2, { freeT: 2.5 });
+          // A SPIN ALWAYS MAKES PROGRESS. This was
+          //   Math.random() < 0.4 + (str - blockerStr) / 110
+          // so in an even matchup THREE SPINS IN FIVE did nothing whatsoever:
+          // the cel played, the 1.3s cooldown burned, the block held, and the
+          // player had no way to tell a failed spin from a mistimed one. That
+          // is precisely the dice-at-a-moment-of-truth LESSON #19 bans, and it
+          // is why a spin "does not seem to get you out of the block".
+          // It now POURS into the same grind ledger blockShedCheck already
+          // reads, so every spin is visible progress: a decisive strength
+          // advantage frees him outright, an even rep takes two, and a spin
+          // specialist (rushTech) gets more out of each one. Deterministic,
+          // stat-driven, and the player can always see it working.
+          const gap = (c2.str || 80) - (bl.str || 75);
+          const frac = SPIN_CHUNK_BASE + clamp(gap * SPIN_CHUNK_PER_STR, -0.18, 0.34);
+          const chunk = Math.max(1, (c2.blockShedAt || 0) * frac *
+            (c2.rushTech === "spin" ? SPIN_TECH_BONUS : 1));
+          c2.blockAcc = (c2.blockAcc || 0) + chunk;
+          const shed = blockShedCheck(c2);
+          if (shed) {
+            if (G.qaTele) G.qaTele.push({ tag: shed, drive: G.drive });
+            releaseBlock(c2, { spin: true, freeT: 2.5 });
           }
         }
       }
@@ -7894,15 +7935,39 @@
         if (e.cutSlowT > 0) e.cutSlowT -= dt;
         const wantCut = Math.abs(d.y) > 0.35;
         if (wantCut && e.cutCd <= 0) {
-          e.cutT = 0.16; e.cutDir = d.y > 0 ? 1 : -1;
-          e.cutCd = 0.34; e.cutSlowT = 0.42;
-          fxDust(e.x, e.y + 4, 3); sfx.juke();
+          e.cutT = CUT_T; e.cutDir = d.y > 0 ? 1 : -1;
+          e.cutCd = CUT_CD; e.cutSlowT = CUT_SLOW_T;
+          // dust off the PLANT foot — the side he pushes away from — so the
+          // cut reads as a direction rather than a puff under his belly
+          fxDust(e.x - e.dir * 3, e.y + 4 - e.cutDir * 3, 4); sfx.juke();
+          // TIMED RIGHT, IT MAKES HIM MISS. A cut only beats a man who has
+          // COMMITTED — close, and closing hard. Cut early or late and it is
+          // just a step sideways that cost you speed, which is what makes the
+          // timing a skill instead of a button. Agility decides how badly the
+          // defender is beaten; a soaring tackler cannot be cut at all,
+          // exactly as in doJuke.
+          for (const df of G.players) {
+            if (df.team === e.team || df.staggerT > 0 || df.soarT > 0 || df.proneT > 0) continue;
+            const gap = dist(df, e);
+            if (gap >= CUT_BEAT_RANGE) continue;
+            const closing = (df.vx * (e.x - df.x) + df.vy * (e.y - df.y)) / Math.max(1, gap);
+            if (closing <= CUT_BEAT_CLOSING) continue;
+            df.staggerT = Math.max(df.staggerT || 0,
+              0.34 + Math.max(0, ((e.agi || 75) - (df.agi || 75))) / 240);
+            G.shake = Math.max(G.shake || 0, 0.06);
+          }
         }
         const backing = (fwdDir > 0 ? d.x < -0.35 : d.x > 0.35);
         const throttle = backing ? 0.45 : 1;
-        e.vx = fwdDir * throttle * (e.cutSlowT > 0 ? 0.95 : 1) * csp;
+        // the cost, ramped back rather than snapped, so the recovery reads.
+        // It was a flat 0.95 — a 5% tax nobody could feel, on a mechanic that
+        // never fired anyway.
+        const cutTax = e.cutSlowT > 0
+          ? CUT_SLOW_SPEED + (1 - CUT_SLOW_SPEED) * (1 - e.cutSlowT / CUT_SLOW_T)
+          : 1;
+        e.vx = fwdDir * throttle * cutTax * csp;
         e.vy = 0;
-        if (e.cutT > 0) { e.cutT -= dt; e.vy = e.cutDir * csp * 2.1; e.vx *= 0.75; }
+        if (e.cutT > 0) { e.cutT -= dt; e.vy = e.cutDir * csp * CUT_BURST; e.vx *= 0.75; }
       } else {
         const m = Math.hypot(d.x, d.y) || 1;
         e.vx = (d.x / m) * csp; e.vy = (d.y / m) * csp;

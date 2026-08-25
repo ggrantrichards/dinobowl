@@ -85,6 +85,15 @@ function key(k) {
   for (const fn of winListeners.keydown || []) fn({ key: k, preventDefault() { } });
   for (const fn of winListeners.keyup || []) fn({ key: k, preventDefault() { } });
 }
+// key() is a TAP — down and up in the same call. Anything that reads the HELD
+// key set (the movement stick: kdir() over keys["w"]/keys["s"]) is invisible
+// to it, so a held direction needs these two.
+function keyHold(k) {
+  for (const fn of winListeners.keydown || []) fn({ key: k, preventDefault() { } });
+}
+function keyRelease(k) {
+  for (const fn of winListeners.keyup || []) fn({ key: k, preventDefault() { } });
+}
 // A real pointer event on the canvas BUBBLES to window, and mousemove/mouseup
 // are registered on window so a release over the LETTERBOX still resolves.
 // Feed both lists; no handler is registered on both, so nothing double-fires.
@@ -113,4 +122,4 @@ function touch(ev, list) {
 function resetTouches() { liveTouches.clear(); }
 
 const G = () => global.window.__game;
-module.exports = { step, stepFor, key, mouse, touch, resetTouches, G, store };
+module.exports = { step, stepFor, key, mouse, touch, resetTouches, G, store, keyHold, keyRelease };
