@@ -85,9 +85,32 @@ function key(k) {
   for (const fn of winListeners.keydown || []) fn({ key: k, preventDefault() { } });
   for (const fn of winListeners.keyup || []) fn({ key: k, preventDefault() { } });
 }
+// A real pointer event on the canvas BUBBLES to window, and mousemove/mouseup
+// are registered on window so a release over the LETTERBOX still resolves.
+// Feed both lists; no handler is registered on both, so nothing double-fires.
 function mouse(ev, x, y, button = 0) {
-  for (const fn of gameCanvas.__listeners[ev] || []) fn({ clientX: x, clientY: y, button, preventDefault() { } });
+  const e = { clientX: x, clientY: y, button, preventDefault() { } };
+  for (const fn of gameCanvas.__listeners[ev] || []) fn(e);
+  for (const fn of winListeners[ev] || []) fn(e);
 }
 
+// ---- multi-touch: touch("touchstart", [{id, x, y}, ...])
+// The LIVE set is tracked the way a browser tracks event.touches: a
+// touchstart/touchmove event sees the new positions, and a touchend sees the
+// set with the lifted fingers ALREADY GONE. Several fingers in one call are
+// one synchronous event with several changedTouches — which is exactly the
+// two-finger case the input layer has to survive.
+const liveTouches = new Map();
+function touch(ev, list) {
+  const mk = (t) => ({ identifier: t.id, clientX: t.x, clientY: t.y });
+  const changedTouches = list.map(mk);
+  if (ev === "touchend" || ev === "touchcancel") for (const t of list) liveTouches.delete(t.id);
+  else for (const t of list) liveTouches.set(t.id, mk(t));
+  const e = { changedTouches, touches: Array.from(liveTouches.values()), preventDefault() { } };
+  for (const fn of gameCanvas.__listeners[ev] || []) fn(e);
+  return e;
+}
+function resetTouches() { liveTouches.clear(); }
+
 const G = () => global.window.__game;
-module.exports = { step, stepFor, key, mouse, G, store };
+module.exports = { step, stepFor, key, mouse, touch, resetTouches, G, store };

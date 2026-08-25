@@ -4,6 +4,7 @@ const H = require("./harness.js");
 const fs = require("fs");
 const path = require("path");
 const { step, stepFor, key, G } = H;
+const SRC3 = fs.readFileSync(path.join(__dirname, "..", "static", "game", "game.js"), "utf8");
 
 let pass = 0, fail = 0;
 function check(name, cond, extra) {
@@ -91,6 +92,61 @@ function noErr(label) {
   step();
   check("#2 release launches the ball", g.ball.mode === "air", g.ball.mode);
   noErr("pull-back throw");
+
+  // ========== P0-13 · ONE FINGER OWNS THE AIM (Batch E, input) ==========
+  // Before the fix EVERY non-button touch was tagged role:"aim", called
+  // onPress() and released on ANY lift. A resting off-hand thumb in the right
+  // 58% of the screen therefore re-planted G.slingAnchor at the thumb, nulled
+  // G.aim, and then resolved the throw on its own lift — after which
+  // mouse.down was false and the arm could never re-arm (the aim update is
+  // gated on `slingAnchor && mouse.down`). The QB stood there until the sack.
+  {
+    H.resetTouches();
+    freshPassPlay();
+    const qbT = g.ball.holder;
+    check("P0-13 setup: QB has the ball in drop", g.state === "live" && g.phase === "drop" && !!qbT,
+      g.state + "/" + g.phase);
+    // two fingers land in ONE synchronous event, both on the aim side
+    // (x > W*0.42 = 403.2) and clear of the on-screen buttons at x = 912
+    H.touch("touchstart", [{ id: 1, x: 600, y: 270 }, { id: 2, x: 700, y: 330 }]);
+    step();
+    check("P0-13 the FIRST finger owns the anchor; the second cannot move it",
+      !!g.slingAnchor && g.slingAnchor.x === 600 && g.slingAnchor.y === 270,
+      JSON.stringify(g.slingAnchor));
+    H.touch("touchmove", [{ id: 1, x: 420, y: 270 }]);
+    step();
+    check("P0-13 the owner's pull loads the arm", !!g.aim && g.aim.x > qbT.x,
+      JSON.stringify(g.aim));
+    const loadedX = g.aim && g.aim.x;
+    // the off-hand thumb now slides across the screen and lifts
+    H.touch("touchmove", [{ id: 2, x: 900, y: 120 }]);
+    step();
+    check("P0-13 a stray finger's DRAG cannot steer the aim",
+      !!g.aim && Math.abs(g.aim.x - loadedX) < 1,
+      JSON.stringify(g.aim) + " loadedX=" + loadedX);
+    H.touch("touchend", [{ id: 2, x: 900, y: 120 }]);
+    step();
+    check("P0-13 a stray finger's LIFT neither fires the throw nor disarms",
+      g.ball.mode === "held" && !!g.slingAnchor && !!g.aim,
+      g.ball.mode + " anchor=" + JSON.stringify(g.slingAnchor) + " aim=" + JSON.stringify(g.aim));
+    H.touch("touchend", [{ id: 1, x: 420, y: 270 }]);
+    step();
+    check("P0-13 the OWNER's lift resolves the throw — exactly one release",
+      g.ball.mode === "air" && !g.slingAnchor, g.ball.mode + " anchor=" + JSON.stringify(g.slingAnchor));
+    noErr("two-finger throw");
+    H.resetTouches();
+  }
+  // P0-12's residue and the desktop half of P0-13 are STRUCTURAL: the harness
+  // dispatches straight to the listener lists, so it cannot model an event the
+  // canvas never receives in the first place (a release out on the letterbox).
+  // Assert the shape here and leave the feel to a human pass.
+  check("P0-12 residue: at most one role:\"aim\" touch is registered per event",
+    SRC3.includes("if (aimTouchId !== null) { touches[t.identifier] = { role: \"idle\" }; continue; }"));
+  check("P0-13 desktop: mousemove/mouseup listen on WINDOW, not on the canvas",
+    SRC3.includes("window.addEventListener(\"mouseup\"") &&
+    SRC3.includes("window.addEventListener(\"mousemove\"") &&
+    !SRC3.includes("cv.addEventListener(\"mouseup\"") &&
+    !SRC3.includes("cv.addEventListener(\"mousemove\""));
 
   // ================= #3 auto-jump is late + flagged =================
   // throw AT a receiver like a real player: let routes develop, then compute

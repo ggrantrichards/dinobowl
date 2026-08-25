@@ -155,7 +155,7 @@ const LIVE_DRAW_CODE = GAME.slice(GAME.indexOf("function drawPlayers"), GAME.ind
     check("a stalled live play receives a safety whistle", g.state === "dead" && g.lastDead && g.lastDead.reason === "WHISTLE",
       JSON.stringify({ state: g.state, reason: g.lastDead && g.lastDead.reason }));
   } else check("a stalled live play has a carrier for the whistle test", false);
-  check("replay captures compact action state and action-focused GIFs", GAME.includes("poseP:") && GAME.includes("diveCatch:") && GAME.includes("GIF_MAX_FRAMES = 120") && GAME.includes("G.replay.frames.length - 150") && !GAME.includes("sheet.poses") && !SPRITES.includes("out.poses"));
+  check("replay captures compact action state and action-focused GIFs", GAME.includes("poseP:") && GAME.includes("diveCatch:") && GAME.includes("GIF_MAX_FRAMES = 120") && GAME.includes("G.replay.frames.length - GIF_TAPE_SPAN") && !GAME.includes("sheet.poses") && !SPRITES.includes("out.poses"));
   const crowdCode = GAME.slice(GAME.indexOf("function buildCrowd"), GAME.indexOf("// ---- stadiums"));
   const sidelineCode = GAME.slice(GAME.indexOf("function drawSidelineLife"), GAME.indexOf("function windArrow"));
   check("stand and bench spectators use compact color blocks rather than dino sprites",
@@ -227,6 +227,57 @@ const LIVE_DRAW_CODE = GAME.slice(GAME.indexOf("function drawPlayers"), GAME.ind
     !GAME.includes("sheet.poses") && !SPRITES.includes("out.poses") && GAME.includes("selectActionSpriteFrame") &&
       SPRITES.includes("base.actions = buildCompactActions") && SPRITES.includes("const COMPACT_ACTION_KEYS"));
 
+  // ---- BATCH G: rendering + allocation ----------------------------------
+  // The weather spawn used to be a per-frame head count (`for (i = 0; i < 6;
+  // i++)`), so a phone running at 30fps quietly got half the rain and half the
+  // snow. That is the LESSON #15 shape: how much world happens must not be a
+  // function of how often the frame happens to run. It is a rate now — dt*360
+  // for rain, dt*120 for snow, with the fractional remainder carried in an
+  // accumulator rather than settled by a coin flip. Settle the same eight
+  // seconds at two different frame times; the steady state has to agree.
+  const settleWeather = (type, ms) => {
+    g.weather = { type: type, wind: { x: 20, y: 0 } };
+    g.parts.length = 0; g.partAcc = 0; g.partAccW = null;
+    for (let i = 0; i < Math.round(8000 / ms); i++) H.step(ms);
+    return g.parts.length;
+  };
+  const snow60 = settleWeather("SNOW", 16.7);
+  const snow30 = settleWeather("SNOW", 33.3);
+  check("BATCH G: snow steady state is the same at 16.7ms and 33.3ms per frame",
+    Math.abs(snow60 - snow30) <= 8, snow60 + " vs " + snow30);
+  // 300 is MAX_PARTS in game.js. It is a live-grain budget, not only a
+  // fill-rate guard: G.parts rides along in every online frame and unbounded
+  // snow was pushing ~90 KB of grain JSON per frame down the wire.
+  check("BATCH G: snow holds the 300-grain live budget after 8s",
+    snow60 <= 300 && snow30 <= 300 && snow60 > 250, snow60 + " / " + snow30);
+  const rain60 = settleWeather("RAIN", 16.7);
+  const rain30 = settleWeather("RAIN", 33.3);
+  // Rain grains only live 0.25-0.5s, so the count swings by one spawn batch
+  // either way; 25% cleanly separates fixed from broken (it was 116 vs 53).
+  check("BATCH G: rain steady state is the same at 16.7ms and 33.3ms per frame",
+    Math.abs(rain60 - rain30) <= 0.25 * Math.max(rain60, rain30, 1),
+    rain60 + " vs " + rain30);
+
+  // The static-turf cache's invalidation trap: a possession flip swaps which
+  // endzone belongs to whom, so the key has to move with it or the previous
+  // drive's endzones stay frozen on screen.
+  const keyBefore = g.fieldKey, driveBefore = g.drive;
+  g.drive = driveBefore === "A" ? "B" : "A";
+  H.step(16.7);
+  const keyAfter = g.fieldKey;
+  g.drive = driveBefore; H.step(16.7);
+  check("BATCH G: the turf cache re-bakes when a possession flip swaps the endzones",
+    !!keyBefore && !!keyAfter && keyBefore !== keyAfter && g.fieldKey === keyBefore,
+    keyBefore + " -> " + keyAfter + " -> " + g.fieldKey);
+
+  check("BATCH G: the depth sort reuses a buffer instead of allocating per frame",
+    !GAME.includes("G.players.slice().sort") && !GAME.includes("f.ents.slice().sort") &&
+      GAME.includes("depthOrder(DRAW_ORDER, G.players)") && GAME.includes("depthOrder(REPLAY_ORDER, f.ents)"));
+  check("BATCH G: particles compact in place into a pool instead of re-filtering",
+    !GAME.includes("G.parts = G.parts.filter(") && GAME.includes("recyclePart(p)") &&
+      GAME.includes("PART_POOL"));
+  check("BATCH G: the field is blitted from a cache and the sky gradient is kept",
+    GAME.includes("cx.drawImage(ensureFieldCache(), -cam, 0)") && GAME.includes("G.skyGradKey !== st.time"));
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
   process.exitCode = fail ? 1 : 0;

@@ -225,16 +225,36 @@ function makeInstance(label, sharedDb) {
   check("guest left the lobby onto the host's live game state", B.G.state !== "online_wait" && B.G.state !== "menu", B.G.state);
 
   // ---- guest INPUT must reach the host (round-trip control channel) ----
-  // Put both on a Team-B possession in a live-ish state so the guest is allowed
-  // to control, then have the guest press 'h' (a global toggle onKey handles
-  // unconditionally) and confirm the HOST's flag flipped.
+  // LESSON #18 — this assertion changed together with the code it asserts.
+  // It used to press "h" and expect the HOST's help overlay to toggle. Under
+  // ROADMAP S4 that is no longer the contract, and the old behaviour was the
+  // bug: "help" is not part of netFrame, so a guest pressing H lit up an
+  // overlay on a screen it cannot see, and got nothing on its own. Mute, help,
+  // the box score and the pause card are purely LOCAL screen furniture now and
+  // are handled on the machine that pressed them — for the guest that is the
+  // first time it reaches onKey in ANY state at all.
   A.G.drive = "B"; A.G.state = "live"; A.G.phase = "drop";
   B.G.drive = "B"; B.G.state = "live"; B.G.phase = "drop";
-  const helpBefore = !!A.G.help;
-  B.key("h");                // guest keydown → queued to DB → host consumes
+  const guestHelpBefore = !!B.G.help, hostHelpBefore = !!A.G.help;
+  B.key("h");
   A.step(); B.step();
-  check("guest input crossed the wire and toggled the HOST",
-    !!A.G.help === !helpBefore, "before=" + helpBefore + " after=" + A.G.help);
+  check("S4 the guest reaches onKey at all (help toggles on the GUEST)",
+    !!B.G.help === !guestHelpBefore, "before=" + guestHelpBefore + " after=" + B.G.help);
+  check("S4 a purely-local key does NOT cross the wire to the host",
+    !!A.G.help === hostHelpBefore, "host help=" + A.G.help);
+
+  // ...and a key that genuinely belongs to the shared simulation still makes
+  // the round trip — from a DEAD beat, which S4 newly added to the guest's
+  // forwardable states (before this the guest was mute between its own plays).
+  for (const inst of [A, B]) {
+    inst.G.state = "dead"; inst.G.practice = false; inst.G.patMode = false;
+    inst.G.clockStopped = false; inst.G.timeouts = { A: 2, B: 2 };
+  }
+  B.key("t");                // guest keydown → queued to DB → host consumes
+  A.step(); B.step();
+  check("guest input crossed the wire and reached the HOST (timeout on a dead beat)",
+    A.G.timeouts.B === 1 && A.G.clockStopped === true,
+    "host timeouts=" + JSON.stringify(A.G.timeouts) + " clockStopped=" + A.G.clockStopped);
   check("input queue was drained by the host (no leftover)",
     (function () { const inp = db.read("dinobowl/rooms/" + roomA + "/inputs"); return inp == null || Object.keys(inp).length === 0; })());
 
@@ -250,6 +270,17 @@ function makeInstance(label, sharedDb) {
   check("a searcher can cancel back to the menu", C.G.state === "menu", C.G.state);
   check("cancel cleared its matchmaking slot",
     parked && db.read("dinobowl/matchmaking/waiting") == null);
+
+  // ---- S5: the status bar tells the truth about WHICH half of online is
+  // missing, and no native modal is thrown over the canvas any more.
+  const NETSRC = fs.readFileSync(GAME_DIR + "game.js", "utf8");
+  check("S5 netStatus has THREE states, not two",
+    /return "CONFIG MISSING";/.test(NETSRC) && /return "SDK BLOCKED";/.test(NETSRC) &&
+    /return "READY";/.test(NETSRC));
+  check("S5 readiness is one shared test, so no path can disagree with the bar",
+    /const netReady = \(\) => !!\(window\.DINO_BOWL_FIREBASE_CONFIG && window\.firebase\);/.test(NETSRC));
+  check("S5 not one native alert() survives on any online path",
+    !/\balert\(\s*["'`]/.test(NETSRC));
 
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);

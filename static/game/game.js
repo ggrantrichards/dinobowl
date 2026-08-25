@@ -601,7 +601,10 @@
 
   // ------------------------------------------------------------------- state
   const cv = document.getElementById("game");
-  const cx = cv.getContext("2d");
+  // `cx` is a binding, not a constant: the static-turf bake below points it
+  // at an offscreen context for one synchronous paint and then puts it
+  // straight back (see ensureFieldCache).
+  let cx = cv.getContext("2d");
   cx.imageSmoothingEnabled = false;
 
   // ------------------------------------------------------ safe localStorage
@@ -992,7 +995,7 @@
     saveCpuMemory();
   }
   window.__game = G; // for debugging / automated tests
-  window.addEventListener("error", (e) => { G.lastErr = e.message + " @ " + e.lineno; });
+  window.addEventListener("error", (e) => { G.lastErr = e.message + " @ " + e.lineno; notify(G.lastErr); });
 
   const keys = {};
   let mouse = { x: 0, y: 0, down: false };
@@ -1003,11 +1006,50 @@
   // This avoids physics desync while keeping the normal possession-based game.
   const Net = { role: null, room: null, db: null, lastFrame: 0, remoteView: false, inputRef: null };
   const netStatus = (text) => { const el = document.getElementById("online-status"); if (el) el.textContent = "ONLINE: " + text; };
+  // S5: THREE states, not two. The bar used to print READY whenever the config
+  // object existed — including when the Firebase SDK itself had been blocked
+  // by an extension, a filter or a flaky CDN, which is the one cause the old
+  // message never named. The absence of the global is the ground truth;
+  // index.html additionally sets DINO_BOWL_SCRIPT_BLOCKED from an onerror so
+  // "the file 404'd" can be told apart from "nobody configured it".
+  const netReady = () => !!(window.DINO_BOWL_FIREBASE_CONFIG && window.firebase);
+  function netReason() {
+    if (!window.DINO_BOWL_FIREBASE_CONFIG) return "CONFIG MISSING";
+    if (!window.firebase) return "SDK BLOCKED";
+    return "READY";
+  }
+  const netBlurb = () => (window.DINO_BOWL_FIREBASE_CONFIG
+    ? "Online is unavailable — the Firebase SDK did not load (ad-blocker, extension or network filter)."
+    : window.DINO_BOWL_SCRIPT_BLOCKED
+      ? "Online is unavailable — firebase-config.js did not load. Check the deploy, or an ad-blocker."
+      : "Online needs FIREBASE_WEB_CONFIG — see the README.");
+  // Every online message goes through here: the status bar gets the short
+  // three-state word, the player gets the sentence. No native alert() survives.
+  function netNote(text, status) { if (status) netStatus(status); notify(text); }
   const roomId = () => Array.from(crypto.getRandomValues(new Uint32Array(2))).map((n) => n.toString(36)).join("").slice(0, 10);
   const cleanNet = (v) => JSON.parse(JSON.stringify(v, (key, value) => {
     if (["engaged", "cover", "controlled", "sheets", "ballSpr", "crowd", "tape", "replay", "deadNext"].includes(key)) return undefined;
     return typeof value === "function" ? undefined : value;
   }));
+  // THE BOX SCORE IS NOT A PER-FRAME QUANTITY. G.gameStats is a per-player
+  // map (~250 bytes of JSON a line, 30-44 lines by the fourth quarter) that
+  // only ever changes at a whistle, and netFrame ships 12 times a SECOND — so
+  // the stream was re-sending the whole thing ~12x/s for a panel the guest can
+  // only read between plays anyway. It now rides ONE frame per dead beat.
+  // A frame that omits the key means "unchanged": applyNetFrame's Object.assign
+  // simply leaves the guest's copy alone, and JSON.stringify drops undefined.
+  // The latch is keyed on G.playNo, which is the play's identity and is bumped
+  // by snap() itself, so it cannot go stale (LESSON #20). playNo is coerced
+  // through `|| 0` on purpose: before the first snap it is undefined, and an
+  // undefined latch comparing equal to an undefined play id would silently
+  // suppress the very first send.
+  function netStats() {
+    if (G.state !== "dead") return undefined;
+    const playId = G.playNo || 0;
+    if (G._netStatsPlay === playId) return undefined;
+    G._netStatsPlay = playId;
+    return G.gameStats;
+  }
   function netFrame() {
     const carrier = G.players.indexOf(G.carrier), rampEnt = G.ramp && G.players.indexOf(G.ramp.ent);
     return cleanNet({
@@ -1016,8 +1058,14 @@
       weather: G.weather, stadium: G.stadium, rampage: G.rampage, ramp: G.ramp ? Object.assign({}, G.ramp, { ent: rampEnt }) : null,
       players: G.players, ball: G.ball, carrier, phase: G.phase, playT: G.playT, callsheet: G.callsheet,
       playIdx: G.playIdx, curPlay: G.curPlay, defCall: G.defCall, aim: G.aim, kick: G.kick, banner: G.banner,
-      deadT: G.deadT, camX: G.camX, shake: G.shake, parts: G.parts, pteros: G.pteros, ot: G.ot,
-      stats: G.stats, gameStats: G.gameStats, patMode: G.patMode, clockStopped: G.clockStopped, humanB: true,
+      // `parts` is GONE from the wire. Measured on a live snap: a CLEAR frame
+      // was 33,077 bytes and a SNOW frame 123,922 — 712 snowflakes, every one
+      // of them a fresh {x,y,vx,vy,t,snow} object, serialised and pushed to
+      // Firebase 12 times a second (~1.5 MB/s of pure weather). Weather is
+      // decoration with no authority in it, so both sides simulate it locally
+      // from `weather`, which is still streamed. See update()'s remoteView bail.
+      deadT: G.deadT, camX: G.camX, shake: G.shake, pteros: G.pteros, ot: G.ot,
+      stats: G.stats, gameStats: netStats(), patMode: G.patMode, clockStopped: G.clockStopped, humanB: true,
       // so a matched guest can WATCH the host pick teams (read-only)
       selA: G.selA, selB: G.selB, selStep: G.selStep, selectFor: G.selectFor, mode: G.mode
     });
@@ -1029,6 +1077,14 @@
     if (f.state === "online_wait" || f.state === "loading" || f.state === "title" || f.state === "menu") return;
     const teamChanged = f.my && (G.my !== f.my || G.opp !== f.opp);
     Object.assign(G, f);
+    // THE TRAP: with `parts` stripped, nothing on the guest re-creates this
+    // array, and drawWeatherFX iterates it on EVERY rendered frame. G.parts is
+    // [] at construction, but a frame could arrive before any local tick and a
+    // future strip could catch a different field the same way — so the guard
+    // lives right where the frame lands. It must NOT be an unconditional
+    // `G.parts = []`: that would wipe the guest's own weather 12 times a
+    // second and leave a sky that never holds more than ~5 frames of snow.
+    if (!Array.isArray(G.parts)) G.parts = [];
     G.carrier = f.carrier >= 0 ? G.players[f.carrier] : null;
     if (G.ramp && typeof G.ramp.ent === "number") G.ramp.ent = G.players[G.ramp.ent];
     if (teamChanged && TEAMS[G.my] && TEAMS[G.opp]) {
@@ -1038,7 +1094,7 @@
     }
   }
   async function startOnlineHost() {
-    if (!window.DINO_BOWL_FIREBASE_CONFIG || !window.firebase) { alert("Online multiplayer needs FIREBASE_WEB_CONFIG. See README."); return; }
+    if (!netReady()) { netNote(netBlurb(), netReason()); return; }
     try {
       if (!firebase.apps.length) firebase.initializeApp(window.DINO_BOWL_FIREBASE_CONFIG);
       await firebase.auth().signInAnonymously();
@@ -1050,11 +1106,14 @@
       history.replaceState(null, "", location.pathname + "?room=" + Net.room);
       netStatus("HOST · SHARE LINK");
       navigator.clipboard && navigator.clipboard.writeText(location.href).catch(() => { });
-      alert("Room ready. The invite link is in your address bar (and copied when permitted). Choose your teams, then have your friend open it.");
-    } catch (err) { console.error(err); alert("Could not start online room: " + err.message); }
+      notify("Room ready — the invite link is in your address bar (and copied when permitted). Pick your teams, then send it over.", { quiet: true, t: 9 });
+    } catch (err) { console.error(err); netNote("Could not start online room: " + err.message, "HOST FAILED"); }
   }
   async function joinOnlineRoom(id) {
-    if (!window.DINO_BOWL_FIREBASE_CONFIG || !window.firebase) { netStatus("CONFIG REQUIRED"); return; }
+    // an invite link that lands on a browser with no working Firebase used to
+    // say "CONFIG REQUIRED" even when the config was fine and the SDK was the
+    // thing that had been blocked.
+    if (!netReady()) { netNote(netBlurb(), netReason()); return; }
     try {
       if (!firebase.apps.length) firebase.initializeApp(window.DINO_BOWL_FIREBASE_CONFIG);
       await firebase.auth().signInAnonymously();
@@ -1062,7 +1121,7 @@
       const ref = Net.db.ref("dinobowl/rooms/" + id);
       ref.child("frame").on("value", (snap) => applyNetFrame(snap.val()));
       Net.inputRef = ref.child("inputs"); netStatus("CONNECTED · TEAM B");
-    } catch (err) { console.error(err); netStatus("JOIN FAILED"); alert("Could not join this room: " + err.message); }
+    } catch (err) { console.error(err); netNote("Could not join this room: " + err.message, "JOIN FAILED"); }
   }
   // ------------------------------------------------- QUICK MATCH (auto-queue)
   // Two strangers who both tap QUICK MATCH get paired into ONE game via a
@@ -1074,7 +1133,7 @@
     Net.inputRef = null; Net.frameRef = null; Net.guestRef = null; Net.waitRef = null; Net.cancelled = false;
   }
   async function ensureFirebase() {
-    if (!window.DINO_BOWL_FIREBASE_CONFIG || !window.firebase) return false;
+    if (!netReady()) return false;
     if (!firebase.apps.length) firebase.initializeApp(window.DINO_BOWL_FIREBASE_CONFIG);
     await firebase.auth().signInAnonymously();
     Net.db = firebase.database();
@@ -1085,8 +1144,8 @@
     G.online = { phase: "searching", since: performance.now(), role: null };
     G.state = "online_wait";
     try {
-      if (!(await ensureFirebase())) { alert("Online multiplayer needs Firebase config."); G.state = "menu"; return; }
-    } catch (err) { console.error(err); alert("Could not sign in for matchmaking: " + err.message); G.state = "menu"; return; }
+      if (!(await ensureFirebase())) { netNote(netBlurb(), netReason()); G.state = "menu"; return; }
+    } catch (err) { console.error(err); netNote("Could not sign in for matchmaking: " + err.message, "SIGN-IN FAILED"); G.state = "menu"; return; }
     if (Net.cancelled) return;
     const myUid = firebase.auth().currentUser.uid;
     const waitRef = Net.db.ref("dinobowl/matchmaking/waiting");
@@ -1103,8 +1162,8 @@
         return { uid: myUid, room: asHostRoom, ts: firebase.database.ServerValue.TIMESTAMP };
       });
     } catch (err) {
-      console.error(err); netStatus("MATCH FAILED");
-      alert("Matchmaking is unavailable (database rules may need deploying). Try ONLINE (LINK) instead.");
+      console.error(err);
+      netNote("Matchmaking is unavailable (the database rules may need deploying). Try ONLINE (LINK) instead.", "MATCH FAILED");
       G.online = null; G.state = "menu"; return;
     }
     if (Net.cancelled) { if (asHostRoom) waitRef.transaction((c) => (c && c.uid === myUid ? null : c)); return; }
@@ -1161,10 +1220,18 @@
     netStatus("READY");
   }
 
+  // The states in which the GUEST is the one actually playing: team B's own
+  // snap, from the call sheet through the whistle.
+  const GUEST_PLAY_STATES = ["playcall", "presnap", "live", "kick", "ptchoice"];
   function canControlHere() {
     if (!Net.role) return true;
-    if (Net.role === "guest") return G.drive === "B" && ["playcall", "presnap", "live", "kick", "ptchoice"].includes(G.state);
-    return G.drive !== "B" || !["playcall", "presnap", "live", "kick", "ptchoice"].includes(G.state);
+    // S4: the guest may also tap THROUGH a whistle — "dead" and "replay"
+    // forward to the host, whose deadSkip()/endReplay() are already spam-safe,
+    // so the guest is no longer a spectator between its own plays. The HOST's
+    // test deliberately keeps the original list: it must never lose control of
+    // a dead beat merely because team B has the ball.
+    if (Net.role === "guest") return G.drive === "B" && (GUEST_PLAY_STATES.includes(G.state) || G.state === "dead" || G.state === "replay");
+    return G.drive !== "B" || !GUEST_PLAY_STATES.includes(G.state);
   }
   function sendRemoteInput(input) { if (Net.inputRef) Net.inputRef.push(input); }
   function applyRemoteInput(i) {
@@ -1176,22 +1243,42 @@
     if (i.type === "release") { mouse.x = i.x; mouse.y = i.y; mouse.down = false; onRelease(); }
     if (i.type === "alt") { mouse.x = i.x; mouse.y = i.y; onAltFire(); }
   }
+  // Purely LOCAL keys. Mute, the help overlay, the box score and the pause
+  // card are this machine's own screen furniture — they never touch the
+  // simulation, so they are handled HERE, for BOTH roles, ahead of the net
+  // gate. Before this the guest reached onKey in NO state whatsoever
+  // (onlineInput returned true unconditionally), and the host lost the same
+  // four keys for as long as team B had the ball. While the local pause card
+  // is up every key is local, or ESC would open a card that Q could not close.
+  const LOCAL_ONLY_KEYS = ["m", "h", "b", "escape"];
   function onlineInput(input) {
     if (!Net.role) return false;
+    if (input && input.type === "key" && (G.paused || LOCAL_ONLY_KEYS.includes(input.key))) return false;
     if (Net.role === "guest") { if (canControlHere()) sendRemoteInput(input); return true; }
     return !canControlHere();
   }
   const initialRoom = new URLSearchParams(location.search).get("room");
   if (initialRoom) joinOnlineRoom(initialRoom);
-  else if (window.DINO_BOWL_FIREBASE_CONFIG) netStatus("READY");
+  else netStatus(netReason());
 
   // ------------------------------------------------------------------ input
   function canvasPos(e) {
     const r = cv.getBoundingClientRect();
     return { x: (e.clientX - r.left) * (W / r.width), y: (e.clientY - r.top) * (H / r.height) };
   }
-  cv.addEventListener("mousemove", (e) => {
-    const p = canvasPos(e); mouse.x = p.x; mouse.y = p.y;
+  // THE POINTER DOES NOT STOP AT THE CANVAS EDGE. `mousemove` and `mouseup`
+  // were bound to `cv`, so a drag that wandered onto the LETTERBOX (the game
+  // is letterboxed at almost every aspect ratio) and released there never
+  // delivered its mouseup: `mouse.down` stayed true, the arm stayed loaded and
+  // the throw simply never resolved. Both now listen on `window`, which still
+  // receives the canvas's own events by bubbling — nothing about an in-canvas
+  // gesture changes. The coordinate is clamped to the canvas so an outside
+  // release resolves at the edge the player last SAW rather than at a wild
+  // number (which is also exactly what the canvas-bound listener used to do,
+  // by freezing at the last in-canvas position).
+  const canvasPosClamped = (e) => { const p = canvasPos(e); return { x: clamp(p.x, 0, W), y: clamp(p.y, 0, H) }; };
+  window.addEventListener("mousemove", (e) => {
+    const p = canvasPosClamped(e); mouse.x = p.x; mouse.y = p.y;
     if (Net.role === "guest" && canControlHere() && performance.now() - (Net.lastMove || 0) > 45) {
       Net.lastMove = performance.now(); sendRemoteInput({ type: "move", x: p.x, y: p.y });
     }
@@ -1204,8 +1291,10 @@
     if (e.button === 2) { onAltFire(); return; }
     mouse.down = true; onPress();
   });
-  cv.addEventListener("mouseup", (e) => { const p = canvasPos(e); mouse.x = p.x; mouse.y = p.y; });
-  cv.addEventListener("mouseup", (e) => { if (e.button === 0) { if (onlineInput({ type: "release", x: mouse.x, y: mouse.y })) return; mouse.down = false; onRelease(); } });
+  window.addEventListener("mouseup", (e) => {
+    const p = canvasPosClamped(e); mouse.x = p.x; mouse.y = p.y;
+    if (e.button === 0) { if (onlineInput({ type: "release", x: mouse.x, y: mouse.y })) return; mouse.down = false; onRelease(); }
+  });
   cv.addEventListener("contextmenu", (e) => e.preventDefault());
   window.addEventListener("keydown", (e) => {
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " ", "Tab"].includes(e.key)) e.preventDefault();
@@ -1229,6 +1318,18 @@
   // ------------------------------------------------------ touch (iOS/iPadOS)
   // left of screen = movement joystick; right = aim/drag; on-screen buttons for actions
   const touches = {};                 // id -> {role, ...}
+  // EXACTLY ONE FINGER OWNS THE AIM. Every non-button touch used to be tagged
+  // role:"aim" and to call onPress(), and ANY lift called onRelease(). So a
+  // resting off-hand thumb anywhere in the right 58% of the screen during a
+  // dropback re-planted G.slingAnchor at the thumb and nulled G.aim; the very
+  // next lift — the thumb's — resolved nothing and set mouse.down false, after
+  // which the arm could never re-arm (the aim update is gated on
+  // `slingAnchor && mouse.down`). The QB just stood there until the sack.
+  // The gesture now has an OWNER: the first aim finger claims it, later ones
+  // are inert until it lifts, and only the owner's lift releases. This is also
+  // P0-12's "at most one role:aim touch per event" — one per GESTURE is
+  // strictly stronger than one per event.
+  let aimTouchId = null;              // identifier of the finger that owns aim
   G.touch = false; G.touchMove = { x: 0, y: 0 };   // flips true on the first real touch
   function canvasPosT(t) {
     const r = cv.getBoundingClientRect();
@@ -1240,6 +1341,14 @@
   function onTouchStart(e) {
     e.preventDefault();
     G.touch = true;                   // reveal on-screen controls for touch players
+    // Self-heal: if the owning finger vanished without ever delivering a
+    // touchend (a gesture stolen by the OS, a dropped event), do not strand
+    // the arm forever. The claim is dropped SILENTLY — a phantom onRelease()
+    // here would throw a pass the player never asked for.
+    if (aimTouchId !== null && e.touches &&
+      !Array.prototype.some.call(e.touches, (t2) => t2.identifier === aimTouchId)) {
+      delete touches[aimTouchId]; aimTouchId = null; mouse.down = false;
+    }
     for (const t of e.changedTouches) {
       const p = canvasPosT(t);
       const btn = touchButtonAt(p);
@@ -1249,7 +1358,10 @@
         touches[t.identifier] = { role: "move", ox: p.x, oy: p.y };
         continue;
       }
-      // otherwise a tap/aim like the mouse
+      // otherwise a tap/aim like the mouse — but only for the OWNER. A second
+      // finger is recorded inert so its move and its lift are explicit no-ops.
+      if (aimTouchId !== null) { touches[t.identifier] = { role: "idle" }; continue; }
+      aimTouchId = t.identifier;
       touches[t.identifier] = { role: "aim" };
       mouse.x = p.x; mouse.y = p.y; mouse.down = true; onPress();
     }
@@ -1262,7 +1374,7 @@
       if (tr.role === "move") {
         const dx = p.x - tr.ox, dy = p.y - tr.oy, m = Math.hypot(dx, dy) || 1, mag = Math.min(1, m / 44);
         G.touchMove = { x: (dx / m) * mag, y: (dy / m) * mag };
-      } else if (tr.role === "aim") { mouse.x = p.x; mouse.y = p.y; }
+      } else if (tr.role === "aim" && t.identifier === aimTouchId) { mouse.x = p.x; mouse.y = p.y; }
     }
   }
   function onTouchEnd(e) {
@@ -1271,7 +1383,9 @@
       const tr = touches[t.identifier]; if (!tr) continue;
       delete touches[t.identifier];
       if (tr.role === "move") G.touchMove = { x: 0, y: 0 };
-      else if (tr.role === "aim") { mouse.down = false; onRelease(); }
+      // The claim is cleared HERE — the same place the release happens — so a
+      // touchcancel (which shares this handler) can never leak ownership.
+      else if (tr.role === "aim" && t.identifier === aimTouchId) { aimTouchId = null; mouse.down = false; onRelease(); }
     }
   }
   cv.addEventListener("touchstart", onTouchStart, { passive: false });
@@ -1367,6 +1481,31 @@
   // itself still goes through, so skipping never eats a gameplay press
   function skipBanner() {
     if (G.banner && !G.banner.sticky && G.banner.t > 0.22) G.banner.t = 0.22;
+  }
+  // ------------------------------------------------ error / notice surface
+  // G.lastErr had two writers and ZERO readers: a caught exception vanished
+  // into a property nothing ever drew, and the player just saw the game stop
+  // responding with no clue why. notify() is the single channel for "something
+  // the player needs to know that isn't a play" — a small red one-liner at the
+  // foot of EVERY screen for a few seconds, plus one console.error per
+  // DISTINCT message so a fault that repeats every frame cannot flood the
+  // console. It is also what replaced the seven native alert() calls the
+  // online paths used to throw over the canvas (S5).
+  //
+  // The "seen" set hangs off the function rather than sitting in a module-level
+  // const on purpose: joinOnlineRoom() runs during the IIFE's own evaluation
+  // when the page carries a ?room= link, and it can notify() from there — a
+  // const declared this far down the file would still be in its temporal dead
+  // zone and the notice would throw instead of showing.
+  function notify(text, opts) {
+    if (text == null || text === "") return;
+    const msg = String(text);
+    G.note = { text: msg, t: (opts && opts.t) || 6 };
+    if (opts && opts.quiet) return;
+    notify.seen = notify.seen || new Set();
+    if (notify.seen.has(msg)) return;
+    notify.seen.add(msg);
+    try { console.error("[dinobowl] " + msg); } catch (_) { /* no console */ }
   }
   // ...and the same input advances the DEAD BEAT itself past a short
   // read-lockout (0.35s routine, 0.9s for TD/turnover mega beats) — the tap
@@ -2194,6 +2333,8 @@
     G.stats = { passYds: 0, rushYds: 0, tds: 0 };
     G.gameStats = {}; G.challengeUsed = false; G.ticker = null;
     G.banner = null;
+    clearCelebration();   // P0-21: a residual from the last game's final TD must not ride along
+    G.zeroBannerPlay = null;
     // show the pregame hype/lineup screen first; kickoff waits for ENTER/tap
     G.intro = { t: 0 };
     G.state = "intro";
@@ -3032,10 +3173,10 @@
           s.tackler.jumpT = 0;
           pinPileCels(s);
           // A low dust kick under the pile as the pair hits the turf.
-          for (let i = 0; i < 7; i++) (G.parts = G.parts || []).push({
-            x: restX + rnd(-16, 12), y: s.baseY + rnd(2, 7), z: 1,
-            vx: rnd(-45, 45), vy: rnd(-14, 14), vz: rnd(16, 46),
-            t: rnd(0.26, 0.46), puff: true });
+          for (let i = 0; i < 7; i++) spawnPart("puff",
+            restX + rnd(-16, 12), s.baseY + rnd(2, 7), 1,
+            rnd(-45, 45), rnd(-14, 14), rnd(16, 46),
+            rnd(0.26, 0.46));
         }
       } else {
         // Resting pile: hold the two collapsed dinos pinned to their most-
@@ -3499,6 +3640,9 @@
     G.state = "live"; G.phase = "drop"; G.playT = 0;
     G.clockStopped = false;   // the snap restarts a stopped clock
     G.tape = []; G.playPass = null; G.aim = null; G.soarAim = null; G.slingAnchor = null;
+    // the SAVE HIGHLIGHT chip asks "did THIS play score?", so its reference
+    // total is latched where the play resets, next to the tape it belongs to
+    G.hlScore0 = G.score.A + G.score.B;
     noteAiPlayStart();
     G.selCard = null;   // the pre-snap info card never lingers into the play
     // scouting log for the CPU defensive coordinator
@@ -3524,6 +3668,12 @@
     // silently downgrade it to once per GAME (LESSON #20 — a latch or
     // accumulator model has to be reset wherever the play resets).
     G.punchDrawn = false;   // the strip question is asked once per play (LESSON #20)
+    // ...and so are these two. A celebration that somehow outlived its beat
+    // would freeze the quarter clock for the whole of the next snap (P0-21),
+    // and the 0:00 latch is per-play by definition (P0-20). LESSON #20: a
+    // latch resets where the play resets.
+    clearCelebration();
+    G.zeroBannerPlay = null;
     for (const e of G.players) { e.punchedThisPlay = false; e.punchRolled = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; e.stiffConsidered = null; e.jukePlantT = 0; e.stiffPlantT = 0; }
     // The takedown ledger, the escape ledger and the per-play contact clock are
     // latches, so they reset where the play resets — LESSON #20, which is exactly
@@ -4448,10 +4598,18 @@
       e.staggerT = 0; e.proneT = 0;
     }
   }
+  // ONE place that ends a celebration, so no caller can null the latch and
+  // leave entities stranded in celebPhase (tickDeadEntities skips those, and a
+  // stranded body never finishes its pose chain).
+  function clearCelebration() {
+    G.celebrate = null;
+    for (const e of G.players || []) e.celebPhase = null;
+  }
   function updateCelebration(dt) {
     const c = G.celebrate;
-    c.t -= dt;
-    if (c.t <= 0) { G.celebrate = null; G.players.forEach((e) => { e.celebPhase = null; }); return; }
+    // The LIFETIME now ticks unconditionally in update() (P0-21); this
+    // function is purely the choreography.
+    if (!c || c.t <= 0) return;
     for (const e of G.players) {
       if (!e.celebPhase) continue;
       e.animT += dt * 8;
@@ -4470,7 +4628,7 @@
         e.x += e.dir * e.slideV * dt;
         e.slideV = Math.max(30, e.slideV * 0.965);
         if (G.weather.type === "RAIN" && Math.random() < dt * 22) {
-          for (let i = 0; i < 3; i++) G.parts.push({ x: e.x + rnd(-8, 8), y: e.y + rnd(-4, 6), z: 0, vx: rnd(-50, 50), vy: rnd(-30, 30), vz: rnd(30, 90), t: rnd(0.3, 0.6), splash: true });
+          for (let i = 0; i < 3; i++) spawnPart("splash", e.x + rnd(-8, 8), e.y + rnd(-4, 6), 0, rnd(-50, 50), rnd(-30, 30), rnd(30, 90), rnd(0.3, 0.6));
         }
         if (e.x > xAtYd(109)) { e.dir *= -1; e.slideV = 60; } // don't slide into the stands
       } else if (e.celebPhase === "party") {
@@ -4480,7 +4638,7 @@
           // the SPIKE: the scorer slams it down once — turf explodes
           if (c.style === "spike" && !c.spiked && e === c.scorer) {
             c.spiked = true; sfx.tackle(); G.shake = Math.max(G.shake, 0.25);
-            for (let i = 0; i < 10; i++) G.parts.push({ x: e.x + rnd(-8, 8), y: e.y + rnd(-4, 6), z: 2, vx: rnd(-70, 70), vy: rnd(-50, 50), vz: rnd(30, 100), t: rnd(0.3, 0.6), puff: true });
+            for (let i = 0; i < 10; i++) spawnPart("puff", e.x + rnd(-8, 8), e.y + rnd(-4, 6), 2, rnd(-70, 70), rnd(-50, 50), rnd(30, 100), rnd(0.3, 0.6));
           }
         }
         e.x += Math.sin(performance.now() / 130 + e.y) * 26 * dt;
@@ -4524,7 +4682,7 @@
     if (tdHome) crowdCheer(1.0); else crowdAww(1.2);
     if (rainParty) {
       const c = G.carrier || G.ball;
-      for (let i = 0; i < 26; i++) G.parts.push({ x: c.x + rnd(-16, 16), y: c.y + rnd(-8, 12), z: 0, vx: rnd(-60, 60), vy: rnd(-40, 40), vz: rnd(30, 110), t: rnd(0.3, 0.7), splash: true });
+      for (let i = 0; i < 26; i++) spawnPart("splash", c.x + rnd(-16, 16), c.y + rnd(-8, 12), 0, rnd(-60, 60), rnd(-40, 40), rnd(30, 110), rnd(0.3, 0.7));
     }
     if (t === "A") G.stats.tds++;
     // 1.2s to the conversion choice — the celebration keeps playing BEHIND
@@ -4601,6 +4759,44 @@
   }
   // ONE geometry for the opt-in replay chip too, same reason ptRects exists.
   function ptReplayRect() { return { x: W / 2 - 170, y: 446, w: 340, h: 28 }; }
+  // ------------------------------------------------ SAVE HIGHLIGHT (GIF door)
+  // WHAT WAS BROKEN: the GIF exporter is a real, finished feature that almost
+  // nobody could reach. It lives on the replay screen, and the replay screen
+  // had exactly two doors: the once-per-game coach's challenge — which also
+  // risks a timeout and is whitelisted to INCOMPLETE / DROPPED! / INTERCEPTED!
+  // / TACKLED / BROKEN UP! / SWATTED AWAY!, i.e. every reason EXCEPT a
+  // touchdown, a sack, a FLATTENED! and a fumble-return TD — and, since batch
+  // F, the PAT card after one of YOUR touchdowns. A safety, a pick, a
+  // scoop-and-score, a fourth-down stand, a two-point stop and every CPU
+  // touchdown had no door at all: the exact plays anyone would want to share.
+  //
+  // This door is free. It costs no challenge and no timeout, it appears only
+  // on a dead beat that is ALREADY parked waiting for input, and the replay's
+  // continuation puts the game back on that same beat — G.deadT and G.deadNext
+  // are untouched while state is "replay" (update() returns straight out of
+  // the replay branch), so nothing about dead-ball pacing changes.
+  //
+  // "Did this play score?" is answered by comparing the running total against
+  // the total latched at the snap, which is where the play resets (LESSON #20)
+  // — that covers touchdown(), defensiveTouchdown(), the safety branch and the
+  // two-point conversion from one place. Turnovers come off G.lastDead, and a
+  // fourth-down stop is the documented G.down === 5 that only exists for the
+  // length of this beat. G.tape is cleared only in snap(), so at this beat it
+  // still holds the play that just happened.
+  function highlightBeat() {
+    return G.state === "dead" && !G.replay && !!G.tape && G.tape.length >= 50 &&
+      ((G.score.A + G.score.B) !== (G.hlScore0 || 0) ||
+        !!(G.lastDead && G.lastDead.turnover) || G.down > 4);
+  }
+  // ONE geometry for the chip, for the same reason stopChipVisible() exists:
+  // an invisible hotspot that outlives its box eats taps. It sits under the
+  // STOP CLOCK chip whenever that one is also up.
+  function highlightChipRect() { return { x: 10, y: stopChipVisible() ? 82 : 40, w: 214, h: 36 }; }
+  function saveHighlight() {
+    if (!highlightBeat()) return;
+    startReplay(() => { G.state = "dead"; });   // tape >= 50 is already proven
+    gifStart();                                 // needs G.replay, so it goes second
+  }
   function ptClick() {
     // WHAT WAS BROKEN: startReplay had exactly ONE caller — inside
     // throwChallenge — and G.replay is assigned nowhere else, so the replay
@@ -5583,6 +5779,9 @@
     });
     if (G.tape.length > 340) G.tape.shift();
   }
+  // ONE truth for how fast the tape plays back. gifStart's seek is derived
+  // from it, so the two can never drift (they already had: see gifStart).
+  const REPLAY_SPEED = 0.55;
   function startReplay(cont) {
     if (G.tape.length < 50) { cont(); return; }
     // last 2.1s of action only — the whole-play tape at 0.42x was a 7-13s tax
@@ -5591,7 +5790,7 @@
   }
   function updateReplay(dt) {
     const r2 = G.replay;
-    r2.i += dt * 60 * 0.55; // slow motion, but not molasses
+    r2.i += dt * 60 * REPLAY_SPEED; // slow motion, but not molasses
     if (r2.i >= r2.frames.length) endReplay();
   }
   // ------------------------------------------------ the coach's challenge
@@ -5672,13 +5871,22 @@
     if (chunk.length) flushChunk();
     out.push(0);
   }
-  function gifEncode(frames, w, h, delayCs) {
+  function gifEncode(frames, w, h, delayCs, pal) {
     const out = [];
     const STR = (t) => { for (let i = 0; i < t.length; i++) out.push(t.charCodeAt(i)); };
     STR("GIF89a");
     out.push(w & 255, w >> 8, h & 255, h >> 8, 0xF7, 0, 0);
-    for (let i = 0; i < 256; i++) {   // fixed 3-3-2 palette (great for pixel art)
-      out.push(Math.round(((i >> 5) & 7) * 255 / 7), Math.round(((i >> 2) & 7) * 255 / 7), Math.round((i & 3) * 255 / 3));
+    // WHAT WAS BROKEN: this wrote a FIXED 3-3-2 table — three bits of red,
+    // three of green and TWO of blue, i.e. four blue levels for the entire
+    // export. Dino Bowl's gold #ffd23f came out (255,218,0), so the amber went
+    // flat yellow; turf greens collapsed toward olive; and every team blue
+    // snapped to one of 0/85/170/255. The table is now the one gifBuildPalette
+    // derived from the pixels the renderer actually drew (256 entries, 3 bytes
+    // each). Callers always pass it; the 3-3-2 ramp survives only as a fallback
+    // so a malformed call still produces a readable file instead of throwing.
+    for (let i = 0; i < 256; i++) {
+      if (pal && pal.length >= 768) out.push(pal[i * 3], pal[i * 3 + 1], pal[i * 3 + 2]);
+      else out.push(Math.round(((i >> 5) & 7) * 255 / 7), Math.round(((i >> 2) & 7) * 255 / 7), Math.round((i & 3) * 255 / 3));
     }
     out.push(0x21, 0xFF, 0x0B); STR("NETSCAPE2.0"); out.push(3, 1, 0, 0, 0); // loop forever
     for (const px of frames) {
@@ -5693,42 +5901,121 @@
   // resolution of the 960×540 canvas instead of reducing the cel work to a
   // postage-stamp 240×135 export.
   const GIF_W = 480, GIF_H = 270, GIF_MAX_FRAMES = 120;
+  // THE GIF's SEEK, DERIVED. `frames.length - 150` was dead code: startReplay
+  // slices the tape to at most 126 frames, so Math.max(0, 126 - 150) chose 0
+  // every single time and the comment above it ("start on the final 2.5
+  // seconds") described something that never ran. The real budget is a
+  // function of the two rates that already exist — one grab every 3 rendered
+  // frames, and REPLAY_SPEED tape-frames of travel per rendered frame — so
+  // GIF_MAX_FRAMES grabs cover GIF_MAX_FRAMES * 3 * REPLAY_SPEED tape frames.
+  // At today's numbers that is 198, comfortably more than the 126-frame
+  // replay, so the export still starts at 0 and still contains the whole
+  // finish; the difference is that it now starts there BECAUSE the budget
+  // covers the window, and a longer replay window would seek correctly instead
+  // of silently dropping its ending.
+  const GIF_TAPE_SPAN = Math.floor(GIF_MAX_FRAMES * 3 * REPLAY_SPEED);
+  // ---- adaptive local colour table (replaces the fixed 3-3-2 ramp)
+  // The first grabbed frame is histogrammed into 32768 RGB555 buckets; the 256
+  // heaviest buckets become the table, each entry the MEAN colour of its
+  // bucket rather than the bucket corner. Every later pixel resolves through a
+  // lazily filled 32K Int16Array, so the steady-state cost is one typed-array
+  // read per pixel — measured 1.43ms/frame at 480x270 against the 1.30ms the
+  // fixed table cost, i.e. the fidelity is free.
+  function gifBuildPalette(d) {
+    const cnt = new Uint32Array(32768), sr = new Uint32Array(32768), sg = new Uint32Array(32768), sb = new Uint32Array(32768);
+    for (let i = 0; i < d.length; i += 4) {
+      const k = ((d[i] >> 3) << 10) | ((d[i + 1] >> 3) << 5) | (d[i + 2] >> 3);
+      cnt[k]++; sr[k] += d[i]; sg[k] += d[i + 1]; sb[k] += d[i + 2];
+    }
+    const used = [];
+    for (let k = 0; k < 32768; k++) if (cnt[k]) used.push(k);
+    used.sort((a, b) => cnt[b] - cnt[a]);
+    const n = Math.max(1, Math.min(256, used.length));
+    const pal = new Uint8Array(768);
+    for (let i = 0; i < n && i < used.length; i++) {
+      const k = used[i], c = cnt[k];
+      pal[i * 3] = Math.round(sr[k] / c); pal[i * 3 + 1] = Math.round(sg[k] / c); pal[i * 3 + 2] = Math.round(sb[k] / c);
+    }
+    G.gifPalN = n;
+    G.gifPal = pal;
+    G.gifLut = new Int16Array(32768).fill(-1);
+    for (let i = 0; i < n; i++) {
+      G.gifLut[((pal[i * 3] >> 3) << 10) | ((pal[i * 3 + 1] >> 3) << 5) | (pal[i * 3 + 2] >> 3)] = i;
+    }
+  }
+  // only ever runs for a bucket the table has not seen yet — at most 32768
+  // times across a whole export, in practice a few hundred
+  function gifNearest(r, g, b) {
+    const pal = G.gifPal; let best = 0, bd = Infinity;
+    for (let i = 0; i < G.gifPalN; i++) {
+      const dr = r - pal[i * 3], dg = g - pal[i * 3 + 1], db = b - pal[i * 3 + 2];
+      const d2 = dr * dr + dg * dg + db * db;
+      if (d2 < bd) { bd = d2; best = i; if (d2 === 0) break; }
+    }
+    return best;
+  }
   function gifGrabFrame() {
     if (!G.gifCv) { G.gifCv = document.createElement("canvas"); G.gifCv.width = GIF_W; G.gifCv.height = GIF_H; }
     const g2 = G.gifCv.getContext("2d");
     g2.imageSmoothingEnabled = false;
     g2.drawImage(cv, 0, 0, GIF_W, GIF_H);
     const d = g2.getImageData(0, 0, GIF_W, GIF_H).data;
-    const idx = new Uint8Array(GIF_W * GIF_H);
+    if (!G.gifPal || !G.gifLut) gifBuildPalette(d);
+    const lut = G.gifLut, idx = new Uint8Array(GIF_W * GIF_H);
     for (let i = 0, j = 0; i < d.length; i += 4, j++) {
-      idx[j] = ((d[i] >> 5) << 5) | ((d[i + 1] >> 5) << 2) | (d[i + 2] >> 6);
+      const k = ((d[i] >> 3) << 10) | ((d[i + 1] >> 3) << 5) | (d[i + 2] >> 3);
+      let v = lut[k];
+      if (v < 0) { v = gifNearest(d[i], d[i + 1], d[i + 2]); lut[k] = v; }
+      idx[j] = v;
     }
     G.gifFrames.push(idx);
   }
   function gifStart() {
     if (!G.replay) return;
     G.gifFrames = []; G.gifRec = true; G.gifSkip = 0;
+    // a new export derives a new table from its OWN footage (a night game and
+    // a snow game do not share 256 colours)
+    G.gifPal = null; G.gifLut = null;
     // Replays run in slow motion.  Starting on the final 2.5 seconds of the
     // live tape guarantees that the tackle/catch/turnover is actually inside
     // the finite, shareable GIF rather than spending its frame budget on a
     // routine route release.
-    G.replay.i = Math.max(0, G.replay.frames.length - 150);
+    G.replay.i = Math.max(0, G.replay.frames.length - GIF_TAPE_SPAN);
     banner("🎥 RECORDING…", "capturing the finish in crisp pixel art", 1.2);
   }
   function gifFinish() {
     if (!G.gifRec || !G.gifFrames.length) { G.gifRec = false; return; }
     G.gifRec = false;
-    try {
-      const bytes = gifEncode(G.gifFrames, GIF_W, GIF_H, 7);
-      const blob = new Blob([bytes], { type: "image/gif" });
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = "dinobowl-replay.gif";
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(a.href), 4000);
-      banner("GIF SAVED!", "check your downloads — share the chaos", 1.6);
-    } catch (err) { banner("GIF FAILED", String(err).slice(0, 40), 1.4); }
+    // PAINT BEFORE YOU BLOCK. gifEncode is pure array maths over every frame
+    // of the tape and it runs on the MAIN THREAD: measured at 254-314ms on
+    // desktop V8 for 76 frames, and roughly a second on a mid-range phone.
+    // That was survivable while the exporter could only be reached by spending
+    // the once-per-game coach's challenge, because almost nobody reached it.
+    // The SAVE HIGHLIGHT chip makes it a ONE-TAP action — and a one-tap action
+    // that freezes with no feedback does not read as work, it reads as a hang.
+    // So the notice goes up and a frame is allowed to LAND before the encode
+    // starts.
+    // setTimeout, deliberately, NOT requestAnimationFrame: the headless test
+    // harness stubs rAF as a single stored callback, so registering one here
+    // would overwrite the game loop's own callback and stop the harness dead.
+    // ~48ms is three frames at 60fps — long enough to guarantee a paint, and
+    // invisible next to the encode it is covering.
+    const frames = G.gifFrames, pal = G.gifPal;
     G.gifFrames = [];
+    G.gifPal = null; G.gifLut = null;   // 96KB of lookup, freed with the frames
+    banner("SAVING HIGHLIGHT…", frames.length + " frames — one moment", 1.2);
+    setTimeout(() => {
+      try {
+        const bytes = gifEncode(frames, GIF_W, GIF_H, 7, pal);
+        const blob = new Blob([bytes], { type: "image/gif" });
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "dinobowl-replay.gif";
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+        banner("GIF SAVED!", "check your downloads — share the chaos", 1.6);
+      } catch (err) { banner("GIF FAILED", String(err).slice(0, 40), 1.4); }
+    }, 48);
   }
 
   function endReplay() {
@@ -5830,7 +6117,7 @@
     const f = r2.frames[Math.min(r2.frames.length - 1, r2.i | 0)];
     G.camX = f.camX;
     drawField();
-    const list = f.ents.slice().sort((a, b) => a.y - b.y);
+    const list = depthOrder(REPLAY_ORDER, f.ents);
     for (const e of list) {
       const sheet = G.sheets[e.side];
       if (!sheet) continue;
@@ -5957,6 +6244,12 @@
       // advances" after clock-stopping whistles
       if (stopChipVisible() && mouse.x >= 10 && mouse.x <= 206 && mouse.y >= 40 && mouse.y <= 76) {
         useTimeout(G.humanB ? G.drive : "A"); return;
+      }
+      // ...and the SAVE HIGHLIGHT chip, under exactly the same rule: the
+      // hotspot exists only while the chip is actually drawn.
+      if (highlightBeat()) {
+        const hr = highlightChipRect();
+        if (mouse.x >= hr.x && mouse.x <= hr.x + hr.w && mouse.y >= hr.y && mouse.y <= hr.y + hr.h) { saveHighlight(); return; }
       }
       deadSkip();
       return;
@@ -6094,11 +6387,9 @@
     G.snowCd = 1.2;
     const to = { x: mouse.x + G.camX, y: clamp(mouse.y, TOP - 10, BOT + 10) };
     const d = dist(from, to), T = clamp(d / 300, 0.4, 1.4);
-    G.parts.push({
-      x: from.x, y: from.y - 10, z: 8,
-      vx: (to.x - from.x) / T, vy: (to.y - from.y) / T, vz: 90 + d * 0.12,
-      t: T, snowball: true, g: 200, thrown: true,
-    });
+    spawnPart("snowball", from.x, from.y - 10, 8,
+      (to.x - from.x) / T, (to.y - from.y) / T, 90 + d * 0.12,
+      T, 200);
     sfx.juke();
   }
   // A snowball makes its victim cold, blue, and slower for a few seconds.
@@ -6261,6 +6552,10 @@
     if (k === "d" && G.state === "title") { G.diff = (G.diff + 1) % DIFFS.length; saveRecord(); return; }
     if (k === "b" && !["title", "select", "live"].includes(G.state)) { G.showBox = !G.showBox; return; }
     if (k === "c" && G.state === "dead" && !G.challengeUsed) { throwChallenge(); return; }
+    // G on a scoring/turnover dead beat = watch it back AND save the GIF. It
+    // is guarded by highlightBeat() rather than by state alone so that a G
+    // press on an ordinary whistle still falls through to the normal handling.
+    if (k === "g" && G.state === "dead" && highlightBeat()) { saveHighlight(); return; }
     // space/enter during a dead beat advances it (challenge/timeout keys above)
     if (G.state === "dead" && (k === " " || k === "enter")) { deadSkip(); return; }
     if (G.state === "kickfly" && (k === " " || k === "enter")) { flySkip(); return; }
@@ -6758,12 +7053,15 @@
       }
       render();
     }
-    catch (err) { G.lastErr = String(err); }
+    catch (err) { G.lastErr = String(err); notify(G.lastErr); }
     requestAnimationFrame(loop);
   }
 
   function update(dt) {
     updateMusic();   // purely local — even online guests get the soundtrack
+    // The notice one-liner ages out on REAL time and does so before the pause
+    // return, so a message raised while the pause card is up still expires.
+    if (G.note) { G.note.t -= (G.rdt || dt); if (G.note.t <= 0) G.note = null; }
     if (G.paused) return;   // ESC pause: nothing ticks, nothing burns
     // scorebug punch: when points land, the score flashes gold and a +N tag
     // floats off the bug — the scoreboard itself celebrates
@@ -6774,9 +7072,25 @@
     if (G._popB) { G._popB.t -= dt; if (G._popB.t <= 0) G._popB = null; }
     if (G.transT > 0) G.transT = Math.max(0, G.transT - dt);
     // Guests only draw the host's authoritative snapshots.
-    if (Net.remoteView) return;
+    // ...but the WEATHER is local on both sides now (netFrame no longer ships
+    // `parts`), and this tick has to happen BEFORE the bail: updateParticles
+    // lives ~2900 lines further down, past the return, so a guest that fell
+    // through here would render an empty sky forever.
+    if (Net.remoteView) {
+      if (!Array.isArray(G.parts)) G.parts = [];
+      updateParticles(dt);
+      return;
+    }
     if (G.fgFlashT > 0) G.fgFlashT = Math.max(0, G.fgFlashT - dt);
     if (G.gainTag) { G.gainTag.t -= dt; if (G.gainTag.t <= 0) G.gainTag = null; }
+    // P0-21: the celebration latch gets an UNCONDITIONAL lifetime. It used to
+    // be decremented only inside updateCelebration(), which just four states
+    // call — so a flag that leaked anywhere else (enterKick, kickfly, or a
+    // residual carried into a brand new game) never expired, and the
+    // "!G.celebrate" term in the quarter-clock gate immediately below froze
+    // the clock outright. LESSON #20: the latch now dies on real time wherever
+    // it lives, and snap()/startGame clear it where the play and the game reset.
+    if (G.celebrate) { G.celebrate.t -= dt; if (G.celebrate.t <= 0) clearCelebration(); }
     // RUNNING clock — Retro Bowl pacing: burns ~2.2x during the live snap and
     // ~2.5x through the dead-ball reset (a play "costs" 10-20 game-seconds),
     // but only 1:1 while you read the defense at presnap. Stoppages
@@ -6796,7 +7110,14 @@
       if (!G.humanB && (G.score.A - G.score.B) > 7) rate *= 1.5;
       const cb = G.clock;
       G.clock = Math.max(0, G.clock - dt * rate);
-      if (cb > 0 && G.clock <= 0 && G.state === "live" && !G.banner) {
+      // LESSON #4 — a correct rule that is invisible reads as a bug. The old
+      // guard was "!G.banner", so the single frame on which the clock crosses
+      // zero was silently thrown away whenever ANY other banner happened to be
+      // up (BROKEN TACKLE is the common one), and nothing ever retried. Latch
+      // the EVENT instead: once per play, regardless of the slot. The banner is
+      // already sticky, so it correctly outranks the toast it displaces.
+      if (cb > 0 && G.clock <= 0 && G.state === "live" && G.zeroBannerPlay !== G.playNo) {
+        G.zeroBannerPlay = G.playNo;
         banner("0:00", "The play runs to the whistle!", 0.9, { sticky: true });
       }
     }
@@ -6883,7 +7204,47 @@
       }
       tickDeadEntities(dt);
       if (G.celebrate) updateCelebration(dt);
-      if (G.deadT <= 0 && G.deadNext) { const f = G.deadNext; G.deadNext = null; f(); }
+      if (G.deadT <= 0 && G.deadNext) {
+        // S3. A continuation that THREW used to leave "dead" with no way out
+        // at all: deadNext had already been nulled, deadT counted down
+        // forever, and space/enter/escape were every one of them no-ops.
+        //
+        // The continuation is still consumed BEFORE the call, exactly as it
+        // always was, and that ordering is load-bearing: continuations
+        // routinely schedule the next beat themselves, and several of them
+        // re-arm the very same function object (enterPlaycall reaching a
+        // spent clock lands in endQuarter, which sets deadNext =
+        // enterPlaycall again). Deferring the null and then clearing it "only
+        // if unchanged" cannot tell that legitimate re-arm apart from a
+        // continuation that scheduled nothing — it deletes the new beat and
+        // hangs the game. So: consume first, and REPAIR on the way out.
+        const f = G.deadNext;
+        G.deadNext = null;
+        try { f(); }
+        catch (err) {
+          G.lastErr = String(err);
+          notify("RECOVERED FROM AN ERROR — RESETTING THE PLAY");
+          // ...unless the continuation managed to schedule its successor
+          // before it blew up, in which case that beat is the better recovery.
+          if (!G.deadNext) { G.deadT = 0; enterPlaycall(); }
+        }
+      }
+      // Belt and braces for the OTHER softlock shape: a dead beat with no
+      // continuation at all (a stray state edit, a dropped frame, a net frame
+      // that landed mid-beat, or a continuation whose own recovery failed).
+      // Three seconds past the whistle with nothing scheduled is not a beat,
+      // it is a hang. The kickoff exemption is written against the flight that
+      // is ACTUALLY still animating — the same test the block above uses, plus
+      // "not landed yet" — because a stale G.koFly object left lying around
+      // would otherwise disable this watchdog permanently. deadT is re-zeroed
+      // first so a recovery that itself fails retries once every 3s rather
+      // than once a frame.
+      const koStillFlying = !!(G.koFly && G.ball && G.ball.mode === "koflight" && G.koFly.t < G.koFly.T);
+      if (G.deadT < -3 && !G.deadNext && !koStillFlying) {
+        G.deadT = 0;
+        notify("DEAD BALL RECOVERED — BACK TO THE PLAY CALL");
+        enterPlaycall();
+      }
       updateCamera(dt);
       return;
     }
@@ -9681,42 +10042,77 @@
   }
 
   // --------------------------------------------------------------- weather
+  // ---------------------------------------------------------- particle pool
+  // Every grain used to be a fresh object literal carrying its own boolean tag
+  // (`rain: true` / `puff: true` / ...). In weather that is 2-6 brand-new
+  // objects a frame, forever, each kind with its own hidden class. One uniform
+  // record with a `k` kind field, recycled through a free list, allocates
+  // nothing at all once the game is warm.
+  //
+  // MAX_PARTS is a hard live budget, and not only a fill-rate guard: G.parts
+  // rides along inside every online frame, and unbounded snow was pushing
+  // ~90 KB of grain JSON per frame down the wire.
+  const MAX_PARTS = 300;
+  const PART_POOL = [];
+  const PART_POOL_MAX = 512;
+  // Argument order deliberately mirrors the old object literals field for
+  // field, so the rnd() calls at every emitter still consume the RNG in
+  // exactly the same order and a seeded run reproduces exactly.
+  function spawnPart(k, x, y, z, vx, vy, vz, t, g, col, ph) {
+    const p = PART_POOL.length ? PART_POOL.pop()
+      : { k: "", x: 0, y: 0, z: 0, vx: 0, vy: 0, vz: null, g: 0, t: 0, col: null, ph: 0 };
+    p.k = k; p.x = x; p.y = y; p.z = z || 0;
+    p.vx = vx || 0; p.vy = vy || 0; p.vz = vz == null ? null : vz;
+    p.t = t; p.g = g || 0; p.col = col || null; p.ph = ph || 0;
+    (G.parts || (G.parts = [])).push(p);
+    return p;
+  }
+  // Only pool-shaped records go back into the pool. Two emitters still live
+  // inside the tackle model (beginTackleImpact's impact ring, checkTackles'
+  // punch burst) and that code belongs to another batch this pass, so their
+  // grains still arrive as old-style literals with no `k`. Letting those into
+  // the pool would make every recycled record polymorphic again, which is the
+  // exact thing the pool exists to stop.
+  function recyclePart(p) {
+    if (p.k && PART_POOL.length < PART_POOL_MAX) PART_POOL.push(p);
+  }
+
   // ---- payoff particle vocabulary (AA pass) — same G.parts system, new
   // typed grains. Every emitter is an event, never a per-frame roll (LESSON #15).
   function fxDust(x, y, n) {
-    for (let i = 0; i < (n || 5); i++) G.parts.push({
-      x: x + rnd(-5, 5), y: y + rnd(-2, 3), z: 1,
-      vx: rnd(-35, 35), vy: rnd(-16, 12), vz: rnd(15, 45),
-      t: rnd(0.25, 0.45), dust: true });
+    for (let i = 0; i < (n || 5); i++) spawnPart("dust",
+      x + rnd(-5, 5), y + rnd(-2, 3), 1,
+      rnd(-35, 35), rnd(-16, 12), rnd(15, 45),
+      rnd(0.25, 0.45));
   }
   function fxChunks(x, y, n) {
-    for (let i = 0; i < (n || 6); i++) G.parts.push({
-      x: x + rnd(-6, 6), y: y + rnd(-3, 4), z: 2,
-      vx: rnd(-70, 70), vy: rnd(-32, 32), vz: rnd(50, 120), g: 300,
-      t: rnd(0.3, 0.55), chunk: true, col: Math.random() < 0.5 ? "#2c5e33" : "#5a4426" });
+    for (let i = 0; i < (n || 6); i++) spawnPart("chunk",
+      x + rnd(-6, 6), y + rnd(-3, 4), 2,
+      rnd(-70, 70), rnd(-32, 32), rnd(50, 120),
+      rnd(0.3, 0.55), 300, Math.random() < 0.5 ? "#2c5e33" : "#5a4426");
   }
   function fxSparks(x, y, n) {
     for (let i = 0; i < (n || 8); i++) {
       const a = Math.random() * Math.PI * 2;
-      G.parts.push({ x, y: y - 6, z: 8,
-        vx: Math.cos(a) * rnd(60, 140), vy: Math.sin(a) * rnd(22, 55), vz: rnd(20, 90), g: 260,
-        t: rnd(0.18, 0.38), spark: true, col: Math.random() < 0.5 ? "#ffffff" : "#ffd23f" });
+      spawnPart("spark", x, y - 6, 8,
+        Math.cos(a) * rnd(60, 140), Math.sin(a) * rnd(22, 55), rnd(20, 90),
+        rnd(0.18, 0.38), 260, Math.random() < 0.5 ? "#ffffff" : "#ffd23f");
     }
   }
   const CONF_COLS = ["#ffd23f", "#f4f6f1", "#ff5533", "#69be28", "#8ec7ff"];
   function fxConfetti(x) {
     // rains across the whole visible frame and lands ON the turf within its
     // lifetime (z is height above the anchor y; draw pos = y - z)
-    for (let i = 0; i < 110; i++) G.parts.push({
-      x: G.camX + rnd(-20, W + 20), y: rnd(TOP + 10, BOT - 10), z: rnd(50, 130),
-      vx: rnd(-14, 14), vy: 0, vz: rnd(-55, -15), g: 42,
-      t: rnd(2.0, 3.2), conf: true, col: CONF_COLS[(Math.random() * CONF_COLS.length) | 0],
-      ph: Math.random() * 6.28 });
+    for (let i = 0; i < 110; i++) spawnPart("conf",
+      G.camX + rnd(-20, W + 20), rnd(TOP + 10, BOT - 10), rnd(50, 130),
+      rnd(-14, 14), 0, rnd(-55, -15),
+      rnd(2.0, 3.2), 42, CONF_COLS[(Math.random() * CONF_COLS.length) | 0],
+      Math.random() * 6.28);
   }
   function fxFlash(n) {
-    for (let i = 0; i < (n || 12); i++) G.parts.push({
-      x: G.camX + rnd(20, W - 20), y: rnd(14, TOP - 12), z: 0,
-      vx: 0, vy: 0, t: rnd(0.08, 0.5), flash: true });
+    for (let i = 0; i < (n || 12); i++) spawnPart("flash",
+      G.camX + rnd(20, W - 20), rnd(14, TOP - 12), 0,
+      0, 0, null, rnd(0.08, 0.5));
   }
 
   function updateParticles(dt) {
@@ -9726,42 +10122,76 @@
     // condition — the latch at breakawayCalled — not a roll)
     if (G.state === "live" && G.carrier && G.breakawayCalled) {
       const sp = Math.hypot(G.carrier.vx || 0, G.carrier.vy || 0);
-      if (sp > 60) G.parts.push({
-        x: G.carrier.x - (G.carrier.dir || 1) * 10, y: G.carrier.y + rnd(-6, 6), z: 10,
-        vx: -(G.carrier.dir || 1) * 40, vy: 0, t: 0.2, streak: true });
+      if (sp > 60) spawnPart("streak",
+        G.carrier.x - (G.carrier.dir || 1) * 10, G.carrier.y + rnd(-6, 6), 10,
+        -(G.carrier.dir || 1) * 40, 0, null, 0.2);
     }
+    // Weather is a RATE, not a per-frame head count. `for (i = 0; i < 6; i++)`
+    // meant 360 raindrops a second at 60fps but only 180 at 30fps: a phone that
+    // dropped to half framerate silently lost half its weather. That is the
+    // LESSON #15 shape — how much world happens must not be a function of how
+    // often the frame happens to run. dt * 360 and dt * 120 reproduce the old
+    // 60fps density exactly (6 and 2 per frame at 16.7ms) and now hold at any
+    // framerate. The fractional remainder is CARRIED in an accumulator, never
+    // settled with a coin flip.
+    if (G.partAccW !== w.type) { G.partAccW = w.type; G.partAcc = 0; }
+    const room = Math.max(0, MAX_PARTS - G.parts.length);
     if (w.type === "RAIN") {
-      for (let i = 0; i < 6; i++) G.parts.push({ x: G.camX + rnd(-40, W + 40), y: rnd(-20, H), vx: w.wind.x * 2 - 60, vy: 540, t: rnd(0.25, 0.5), rain: true });
+      G.partAcc += dt * 360;
+      const want = G.partAcc | 0; G.partAcc -= want;
+      const n = Math.min(want, room);
+      for (let i = 0; i < n; i++) spawnPart("rain", G.camX + rnd(-40, W + 40), rnd(-20, H), 0, w.wind.x * 2 - 60, 540, null, rnd(0.25, 0.5));
       // players splash through the puddles (Fields rules)
       for (const e of G.players || []) {
         if (Math.hypot(e.vx, e.vy) > 36 && inPuddle(e) && Math.random() < dt * 9) {
-          for (let i = 0; i < 3; i++) G.parts.push({ x: e.x + rnd(-6, 6), y: e.y + rnd(-2, 4), z: 0, vx: rnd(-30, 30), vy: rnd(-20, 6), vz: rnd(20, 60), t: rnd(0.25, 0.45), splash: true });
+          for (let i = 0; i < 3; i++) spawnPart("splash", e.x + rnd(-6, 6), e.y + rnd(-2, 4), 0, rnd(-30, 30), rnd(-20, 6), rnd(20, 60), rnd(0.25, 0.45));
         }
       }
     } else if (w.type === "SNOW") {
-      for (let i = 0; i < 2; i++) G.parts.push({ x: G.camX + rnd(-40, W + 40), y: -6, vx: w.wind.x * 1.5 + rnd(-18, 18), vy: rnd(40, 90), t: rnd(4, 8), snow: true });
-      // the crowd lobs the occasional snowball — live snaps only, and rarely
-      if (G.state === "live" && Math.random() < dt * 0.1) {
+      G.partAcc += dt * 120;
+      const want = G.partAcc | 0; G.partAcc -= want;
+      const n = Math.min(want, room);
+      for (let i = 0; i < n; i++) spawnPart("snow", G.camX + rnd(-40, W + 40), -6, 0, w.wind.x * 1.5 + rnd(-18, 18), rnd(40, 90), null, rnd(4, 8));
+      // the crowd lobs the occasional snowball — live snaps only, and rarely.
+      // NEVER on an online guest: snowballSplat() is the one particle in this
+      // system with gameplay in it (staggerT / coldT / stamNow, plus the
+      // ICEMAN banner), and on a guest those are local fictions the host's
+      // next authoritative frame overwrites 83ms later. Ambient snowballs are
+      // host-side only; everything else here is pure decoration.
+      if (G.state === "live" && !Net.remoteView && Math.random() < dt * 0.1) {
         const fromTop = Math.random() < 0.5;
-        G.parts.push({
-          x: G.camX + rnd(60, W - 60), y: fromTop ? TOP - 8 : BOT + 8, z: 4,
-          vx: rnd(-40, 40), vy: fromTop ? rnd(50, 110) : rnd(-110, -50), vz: 130,
-          t: rnd(1.4, 2.0), snowball: true, g: 160,
-        });
+        spawnPart("snowball",
+          G.camX + rnd(60, W - 60), fromTop ? TOP - 8 : BOT + 8, 4,
+          rnd(-40, 40), fromTop ? rnd(50, 110) : rnd(-110, -50), 130,
+          rnd(1.4, 2.0), 160);
       }
     }
     for (const p of G.parts) {
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
       if (p.vz != null) { p.z = (p.z || 0) + p.vz * dt; p.vz -= (p.g || 220) * dt; }
       // confetti settles on the turf and fades there instead of sinking through
-      if (p.conf && p.z <= 0) { p.z = 0; p.vz = 0; p.vx *= 0.9; p.t = Math.min(p.t, 0.5); }
-      if (p.snowball && p.z <= 0 && p.vz < 0) { // lands with a puff
+      if (p.k === "conf" && p.z <= 0) { p.z = 0; p.vz = 0; p.vx *= 0.9; p.t = Math.min(p.t, 0.5); }
+      if (p.k === "snowball" && p.z <= 0 && p.vz < 0) { // lands with a puff
         p.t = 0;
         snowballSplat(p);
-        for (let i = 0; i < 5; i++) G.parts.push({ x: p.x + rnd(-4, 4), y: p.y + rnd(-3, 3), z: 0, vx: rnd(-40, 40), vy: rnd(-30, 30), vz: rnd(10, 50), t: 0.3, puff: true });
+        for (let i = 0; i < 5; i++) spawnPart("puff", p.x + rnd(-4, 4), p.y + rnd(-3, 3), 0, rnd(-40, 40), rnd(-30, 30), rnd(10, 50), 0.3);
       }
     }
-    G.parts = G.parts.filter((p) => p.t > 0 && p.y < H + 30 && p.y > -30);
+    // Compaction in place. The filter() this replaces threw away and rebuilt
+    // the whole array every frame; dead grains now go back to the pool.
+    // `over` only bites when an event burst (confetti) has pushed the list past
+    // the budget, and it gives up the oldest WEATHER grains first so the FX
+    // that actually carry meaning are never the ones starved out.
+    let over = G.parts.length - MAX_PARTS;
+    let keep = 0;
+    for (let i = 0; i < G.parts.length; i++) {
+      const p = G.parts[i];
+      let live = p.t > 0 && p.y < H + 30 && p.y > -30;
+      if (live && over > 0 && (p.k === "rain" || p.k === "snow")) { live = false; over--; }
+      if (live) G.parts[keep++] = p;
+      else recyclePart(p);
+    }
+    G.parts.length = keep;
   }
   function inPuddle(e) {
     // puddles live on a fixed deterministic grid (mirrors drawField's rects)
@@ -9794,6 +10224,19 @@
       cx.fillText("PAUSED", W / 2, H / 2 - 18);
       cx.font = PF(9); cx.fillStyle = "#f4f6f1";
       cx.fillText("ESC — RESUME      Q — QUIT TO MENU", W / 2, H / 2 + 22);
+    }
+    // S3: the notice line, drawn LAST so nothing can paint over it and no
+    // screen has to opt in. Under qaMode the raw G.lastErr is pinned up too —
+    // a caught exception can never again be invisible. The centred line is
+    // drawn second so this block always leaves textAlign the way the pause
+    // card above already leaves it.
+    if (G.qaMode && G.lastErr) {
+      cx.textAlign = "left"; cx.font = PF(8); cx.fillStyle = "#ff4d3d";
+      cx.fillText(String(G.lastErr).slice(0, 130), 8, H - 22);
+    }
+    if (G.note && G.note.t > 0) {
+      cx.textAlign = "center"; cx.font = PF(9); cx.fillStyle = "#ff7a6b";
+      cx.fillText(G.note.text.slice(0, 110).toUpperCase(), W / 2, H - 9);
     }
   }
   function renderInner() {
@@ -9907,13 +10350,75 @@
 
   const PF = (s) => s + "px 'Press Start 2P', monospace";
 
-  function drawField() {
+  // Depth sort runs twice a frame over ~22 entities. `.slice().sort()` threw a
+  // fresh array away every single time; these persistent buffers are refilled
+  // in place instead. Two buffers, not one shared: the live renderer and the
+  // replay renderer must never be able to alias each other's list.
+  const DRAW_ORDER = [], REPLAY_ORDER = [];
+  const byDepth = (a, b) => a.y - b.y;
+  function depthOrder(buf, src) {
+    buf.length = 0;
+    for (let i = 0; i < src.length; i++) buf.push(src[i]);
+    buf.sort(byDepth);
+    return buf;
+  }
+
+  // ------------------------------------------------------- static turf cache
+  // Stripes, mow grain, endzones, the midfield mark, yard lines, numbers,
+  // hashes and the sidelines are a pure function of the FIELD, not of the
+  // camera — yet they were being repainted, about a thousand canvas ops of
+  // them, on every single frame. Bake them once into an offscreen canvas as
+  // wide as the whole field and blit that at -cam.
+  //
+  // VW is the culling width those paints test against: W while drawing to the
+  // screen, the entire field while baking. Without it the bake would cull
+  // everything past the first viewport and the cache would hold only the left
+  // edge of the field.
+  let VW = W;
+  // Getting this key right is the whole job. A possession flip swaps which
+  // endzone belongs to whom, so G.drive AND both abbreviations have to be in
+  // it — key on the endzone pair alone and a turnover leaves the previous
+  // drive's endzones frozen on screen. The TEAMS flag covers the boot window
+  // before teams.json lands, so a blank first bake cannot get stuck either.
+  function fieldCacheKey() {
+    const ezA = (G.drive === "A" ? G.my : G.opp) || "GB";
+    const ezB = (G.drive === "A" ? G.opp : G.my) || "CHI";
+    const home = (G.stadium && G.stadium.home) || G.homeAbbr || G.my || "-";
+    const wx = (G.weather && G.weather.type) || "CLEAR";
+    return wx + "|" + ezA + "|" + ezB + "|" + (G.drive || "-") + "|" + home +
+      "|" + (TEAMS[ezA] && TEAMS[ezB] ? "T" : "-");
+  }
+  function ensureFieldCache() {
+    const key = fieldCacheKey();
+    if (G.fieldCv && G.fieldKey === key) return G.fieldCv;
+    if (!G.fieldCv) {
+      const fcv = document.createElement("canvas");
+      fcv.width = FIELD_LEN; fcv.height = H;
+      G.fieldCv = fcv; G.fieldCx = fcv.getContext("2d");
+      G.fieldCx.imageSmoothingEnabled = false;
+    }
+    // Point the module's `cx` at the offscreen sheet for exactly one
+    // synchronous paint. Nothing yields in between, and the finally block puts
+    // the camera and the context back even if a paint throws.
+    const keepCx = cx, keepCam = G.camX, keepVW = VW;
+    try {
+      G.fieldCx.clearRect(0, 0, FIELD_LEN, H);
+      cx = G.fieldCx; G.camX = 0; VW = FIELD_LEN;
+      paintFieldStatic();
+    } finally {
+      cx = keepCx; G.camX = keepCam; VW = keepVW;
+      G.fieldKey = key;
+    }
+    return G.fieldCv;
+  }
+
+  function paintFieldStatic() {
     const cam = G.camX;
     // grass stripes every five yards.  Keep their geometry tied to xAtYd so
     // the visual field stays truthful when the presentation scale changes.
     for (let seg = 0; seg < 24; seg++) {
       const x = xAtYd(-10 + seg * 5) - cam;
-      if (x + 5 * YPX < 0 || x > W) continue;
+      if (x + 5 * YPX < 0 || x > VW) continue;
       const snow = G.weather && G.weather.type === "SNOW";
       const base = seg % 2 ? (snow ? "#c9d4cf" : "#1e6b35") : (snow ? "#bcc9c3" : "#1a5e2e");
       cx.fillStyle = G.weather && G.weather.type === "RAIN" ? shade(base, -14) : base;
@@ -9941,7 +10446,7 @@
     cx.font = PF(16); cx.fillStyle = "rgba(244,246,241,.64)"; cx.textAlign = "center";
     for (let yd = 0; yd <= 100; yd += 5) {
       const x = xAtYd(yd) - cam;
-      if (x < -20 || x > W + 20) continue;
+      if (x < -20 || x > VW + 20) continue;
       cx.beginPath(); cx.moveTo(x, TOP); cx.lineTo(x, BOT); cx.stroke();
       if (yd % 10 === 0 && yd > 0 && yd < 100) {
         const num = yd <= 50 ? yd : 100 - yd;
@@ -9957,12 +10462,17 @@
     cx.fillStyle = "rgba(244,246,241,.35)";
     for (let yd = 0; yd <= 100; yd++) {
       const x = xAtYd(yd) - cam;
-      if (x < -4 || x > W + 4) continue;
+      if (x < -4 || x > VW + 4) continue;
       cx.fillRect(x - 1, MID - 52, 2, 6); cx.fillRect(x - 1, MID + 46, 2, 6);
     }
     // sidelines
     cx.fillStyle = "#f4f6f1";
     cx.fillRect(-cam, TOP - 5, FIELD_LEN, 5); cx.fillRect(-cam, BOT, FIELD_LEN, 5);
+  }
+
+  function drawField() {
+    const cam = G.camX;
+    cx.drawImage(ensureFieldCache(), -cam, 0);
     // backdrop: sky / skyline / dome behind the stands
     drawBackdrop(cam);
     // crowd
@@ -10053,9 +10563,15 @@
       day: ["#7db6e8", "#a9d0f0"], dusk: ["#d98a4a", "#7a4a6e"], night: ["#0c1426", "#1a2540"],
     };
     const [top2, bot2] = skies[st.time] || skies.day;
-    const grad = cx.createLinearGradient(0, 0, 0, 70);
-    grad.addColorStop(0, top2); grad.addColorStop(1, bot2);
-    cx.fillStyle = grad; cx.fillRect(0, 0, W, 70);
+    // The sky only depends on the time of day, so build the gradient once
+    // and hold it. createLinearGradient was minting a fresh CanvasGradient
+    // on every frame of every outdoor game.
+    if (!G.skyGrad || G.skyGradKey !== st.time) {
+      const grad = cx.createLinearGradient(0, 0, 0, 70);
+      grad.addColorStop(0, top2); grad.addColorStop(1, bot2);
+      G.skyGrad = grad; G.skyGradKey = st.time;
+    }
+    cx.fillStyle = G.skyGrad; cx.fillRect(0, 0, W, 70);
     if (st.time === "night") {
       cx.fillStyle = "#e8ecf4";
       for (let i = 0; i < 40; i++) cx.fillRect(((i * 197 + 31) % W), (i * 53) % 40, 2, 2); // stars
@@ -10101,7 +10617,7 @@
     // Retro Bowl paints the mark twice more at the 25s (smaller)
     for (const yd of [25, 75]) {
       const x25 = xAtYd(yd) - cam;
-      if (x25 < -60 || x25 > W + 60) continue;
+      if (x25 < -60 || x25 > VW + 60) continue;
       cx.save(); cx.globalAlpha = 0.6;
       cx.font = PF(15); cx.textAlign = "center"; cx.textBaseline = "middle";
       cx.fillStyle = shade(t[1], 12);
@@ -10110,7 +10626,7 @@
       cx.restore(); cx.textBaseline = "alphabetic";
     }
     const x = xAtYd(50) - cam;
-    if (x < -90 || x > W + 90) return;
+    if (x < -90 || x > VW + 90) return;
     cx.save();
     cx.globalAlpha = 0.85;
     cx.fillStyle = shade(t[1], -8);
@@ -10133,7 +10649,7 @@
     const cam = G.camX, t = TEAMS[abbr];
     const x = x0 - cam;
     const width = 10 * YPX;
-    if (x + width < 0 || x > W) return;
+    if (x + width < 0 || x > VW) return;
     // solid, saturated team paint (Retro Bowl endzones are a full color slab)
     cx.fillStyle = shade(t[1], -6); cx.fillRect(x, TOP, width, BOT - TOP);
     cx.fillStyle = "rgba(0,0,0,.14)"; cx.fillRect(x, TOP, width, 6);
@@ -10216,7 +10732,7 @@
   }
 
   function drawPlayers() {
-    const list = G.players.slice().sort((a, b) => a.y - b.y);
+    const list = depthOrder(DRAW_ORDER, G.players);
     for (const e of list) {
       const sheet = G.sheets[teamOf(e)];
       if (!sheet) continue;
@@ -10486,46 +11002,62 @@
     }
     // splash + snowball particles
     for (const p of G.parts) {
-      if (p.splash) {
-        cx.fillStyle = "rgba(150,200,255," + Math.min(0.8, p.t * 2) + ")";
-        cx.fillRect(p.x - G.camX, p.y - p.z, 3, 3);
-      } else if (p.snowball) {
-        cx.fillStyle = "rgba(0,0,0,.25)"; cx.fillRect(p.x - G.camX - 3, p.y, 7, 3);
-        cx.drawImage(G.snowSpr, p.x - G.camX - 6, p.y - p.z - 5);
-      } else if (p.puff) {
-        cx.fillStyle = "rgba(244,246,241," + Math.min(0.9, p.t * 1.5) + ")";
-        cx.fillRect(p.x - G.camX, p.y - p.z, 4, 4);
-      } else if (p.dust) {
-        cx.fillStyle = "rgba(178,158,112," + Math.min(0.8, p.t * 1.8) + ")";
-        cx.fillRect(p.x - G.camX, p.y - p.z, 3, 3);
-      } else if (p.chunk || p.spark) {
-        cx.globalAlpha = Math.min(1, p.t * 2.2);
-        cx.fillStyle = p.col;
-        cx.fillRect(p.x - G.camX, p.y - p.z, p.spark ? 2 : 3, p.spark ? 2 : 3);
-        cx.globalAlpha = 1;
-      } else if (p.conf) {
-        cx.globalAlpha = Math.min(1, p.t);
-        cx.fillStyle = p.col;
-        cx.fillRect(p.x - G.camX + Math.sin(p.ph + p.t * 6) * 2.5, p.y - p.z, 4, 3);
-        cx.globalAlpha = 1;
-      } else if (p.flash) {
-        cx.fillStyle = "rgba(255,255,255," + Math.min(0.95, p.t * 3) + ")";
-        cx.fillRect(p.x - G.camX, p.y, 3, 3);
-      } else if (p.streak) {
-        cx.fillStyle = "rgba(255,255,255," + Math.min(0.4, p.t * 1.6) + ")";
-        cx.fillRect(p.x - G.camX, p.y - p.z, 5, 2);
+      // `p.k` is the grain's kind. The two emitters that still sit inside the
+      // tackle model — beginTackleImpact's impact ring and checkTackles' punch
+      // burst — are off limits this batch, so their grains keep arriving with
+      // the old `puff: true` tag. Resolve that here rather than reach into a
+      // function another batch owns. For a pooled grain `p.k` is a non-empty
+      // string, so this is one truthiness test and nothing else.
+      switch (p.k || (p.puff ? "puff" : "")) {
+        case "splash":
+          cx.fillStyle = "rgba(150,200,255," + Math.min(0.8, p.t * 2) + ")";
+          cx.fillRect(p.x - G.camX, p.y - p.z, 3, 3);
+          break;
+        case "snowball":
+          cx.fillStyle = "rgba(0,0,0,.25)"; cx.fillRect(p.x - G.camX - 3, p.y, 7, 3);
+          cx.drawImage(G.snowSpr, p.x - G.camX - 6, p.y - p.z - 5);
+          break;
+        case "puff":
+          cx.fillStyle = "rgba(244,246,241," + Math.min(0.9, p.t * 1.5) + ")";
+          cx.fillRect(p.x - G.camX, p.y - p.z, 4, 4);
+          break;
+        case "dust":
+          cx.fillStyle = "rgba(178,158,112," + Math.min(0.8, p.t * 1.8) + ")";
+          cx.fillRect(p.x - G.camX, p.y - p.z, 3, 3);
+          break;
+        case "chunk":
+        case "spark":
+          cx.globalAlpha = Math.min(1, p.t * 2.2);
+          cx.fillStyle = p.col;
+          cx.fillRect(p.x - G.camX, p.y - p.z, p.k === "spark" ? 2 : 3, p.k === "spark" ? 2 : 3);
+          cx.globalAlpha = 1;
+          break;
+        case "conf":
+          cx.globalAlpha = Math.min(1, p.t);
+          cx.fillStyle = p.col;
+          cx.fillRect(p.x - G.camX + Math.sin(p.ph + p.t * 6) * 2.5, p.y - p.z, 4, 3);
+          cx.globalAlpha = 1;
+          break;
+        case "flash":
+          cx.fillStyle = "rgba(255,255,255," + Math.min(0.95, p.t * 3) + ")";
+          cx.fillRect(p.x - G.camX, p.y, 3, 3);
+          break;
+        case "streak":
+          cx.fillStyle = "rgba(255,255,255," + Math.min(0.4, p.t * 1.6) + ")";
+          cx.fillRect(p.x - G.camX, p.y - p.z, 5, 2);
+          break;
       }
     }
     const w = G.weather; if (!w) return;
     if (w.type === "RAIN") {
       cx.strokeStyle = "rgba(160,200,255,.4)"; cx.lineWidth = 1;
       cx.beginPath();
-      for (const p of G.parts) if (p.rain) { const x = p.x - G.camX; cx.moveTo(x, p.y); cx.lineTo(x + p.vx * 0.02, p.y + 11); }
+      for (const p of G.parts) if (p.k === "rain") { const x = p.x - G.camX; cx.moveTo(x, p.y); cx.lineTo(x + p.vx * 0.02, p.y + 11); }
       cx.stroke();
       cx.fillStyle = "rgba(10,20,40,.12)"; cx.fillRect(0, 0, W, H);
     } else if (w.type === "SNOW") {
       cx.fillStyle = "rgba(255,255,255,.85)";
-      for (const p of G.parts) if (p.snow) cx.fillRect(p.x - G.camX, p.y, 3, 3);
+      for (const p of G.parts) if (p.k === "snow") cx.fillRect(p.x - G.camX, p.y, 3, 3);
       cx.fillStyle = "rgba(220,230,255,.07)"; cx.fillRect(0, 0, W, H);
     }
   }
@@ -12097,6 +12629,15 @@
       cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(10, 40, 196, 36);
       cx.font = PF(9); cx.textAlign = "left"; cx.fillStyle = "#ffd23f";
       cx.fillText("⏱ STOP CLOCK (T)", 22, 63);
+    }
+    // SAVE HIGHLIGHT chip: the GIF exporter's own door (see highlightBeat).
+    // highlightChipRect() is THE shared truth — the tap hotspot mirrors it.
+    if (highlightBeat()) {
+      const hr = highlightChipRect();
+      cx.fillStyle = "rgba(4,10,7,.85)"; cx.fillRect(hr.x, hr.y, hr.w, hr.h);
+      cx.strokeStyle = "#ff5533"; cx.lineWidth = 2; cx.strokeRect(hr.x, hr.y, hr.w, hr.h);
+      cx.font = PF(9); cx.textAlign = "left"; cx.fillStyle = "#ff5533";
+      cx.fillText("🎥 SAVE HIGHLIGHT (G)", hr.x + 12, hr.y + 23);
     }
     // rampage meter (one per half — spent = grayed out until the break).
     // 2-player versus draws BOTH meters, one per human.

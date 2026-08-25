@@ -31,9 +31,22 @@ const SPRITES = fs.readFileSync(path.join(__dirname, "..", "static", "game", "sp
     sheet.troodon.n === 4 && sheet.trike.n === 4 && sheet.quetz.n === 4 &&
     sheet.troodon.w === 32 && sheet.trike.w === 32 && sheet.quetz.w === 32 &&
     !SRC.includes("sheet.poses") && !SPRITES.includes("out.poses"));
+  // LESSON #18 — CONSTANT CHANGED ON PURPOSE, ASSERTION MOVED WITH IT.
+  // This used to assert "G.replay.frames.length - 150" verbatim. That constant
+  // was DEAD: startReplay slices the tape to at most 126 frames, so
+  // Math.max(0, 126 - 150) evaluated to 0 on every export and the seek never
+  // once did what the comment beside it claimed. Batch G replaces it with
+  // GIF_TAPE_SPAN = GIF_MAX_FRAMES * 3 * REPLAY_SPEED — the grab cadence (one
+  // capture every 3 rendered frames) times the replay's playback rate — which
+  // is 198 today and so still lands the seek at 0 for a 126-frame replay. The
+  // captured footage is byte-for-byte the same window; what changed is that
+  // the number is now derived from the two rates that decide it, so a longer
+  // replay window can no longer silently lose its ending. The assertion pins
+  // the DERIVATION (both operands and the expression) instead of the corpse.
   check("replay GIF captures the compact action finish at HD pixel-art size",
     SRC.includes("const GIF_W = 480, GIF_H = 270, GIF_MAX_FRAMES = 120") && SRC.includes("gifGrabFrame()") &&
-    SRC.includes("G.replay.frames.length - 150"));
+    SRC.includes("const GIF_TAPE_SPAN = Math.floor(GIF_MAX_FRAMES * 3 * REPLAY_SPEED)") &&
+    SRC.includes("G.replay.frames.length - GIF_TAPE_SPAN"));
   check("pass aim no longer renders a threat/risk reticle", !SRC.includes("cx.arc(target.x - G.camX, target.y, 15") && !SRC.includes("cx.fillText(read.label"));
   check("lob arc uses the lower presentation apex", SRC.includes("clamp(d * 0.17, 20, 74)"));
 
