@@ -4780,7 +4780,8 @@
     return cards.map((c, i) => ({ x: rects[i].x, y: rects[i].y, w: 240, h: 72, c }));
   }
   // ONE geometry for the opt-in replay chip too, same reason ptRects exists.
-  function ptReplayRect() { return { x: W / 2 - 170, y: 446, w: 340, h: 28 }; }
+  // 372, not 340: the chip's own copy is 50 characters, 350px at PF(7).
+  function ptReplayRect() { return { x: W / 2 - 186, y: 446, w: 372, h: 28 }; }
   // ------------------------------------------------ SAVE HIGHLIGHT (GIF door)
   // WHAT WAS BROKEN: the GIF exporter is a real, finished feature that almost
   // nobody could reach. It lives on the replay screen, and the replay screen
@@ -4870,8 +4871,8 @@
       const hov = mouse.x >= rr.x && mouse.x <= rr.x + rr.w && mouse.y >= rr.y && mouse.y <= rr.y + rr.h;
       cx.fillStyle = "rgba(4,10,7,.85)"; cx.fillRect(rr.x, rr.y, rr.w, rr.h);
       cx.strokeStyle = hov ? "#ffd23f" : "#9db0a4"; cx.lineWidth = 2; cx.strokeRect(rr.x, rr.y, rr.w, rr.h);
-      cx.font = PF(7); cx.fillStyle = hov ? "#ffd23f" : "#9db0a4"; cx.textAlign = "center";
-      cx.fillText("[R] / TAP = REPLAY THAT TOUCHDOWN  ·  G = SAVE GIF", rr.x + rr.w / 2, rr.y + 18);
+      cx.fillStyle = hov ? "#ffd23f" : "#9db0a4"; cx.textAlign = "center";
+      fitText("[R] / TAP = REPLAY THAT TOUCHDOWN  ·  G = SAVE GIF", rr.x + rr.w / 2, rr.y + 18, rr.w - 12, 7, 6);
     }
   }
 
@@ -5108,13 +5109,22 @@
     drawHalfFrame(title, hint);
   }
   function drawHalfFrame(title, hint) {
-    cx.font = PF(12); cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
-    cx.fillText(title, W / 2, 52);
+    // TEXT BOX: the title and the hint were printed onto the minigame field
+    // with nothing behind them -- 619px of PF(8) instructions over meteors and
+    // flying hot dogs. One plate behind both lines, measured from the wider of
+    // the two and capped at 700px so it never reaches the SKIP chip at x=838.
+    const bw = Math.min(700, Math.max(
+      withFont(PF(12), () => cx.measureText(title).width),
+      withFont(PF(8), () => cx.measureText(hint).width)) + 24);
+    cx.fillStyle = "rgba(5,12,8,.72)";
+    cx.fillRect(Math.round(W / 2 - bw / 2), 36, Math.round(bw), 44);
+    cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
+    fitText(title, W / 2, 52, bw - 16, 12, 9);
     cx.fillStyle = "rgba(5,12,8,.8)"; cx.fillRect(W - 122, 10, 108, 30);
     cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(W - 122, 10, 108, 30);
     cx.font = PF(9); cx.fillStyle = "#ffd23f"; cx.fillText("SKIP ▶", W - 68, 30);
-    cx.font = PF(8); cx.fillStyle = "#9db0a4";
-    cx.fillText(hint, W / 2, 72);
+    cx.fillStyle = "#9db0a4";
+    fitText(hint, W / 2, 72, bw - 16, 8, 7);
   }
   function drawHalfFG() {
     const h = G.half;
@@ -6829,7 +6839,14 @@
   const activeMenuOptions = () => (menuIsGrid() ? menuOptions() : homeOptions());
   // the front door gets fewer, bigger cards; the grid keeps its three columns
   const menuGrid = () => (menuIsGrid()
-    ? { cols: 3, cw: 284, chh: 88, gapx: 18, gapy: 14 }
+    // chh was 88 and gapy 14. With the online modes present the grid is 13 or
+    // 14 cards, which is FIVE rows: 5 * (88 + 14) = 510px of card in the 444px
+    // between the title and the bottom edge. The last row's card ran to y=592
+    // on a 540px canvas, so the SETTINGS description was drawn 18px and 30px
+    // BELOW the screen -- invisible, and invisible to a checker that only ever
+    // measured width. 5 * (76 + 12) = 440 fits, with the mascot (44px), the
+    // title (y+32) and both description lines (y+52, y+64) all still inside.
+    ? { cols: 3, cw: 284, chh: 76, gapx: 18, gapy: 12 }
     : { cols: 2, cw: 372, chh: 118, gapx: 22, gapy: 18 });
   function menuOptions() {
     const opts = [["EXHIBITION", "one game, any matchup"]];
@@ -7045,7 +7062,10 @@
     return cards;
   }
   function cardRects(cards) {
-    const n = cards.length, cw = 168, gap = 16;
+    // cw was 168, which could not hold a signature play name: IMMACULATE
+    // RECEPTION is 200px at PF(10). Four cards at 196 plus three 16px gaps is
+    // 832px of the 960px canvas, so the room was there.
+    const n = cards.length, cw = 196, gap = 16;
     const total = n * cw + (n - 1) * gap, x0 = (W - total) / 2;
     return cards.map((c, i) => ({ x: x0 + i * (cw + gap), y: 356, w: cw, h: 128, c }));
   }
@@ -10337,11 +10357,34 @@
     // card above already leaves it.
     if (G.qaMode && G.lastErr) {
       cx.textAlign = "left"; cx.font = PF(8); cx.fillStyle = "#ff4d3d";
-      cx.fillText(String(G.lastErr).slice(0, 130), 8, H - 22);
+      // TEXT BOX: the full width, less an 8px pad each side. 130 characters
+      // at PF(8) is 1040px on a 960px canvas, so the message a QA run most
+      // needs to read was clipped at both ends.
+      fitText(String(G.lastErr), 8, H - 22, W - 16, 8, 6);
     }
     if (G.note && G.note.t > 0) {
-      cx.textAlign = "center"; cx.font = PF(9); cx.fillStyle = "#ff7a6b";
-      cx.fillText(G.note.text.slice(0, 110).toUpperCase(), W / 2, H - 9);
+      // .slice(0, 110) at PF(9) is 990px on a 960px canvas. Notes carry
+      // arbitrary text (sign-in failures quote the network error verbatim),
+      // so the cap has to be measured rather than counted in characters.
+      // Two faults. A quoted network error runs to 139 characters, which is
+      // 1251px at PF(9) and 973px even at PF(7) -- wider than the canvas either
+      // way, so fitting it ALONE meant cutting the end off the one message the
+      // player most needs to read; two lines hold it whole. And it was printed
+      // straight onto whatever screen was showing, so on the MORE MODES grid it
+      // ran across the bottom row of cards. A notice has to be readable over
+      // anything, so it gets an OPAQUE plate measured from its own lines. A
+      // one-line notice still sits exactly where it always did.
+      cx.textAlign = "center"; cx.font = PF(9);
+      const nl = wrapLines(G.note.text.toUpperCase(), W - 24, 2);
+      let nw = 0;
+      for (const l2 of nl) nw = Math.max(nw, cx.measureText(l2).width);
+      nw = Math.ceil(nw) + 16;
+      const ny = H - 20 - (nl.length - 1) * 13;
+      cx.fillStyle = "rgba(4,10,7,1)";
+      cx.fillRect(Math.round(W / 2 - nw / 2), ny, nw, nl.length * 13 + 6);
+      cx.fillStyle = "#ff7a6b";
+      for (let i2 = 0; i2 < nl.length; i2++)
+        cx.fillText(nl[i2], W / 2, H - 9 - (nl.length - 1 - i2) * 13);
     }
   }
   function renderInner() {
@@ -10412,16 +10455,19 @@
     if (S === "ptchoice") drawPTChoice();
     if (S === "kick") drawKickUI();
     // tapped-player info card (name + unique ratings)
-    if (G.selCard && G.selCard.t > 0 && (S === "presnap" || S === "live")) {
-      const e2 = G.selCard.e;
-      const cxp = clamp(e2.x - G.camX, 102, W - 102), cyp = Math.max(64, e2.y - 74);
-      cx.fillStyle = "rgba(4,10,7,.92)"; cx.fillRect(cxp - 98, cyp, 196, 46);
-      cx.strokeStyle = "#ffd23f"; cx.strokeRect(cxp - 98, cyp, 196, 46);
-      cx.font = PF(8); cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
-      cx.fillText((e2.role || e2.species).toUpperCase() + " · " + lastName(e2.name || "DINO").toUpperCase(), cxp, cyp + 14);
-      cx.font = PF(7); cx.fillStyle = "#f4f6f1";
-      cx.fillText("SPD " + Math.round((e2.spd / SPEED_SCALE - 96) / 1.9 + 60) + " STR " + (e2.str || 75) + " JMP " + (e2.jump || 70), cxp, cyp + 27);
-      cx.fillText("HND " + (e2.hands || 75) + " TKL " + (e2.tkl || 75) + " AGI " + (e2.agi || 75) + " STA " + (e2.stam || 82), cxp, cyp + 39);
+    const sc = selCardRect();
+    if (sc) {
+      const e2 = G.selCard.e, cxp = sc.cx, cyp = sc.cy;
+      cx.fillStyle = "rgba(4,10,7,.92)"; cx.fillRect(sc.x, sc.y, sc.w, sc.h);
+      cx.strokeStyle = "#ffd23f"; cx.strokeRect(sc.x, sc.y, sc.w, sc.h);
+      cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
+      // TEXT BOX: 196px of card, 8px of pad each side. "EDGE · WESTBROOK-IKHINE"
+      // is 23 characters = 184px at PF(8) and would have crossed the gold
+      // border; the long ones step down instead of being cut.
+      fitText((e2.role || e2.species).toUpperCase() + " · " + lastName(e2.name || "DINO").toUpperCase(), cxp, cyp + 14, sc.w - 16, 8, 6);
+      cx.fillStyle = "#f4f6f1";
+      fitText("SPD " + Math.round((e2.spd / SPEED_SCALE - 96) / 1.9 + 60) + " STR " + (e2.str || 75) + " JMP " + (e2.jump || 70), cxp, cyp + 27, sc.w - 16, 7, 6);
+      fitText("HND " + (e2.hands || 75) + " TKL " + (e2.tkl || 75) + " AGI " + (e2.agi || 75) + " STA " + (e2.stam || 82), cxp, cyp + 39, sc.w - 16, 7, 6);
     }
     if (G.ticker && G.ticker.t > 0) {
       const a = Math.min(1, G.ticker.t * 2);
@@ -10435,12 +10481,31 @@
     drawHUD();
     drawTouchButtons();
     if (G.practice) drawPracticeTips();
-    if (G.banner) drawBanner();
+    // drawOver's backdrop is only 55% opaque, so a banner still counting
+    // down when the clock hit zero showed straight THROUGH the FINAL card:
+    // "SACKED!" at PF(26) printed across "YOUR DAY: ... TOTAL YDS" on the
+    // same baseline, 182px of overlap. The last play's banner has said its
+    // piece by the time the game is over.
+    if (G.banner && S !== "over") drawBanner();
     if (S === "qa" && !G.qaCapture) drawQAOverlay();
     if (S === "over") drawOver();
     if (G.showBox) drawBoxScore();
     if (G.help) drawHelp();
     cx.restore();
+  }
+
+  // The tapped-player info card floats ABOVE the field, so whatever the field
+  // already painted where the card lands bleeds through its .92-alpha panel.
+  // For sprites that is the intended look; for TEXT it is two strings on one
+  // baseline and neither is readable. drawPlayers has to know where the card
+  // is in order to stand its jersey tag down, so the rectangle lives here once
+  // rather than being re-derived at both sites and drifting.
+  function selCardRect() {
+    if (!(G.selCard && G.selCard.t > 0 && (G.state === "presnap" || G.state === "live"))) return null;
+    const e2 = G.selCard.e;
+    if (!e2) return null;
+    const cxp = clamp(e2.x - G.camX, 102, W - 102), cyp = Math.max(64, e2.y - 74);
+    return { x: cxp - 98, y: cyp, w: 196, h: 46, cx: cxp, cy: cyp };
   }
 
   function drawPracticeTips() {
@@ -10450,10 +10515,94 @@
     const tips = off
       ? "OFFENSE DRILL — hold & PULL BACK=aim, release=throw · SPACE=bullet · SHIFT=juke · F=stiff-arm · Q=lateral · R=RAMPAGE"
       : "DEFENSE DRILL — TAB=switch · SPACE=jump · JUMP+F=punch · SHIFT=soar · R=RAMPAGE";
-    cx.fillText(tips + "     [P] SWITCH DRILL · [ESC] QUIT", W / 2, 45);
+    // 151 characters at PF(7) is 1057px wide on a 960px canvas — the offence
+    // line hung 48.5px off BOTH edges of the screen. The strip is already the
+    // full width of the game, so size is the only lever left: the offence line
+    // lands at PF(6) (906px), the defence line (791px) still fits at PF(7).
+    fitText(tips + "     [P] SWITCH DRILL · [ESC] QUIT", W / 2, 45, W - 24, 7, 6);
   }
 
   const PF = (s) => s + "px 'Press Start 2P', monospace";
+
+  // ------------------------------------------------- text that fits its box
+  // Almost every string on every screen is drawn into a box of a known width,
+  // and until now nothing checked that it FIT. It frequently did not: the
+  // presnap footer ran 61px off both ends of its own backing plate, the season
+  // stats ran 24px off the right edge of the canvas, the menu descriptions
+  // were chopped mid-word at a hard 34 characters AND still overran their card
+  // by 14px. These four primitives are the fix, and they are the only ones —
+  // shrink, cut, wrap, and a font-scope guard.
+  //
+  // PIXEL LAW: this is an 8-bit game. Font sizes stay INTEGER px (a 9.4px
+  // pixel font is a blurry mess) and draw coordinates are rounded to integers.
+  // Nothing here assumes Press Start 2P's 1em advance — it asks the canvas, so
+  // it stays correct if the font ever changes.
+
+  // Run fn with the font temporarily set, then put the font back. Every helper
+  // below is scoped this way so a call site's font survives the call.
+  function withFont(font, fn) {
+    const keep = cx.font;
+    cx.font = font;
+    try { return fn(); } finally { cx.font = keep; }
+  }
+  // The largest INTEGER size <= base at which text fits maxW, floored at min.
+  function fitFont(text, maxW, base, min) {
+    const lo = Math.max(1, min == null ? base : min | 0);
+    return withFont(cx.font, () => {
+      for (let s = base | 0; s > lo; s--) {
+        cx.font = PF(s);
+        if (cx.measureText(text).width <= maxW) return s;
+      }
+      return lo;
+    });
+  }
+  // Every string ellipsize() actually had to cut. Copy loss is the only thing
+  // fitText can still cost you once the box is safe, so it is recorded rather
+  // than left to be discovered in a screenshot. Bounded and de-duplicated, so
+  // a long session cannot grow it without limit. Read via G.debug.textCuts().
+  const TEXT_CUTS = [];
+  // Cut text down at the CURRENT font until it fits maxW, ending in a single
+  // ellipsis. Trailing separators go with the cut so we never leave "FOO ·…".
+  function ellipsize(text, maxW) {
+    let s = String(text);
+    if (cx.measureText(s).width <= maxW) return s;
+    if (TEXT_CUTS.length < 200 && TEXT_CUTS.indexOf(s) < 0) TEXT_CUTS.push(s);
+    while (s.length > 1 && cx.measureText(s.replace(/[ ·—-]+$/, "") + "…").width > maxW) {
+      s = s.slice(0, -1);
+    }
+    return s.replace(/[ ·—-]+$/, "") + "…";
+  }
+  // Draw text so it CANNOT leave its box: [x, x+maxW] for align "left",
+  // [x-maxW, x] for "right", x +/- maxW/2 for "center". Steps the size down in
+  // whole pixels first and only ellipsizes when even the floor size will not do.
+  // Returns the size used. Leaves cx.font exactly as it found it.
+  function fitText(text, x, y, maxW, base, min) {
+    const size = fitFont(text, maxW, base, min);
+    withFont(PF(size), () => {
+      cx.fillText(ellipsize(text, maxW), Math.round(x), Math.round(y));
+    });
+    return size;
+  }
+  // Break text into at most maxLines lines that each fit maxW at the current
+  // font. If words are left over the last line is ellipsized, so copy is never
+  // silently dropped off the bottom of a card without a visible mark.
+  function wrapLines(text, maxW, maxLines) {
+    const words = String(text).split(" ");
+    const out = [];
+    let line = "";
+    for (let i = 0; i < words.length; i++) {
+      const next = line ? line + " " + words[i] : words[i];
+      if (line && cx.measureText(next).width > maxW) {
+        if (out.length === maxLines - 1) {
+          out.push(ellipsize(line + " " + words.slice(i).join(" "), maxW));
+          return out;
+        }
+        out.push(line); line = words[i];
+      } else line = next;
+    }
+    if (line) out.push(ellipsize(line, maxW));
+    return out;
+  }
 
   // Depth sort runs twice a frame over ~22 entities. `.slice().sort()` threw a
   // fresh array away every single time; these persistent buffers are refilled
@@ -10969,9 +11118,24 @@
       }
       // carrier name / QB name
       if (!G.qaCapture && (e === G.carrier || (G.ball.holder === e && G.phase === "drop")) && e.name) {
-        cx.font = PF(7); cx.textAlign = "center";
-        cx.fillStyle = "rgba(0,0,0,.5)"; cx.fillRect(e.x - G.camX - 34, e.y + 8, 68, 11);
-        cx.fillStyle = "#fff"; cx.fillText(lastName(e.name).toUpperCase().slice(0, 10), e.x - G.camX, e.y + 17);
+        // TEXT BOX: the plate used to be a fixed 68px and the name a hard
+        // 10-character cut, which is 70px at PF(7) -- every long name sat 1px
+        // outside its own plate AND lost its ending. The plate is measured
+        // from the name instead, so it holds the whole thing.
+        const nm = lastName(e.name).toUpperCase();
+        cx.textAlign = "center";
+        const pw = Math.min(148, Math.max(68, Math.ceil(withFont(PF(7), () => cx.measureText(nm).width)) + 12));
+        const px0 = Math.round(e.x - G.camX - pw / 2), py0 = Math.round(e.y + 8);
+        // ...and it steps aside entirely under the tapped-player info card,
+        // which is drawn on top of the field and would otherwise print its
+        // stat line straight through this name.
+        const sc2 = selCardRect();
+        const hidden = sc2 && px0 + pw > sc2.x && px0 < sc2.x + sc2.w &&
+          py0 + 11 > sc2.y && py0 < sc2.y + sc2.h;
+        if (!hidden) {
+          cx.fillStyle = "rgba(0,0,0,.5)"; cx.fillRect(px0, py0, pw, 11);
+          cx.fillStyle = "#fff"; fitText(nm, e.x - G.camX, e.y + 17, pw - 8, 7, 6);
+        }
       }
       drawContactBurst(e);
     }
@@ -11845,13 +12009,21 @@
         const pr = { role, spd: p.spd, hands: p.hands, agi: p.agi, arm: p.arm, acc: p.acc };
         const ov = playerOvr(pr);
         cx.font = PF(9); cx.fillStyle = "#69be28"; cx.fillText(pos, x0, y);
-        cx.fillStyle = "#f4f6f1"; cx.fillText(lastName(p.name).slice(0, 13).toUpperCase(), x0 + (align === "left" ? 44 : -44), y);
+        // TEXT BOX: the name sits 44px in from the column edge and the OVR
+        // number 250px in, so there are 198px between them. 13 characters at
+        // PF(9) was 117px of that -- the cut was never needed.
+        cx.fillStyle = "#f4f6f1";
+        fitText(lastName(p.name).toUpperCase(), x0 + (align === "left" ? 44 : -44), y, 198, 9, 8);
         cx.fillStyle = "#9db0a4"; cx.fillText(ov, x0 + (align === "left" ? 250 : -250), y);
         y += 30;
       }
       // key defender
       const dl = ros.defense[0];
-      if (dl) { cx.font = PF(9); cx.fillStyle = "#69be28"; cx.fillText(dl.pos, x0, y); cx.fillStyle = "#f4f6f1"; cx.fillText(lastName(dl.name).slice(0, 13).toUpperCase(), x0 + (align === "left" ? 44 : -44), y); }
+      if (dl) {
+        cx.font = PF(9); cx.fillStyle = "#69be28"; cx.fillText(dl.pos, x0, y);
+        cx.fillStyle = "#f4f6f1";
+        fitText(lastName(dl.name).toUpperCase(), x0 + (align === "left" ? 44 : -44), y, 198, 9, 8);
+      }
     }
     drawCol(rA, G.my, 40, "left");
     drawCol(rB, G.opp, W - 40, "right");
@@ -11872,7 +12044,10 @@
           306 + frameBobDy(sheet[spec], "R", fi2) * (64 / sheet[spec].h), 64);
       }
       cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#ff5533"; cx.fillText("★ RAMPAGER · " + pos, cx0, 300);
-      cx.font = PF(10); cx.fillStyle = "#fff"; cx.fillText(info[0].toUpperCase().slice(0, 16), cx0, 382);
+      // TEXT BOX: half of the 520px showcase card, centred on cx0. The
+      // 16-character cut turned CHRISTIAN GONZALEZ into CHRISTIAN GONZAL for
+      // no reason at all -- 18 characters is 180px in 240px of room.
+      cx.fillStyle = "#fff"; fitText(info[0].toUpperCase(), cx0, 382, 240, 10, 8);
       cx.font = PF(9); cx.fillStyle = "#ffd23f"; cx.fillText(pk.label, cx0, 401);
     };
     cx.fillStyle = "rgba(255,85,51,.08)"; cx.fillRect(W / 2 - 260, 285, 520, 150);
@@ -11996,9 +12171,13 @@
       cx.drawImage(spr.R[t % 2], sx2, sy2, size, size);
       if (feat !== "small") drawQBFeature(feat, gx + 32, gy + 8, 44);
       cx.font = PF(7); cx.fillStyle = hudColor(ab); cx.textAlign = "center";
-      cx.fillText(ab + " · " + lastName(qb.name).slice(0, 9).toUpperCase(), gx + 54, gy + 64);
+      // TEXT BOX: a 108px card with 4px of pad. "FASTEST QB ALIVE" is 112px
+      // at PF(7) and hung 2px past the card on both sides; the 9-character cut
+      // on the name was tuned to 105px, i.e. 1.5px of margin. Both are fitted
+      // now, which also lets the name keep the rest of its letters.
+      fitText(ab + " · " + lastName(qb.name).toUpperCase(), gx + 54, gy + 64, 100, 7, 6);
       cx.fillStyle = "#ffd23f";
-      cx.fillText(tag, gx + 54, gy + 78);
+      fitText(tag, gx + 54, gy + 78, 100, 7, 6);
       cx.fillStyle = "#9db0a4";
       cx.fillText("A" + Math.round(qb.arm) + " C" + Math.round(qb.acc) + " S" + Math.round(qb.spd), gx + 54, gy + 92);
     }
@@ -12148,7 +12327,8 @@
       const p2 = L[G.scout.top + i]; if (!p2) break;
       const y = 116 + i * 26;
       cx.textAlign = "left"; cx.fillStyle = "#f4f6f1";
-      cx.fillText((G.scout.top + i + 1) + ". " + lastName(p2.name).slice(0, 14).toUpperCase(), 70, y);
+      // TEXT BOX: the PLAYER column runs x=70 to the TM column at x=300.
+      fitText((G.scout.top + i + 1) + ". " + lastName(p2.name).toUpperCase(), 70, y, 222, 8, 7);
       cx.fillStyle = hudColor(p2.team); cx.fillText(p2.team, 300, y);
       cx.fillStyle = "#9db0a4"; cx.fillText(p2.pos, 352, y);
       cx.textAlign = "center";
@@ -12397,11 +12577,18 @@
         cx.drawImage(G.sheets.A[ic[0]].R[sel ? t % 2 : 0], r2.x + 8, r2.y + r2.h / 2 - 22, 44, 44);
       }
       cx.textAlign = "left";
-      cx.font = PF(sel ? 10 : 9); cx.fillStyle = sel ? "#ffd23f" : "#f4f6f1";
-      cx.fillText(ic[1] + " " + r2.o[0], r2.x + 60, r2.y + 34);
+      // TEXT BOX: the copy starts 60px in past the mascot and keeps a 12px
+      // right pad, so the title and the description have this much room. The
+      // description used to be cut at a hard 34 characters — which mangled the
+      // copy AND still overran the card by 14px, because 34 characters at
+      // PF(7) is 238px in 224px of space. Two wrapped lines hold every
+      // description in the game with every word intact.
+      const tw = r2.w - 60 - 12;
+      cx.fillStyle = sel ? "#ffd23f" : "#f4f6f1";
+      fitText(ic[1] + " " + r2.o[0], r2.x + 60, r2.y + 32, tw, sel ? 10 : 9, 7);
       cx.font = PF(7); cx.fillStyle = "#9db0a4";
-      const sub = r2.o[1].length > 34 ? r2.o[1].slice(0, 33) + "…" : r2.o[1];
-      cx.fillText(sub, r2.x + 60, r2.y + 54);
+      const sub = wrapLines(r2.o[1], tw, 2);
+      for (let li = 0; li < sub.length; li++) cx.fillText(sub[li], r2.x + 60, r2.y + 52 + li * 12);
     }
     cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#9db0a4";
     cx.fillText(menuIsGrid()
@@ -12534,7 +12721,8 @@
       const y = 118 + i * 44;
       cx.textAlign = "left"; cx.font = PF(9);
       cx.fillStyle = "#69be28"; cx.fillText((p2.role || p2.pos || "").padEnd(3), 40, y);
-      cx.fillStyle = "#f4f6f1"; cx.fillText(lastName(p2.name).slice(0, 14).toUpperCase(), 96, y);
+      // TEXT BOX: x=96 up to the OVR readout at x=290.
+      cx.fillStyle = "#f4f6f1"; fitText(lastName(p2.name).toUpperCase(), 96, y, 186, 9, 8);
       cx.fillStyle = "#9db0a4"; cx.fillText("OVR " + (p2.ovr || playerOvr(p2)), 290, y);
       const boosts = (G.szn.devF || {})[p2.name] || {};
       trainCols(p2).forEach(([f2, label], j2) => {
@@ -12586,14 +12774,26 @@
       const s = r2.s;
       const x = i < 7 ? 80 : W / 2 + 40, y = 90 + (i % 7) * 56;
       cx.fillStyle = "#ffd23f";
-      cx.fillText((s.pos + "    ").slice(0, 4) + lastName(s.name).slice(0, 14) + "  (" + s.games + " gm)", x, y);
+      // TEXT BOX: the same 400px column the stat line below it uses.
+      fitText((s.pos + "    ").slice(0, 4) + lastName(s.name) + "  (" + s.games + " gm)", x, y, 400, 8, 7);
       cx.fillStyle = "#f4f6f1";
       const parts = [];
       if (s.att) parts.push(s.cmp + "/" + s.att + ", " + s.passYds + " yds, " + s.passTd + " TD, " + s.passInt + " INT");
       if (s.car) parts.push(s.car + " car, " + s.rushYds + " yds" + (s.rushTd ? ", " + s.rushTd + " TD" : ""));
       if (s.rec) parts.push(s.rec + " rec, " + s.recYds + " yds" + (s.recTd ? ", " + s.recTd + " TD" : ""));
       if (s.tkl || s.sacks) parts.push(s.tkl + " tkl" + (s.sacks ? ", " + s.sacks + " sacks" : "") + (s.defInt ? ", " + s.defInt + " INT" : ""));
-      cx.fillText(parts.join(" · ").slice(0, 58) || "—", x, y + 16);
+      // TEXT BOX: two columns, at x=80 and x=W/2+40, with 400px each before
+      // the next column (or the screen edge) starts. The old .slice(0, 58) was
+      // 464px at PF(8): the left column ran 24px INTO the right one and the
+      // right column ran 24px off the canvas. Fitting to the real column width
+      // shows about as many characters and none of them outside.
+      // A two-way player's line -- passing AND rushing AND receiving -- is 77
+      // characters, which is 616px at PF(8) and does not fit a 400px column at
+      // any size worth reading, so fitText had to ellipsize it. The rows are
+      // 56px apart, so the second line was free.
+      cx.font = PF(8);
+      const sl = wrapLines(parts.join(" · ") || "—", 400, 2);
+      for (let li = 0; li < sl.length; li++) cx.fillText(sl[li], x, y + 16 + li * 12);
     });
     if (!rows.length) { cx.textAlign = "center"; cx.fillStyle = "#9db0a4"; cx.fillText("Play a game first!", W / 2, 200); }
     cx.textAlign = "center"; cx.font = PF(9); cx.fillStyle = "#9db0a4";
@@ -12653,9 +12853,12 @@
       cx.fillRect(r2.x, r2.y, r2.w, r2.h);
       cx.strokeStyle = hov ? "#ffd23f" : "#1d4030"; cx.lineWidth = 2;
       cx.strokeRect(r2.x, r2.y, r2.w, r2.h);
-      cx.font = PF(10); cx.fillStyle = "#f4f6f1";
+      cx.fillStyle = "#f4f6f1";
       const name = r2.c.kind === "play" ? r2.c.play.name : r2.c.kind === "FG" ? "FIELD GOAL" : "PUNT";
-      cx.fillText(name, r2.x + r2.w / 2, r2.y + 24);
+      // With the wider card only the two longest signature names (IMMACULATE
+      // RECEPTION, MINNEAPOLIS MIRACLE) step down to PF(9); everything else
+      // stays at PF(10).
+      fitText(name, r2.x + r2.w / 2, r2.y + 24, r2.w - 16, 10, 8);
       cx.font = PF(8); cx.fillStyle = "#9db0a4";
       cx.fillText("[" + (cardRects(cards).indexOf(r2) + 1) + "]", r2.x + r2.w / 2, r2.y + r2.h - 10);
       if (r2.c.kind === "play") drawMiniPlay(r2.c.play, r2.x + r2.w / 2, r2.y + 72);
@@ -12861,12 +13064,16 @@
       }
     }
     cx.textAlign = "center"; cx.font = PF(9);
-    cx.fillStyle = "rgba(0,0,0,.55)"; cx.fillRect(W / 2 - 290, H - 30, 580, 22);
+    // TEXT BOX: the offence hint is 78 characters, 702px at PF(9), and this
+    // plate used to be 580 — the gold copy hung 61px off BOTH ends of its own
+    // backing onto the grass. The plate is now sized to the copy (740px, still
+    // 110px clear of each screen edge) and fitText is the belt and braces.
+    cx.fillStyle = "rgba(0,0,0,.55)"; cx.fillRect(W / 2 - 370, H - 30, 740, 22);
     cx.fillStyle = "#ffd23f";
     // the footer teaches the SIGNATURE gesture, not the fallback
-    cx.fillText(offenseIsUser()
+    fitText(offenseIsUser()
       ? "HOLD YOUR QB & PULL BACK = SNAP + THROW  ·  SPACE = SNAP  ·  Q/E = CHANGE PLAY"
-      : "TAP A DINO TO CONTROL HIM  ·  SPACE = SNAP  ·  Q/E = CHANGE DEFENSE", W / 2, H - 14);
+      : "TAP A DINO TO CONTROL HIM  ·  SPACE = SNAP  ·  Q/E = CHANGE DEFENSE", W / 2, H - 14, 720, 9, 7);
     // first-3-snaps coach bubble floats over the QB himself
     if (offenseIsUser() && (G.snapTaught || 0) < 3 && !G.patMode) {
       const qb2 = G.players.find((p) => p.team === "off" && p.role === "QB");
@@ -13037,6 +13244,9 @@
     }
   }
 
+  // How much room the kick title has before it reaches the WIND readout
+  // centred at W/2+178 on the same baseline. Exported for the fit tests.
+  const KICK_TITLE_W = 270;
   function drawKickUI() {
     const k = G.kick;
     const meter = kickMeterPlan(k);
@@ -13046,7 +13256,11 @@
     cx.textAlign = "center";
     cx.font = PF(14); cx.fillStyle = "#ffd23f";
     const title = k.kind === "XP" ? "EXTRA POINT" : k.kind === "FG" ? "FIELD GOAL · " + Math.round(100 - G.losYd + 17) + " YDS" : k.kind === "KO" ? "KICKOFF · COVER THE RETURN" : "PUNT · PIN THEM DEEP";
-    cx.fillText(title, W / 2, 112);
+    // The WIND readout is centred at W/2+178 on this same baseline, so the
+    // title owns W/2 +/- 135. At PF(14) "KICKOFF · COVER THE RETURN" is 364px
+    // and its right edge landed 39px inside the wind chip; it now draws at
+    // PF(10). The other three titles still fit at PF(14) or PF(13).
+    fitText(title, W / 2, 112, KICK_TITLE_W, 14, 9);
     cx.font = PF(9); cx.fillStyle = "#f4f6f1";
     cx.fillText(lastName(k.kicker.name).toUpperCase() + "  LEG " + (k.kicker.leg || 84) + " · ACC " + (k.kicker.kacc || kickAccOf(k.kicker.name)) + (k.cpu ? "  (CPU)" : ""), W / 2, 135);
     // Retro Bowl's great UI trick: the user sees the makeable lane first,
@@ -13320,10 +13534,17 @@
         cx.fillStyle = G.stadium.time === "night" ? "#cfd8ea" : "#ffd23f";
         cx.beginPath(); cx.arc(sx2, sy2, 3, 0, Math.PI * 2); cx.fill();
       }
+      // TEXT BOX: this readout had none -- it sat on bare grass next to the
+      // dial, so it was only legible over dark turf, and a checker has nothing
+      // to measure it against. A plate measured from the string fixes both.
       const t = G.weather.temp != null ? G.weather.temp : 72;
+      const ts = t + "°F";
       cx.font = PF(7); cx.textAlign = "right";
+      const tw2 = Math.ceil(cx.measureText(ts).width);
+      cx.fillStyle = "rgba(4,10,7,.75)";
+      cx.fillRect(dx - 17 - tw2, dy - 6, tw2 + 5, 13);
       cx.fillStyle = t <= 32 ? "#8ecafc" : t >= 85 ? "#ff8a5c" : "#9db0a4";
-      cx.fillText(t + "°F", dx - 14, dy + 3);
+      cx.fillText(ts, dx - 14, dy + 3);
     }
   }
 
@@ -13342,19 +13563,23 @@
       cx.fillRect(0, H / 2 - 72, W, 5); cx.fillRect(0, H / 2 + 55, W, 5);
       cx.translate(W / 2, H / 2 - 8); cx.scale(slam, slam);
       cx.textAlign = "center";
-      cx.font = PF(31); cx.fillStyle = "#ffd23f";
-      cx.fillText(b.text, 0, 0);
+      cx.fillStyle = "#ffd23f";
+      // PF(31) holds 30 characters of headline and PF(11) holds 87 of sub on a
+      // 960px card, and both are built at runtime from player and team names.
+      // The slam scale is on the transform, so the width budget shrinks with it.
+      fitText(b.text, 0, 0, (W - 40) / slam, 31, 18);
       cx.setTransform(1, 0, 0, 1, 0, 0);
-      if (b.sub) { cx.textAlign = "center"; cx.font = PF(11); cx.fillStyle = "#f4f6f1"; cx.fillText(b.sub, W / 2, H / 2 + 30); }
+      if (b.sub) { cx.textAlign = "center"; cx.fillStyle = "#f4f6f1"; fitText(b.sub, W / 2, H / 2 + 30, W - 40, 11, 8); }
       cx.restore();
       return;
     }
     cx.fillStyle = "rgba(5,12,8,.8)"; cx.fillRect(0, H / 2 - 58, W, 104);
     cx.fillStyle = "#ffd23f"; cx.fillRect(0, H / 2 - 58, W, 4); cx.fillRect(0, H / 2 + 42, W, 4);
     cx.textAlign = "center";
-    cx.font = PF(26); cx.fillStyle = "#ffd23f";
-    cx.fillText(b.text, W / 2, H / 2 - 8);
-    if (b.sub) { cx.font = PF(11); cx.fillStyle = "#f4f6f1"; cx.fillText(b.sub, W / 2, H / 2 + 24); }
+    cx.fillStyle = "#ffd23f";
+    // 36 characters at PF(26); "FUMBLE — RECOVERED BY THE DEFENSE" is already 33
+    fitText(b.text, W / 2, H / 2 - 8, W - 40, 26, 14);
+    if (b.sub) { cx.fillStyle = "#f4f6f1"; fitText(b.sub, W / 2, H / 2 + 24, W - 40, 11, 8); }
     cx.restore();
   }
 
@@ -13411,9 +13636,13 @@
       rows.forEach((r2, i) => {
         const s = r2.s;
         cx.fillStyle = "#9db0a4";
-        cx.fillText((s.pos + "    ").slice(0, 4) + lastName(s.name).slice(0, 12), x0, 122 + i * 26);
+        // TEXT BOX: two columns at x=70 and x=W/2+30, so each has 380px
+        // before the next one starts. The 12-char name cut and the 44-char
+        // stat cut were both well inside that -- 44 characters at PF(7) is
+        // 308px -- so both lines get their full copy and a measured cap.
+        fitText((s.pos + "    ").slice(0, 4) + lastName(s.name), x0, 122 + i * 26, 380, 7, 6);
         cx.fillStyle = "#f4f6f1";
-        cx.fillText(fmt(s).slice(0, 44), x0, 133 + i * 26);
+        fitText(fmt(s), x0, 133 + i * 26, 380, 7, 6);
       });
       if (!rows.length) { cx.fillStyle = "#9db0a4"; cx.fillText("no stats yet", x0, 122); }
     });
@@ -13509,6 +13738,24 @@
     loop,   // headless browser pumping (rAF never fires in hidden panes)
     bumpDynamicLadder, refreshDynamicDiff, diffScalar, ballSecurityScore,
     irandom, irandomRange, fumbleImmuneSpot, diffTable: DIFFS,
+    // ---- UI text seams. tests/test_textfit.js measures copy against these
+    // instead of hard-coding the numbers, so a layout change breaks the test
+    // rather than quietly un-fixing an overflow.
+    textfit: { withFont, fitFont, fitText, ellipsize, wrapLines, wrapText },
+    cardGeom: () => ({ cw: cardRects([{}, {}, {}, {}])[0].w, gap: 16 }),
+    presnapFooter: () => ({ w: 740, tw: 720 }),
+    ptReplayGeom: ptReplayRect,
+    kickTitleW: () => KICK_TITLE_W,
+    selCardGeom: selCardRect,
+    qbCardGeom: () => ({ cw: 108, tw: 100 }),
+    textCuts: () => TEXT_CUTS.slice(),
+    halfFrameW: (title, hint) => Math.min(700, Math.max(
+      withFont(PF(12), () => cx.measureText(title).width),
+      withFont(PF(8), () => cx.measureText(hint).width)) + 24),
+    // announce() builds the ticker from a template plus a player name, so the
+    // game's longest ticker string is not a literal anywhere in the source.
+    // The sweep asks for the templates and substitutes the worst name itself.
+    callLines: () => Object.keys(CALLS).reduce((a, k) => a.concat(CALLS[k]), []),
     get dyn() { return G.dyn; },
     get szn() { return G.szn; }
   };

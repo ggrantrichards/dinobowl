@@ -21,6 +21,22 @@
 //      in all 11 species, and `tackled`'s first two cels were near-identical
 //      uprights, so the whole upright->horizontal rotation snapped in one step.
 "use strict";
+// DETERMINISM FIRST, BEFORE THE ENGINE BOOTS. Sections F and G run real plays
+// and assert on SHARES of them, and the engine draws its matchup, its ratings
+// and its per-rep block anchors from Math.random at boot. Pinning inside the
+// trial loop (which is what I did first) fixes the stream but not the starting
+// state, and G3 still failed about one run in five. Pinning here makes the
+// whole suite reproducible, which is the same thing blocking_bench.js and
+// qa_botgame.js do and for the same reason. Section A spawns child processes
+// and is unaffected; it does not want determinism, it wants hostile storage.
+(function pinRng() {
+  let a = 20260826 >>> 0;
+  Math.random = function () {
+    a = (a + 0x6D2B79F5) >>> 0; let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+})();
 const H = require("./harness.js");
 const fs = require("fs");
 const os = require("os");
@@ -665,15 +681,8 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     // threshold was being crossed by chance roughly one run in six (measured:
     // "50.0% of 36"). That is noise reported as a regression, which is worse
     // than no assertion. A fixed stream makes the same claim deterministically.
-    const __rnd = Math.random;
-    (function () {
-      let a = 20260826 >>> 0;
-      Math.random = function () {
-        a = (a + 0x6D2B79F5) >>> 0; let x = a;
-        x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
-        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
-      };
-    })();
+    // (the suite-wide pin at the top of this file covers these trials now —
+    // re-seeding here only made the stream harder to reason about)
     for (let t = 0; t < 36; t++) {
       g.state = "dead"; g.deadT = 0; g.deadNext = null; g.half = null;
       g.replay = null; g.celebrate = null; g.ramp = null;
@@ -771,7 +780,7 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     };
     const share = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     const medGain = med(gains);
-    Math.random = __rnd;   // restore before anything else measures
+
     const blkShare = share(blockedTackler), fitShare = share(creaseFits);
     check("G0 the gate sampled real RB carries off ordinary run calls",
       carriesRun >= 20, carriesRun + " carries");

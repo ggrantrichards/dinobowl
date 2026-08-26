@@ -5,18 +5,26 @@ const fs = require("fs");
 const vm = require("vm");
 const path = require("path");
 const GAME_DIR = path.join(__dirname, "..", "static", "game") + path.sep;
+const TM = require("./textmetrics.js");
 
-// ---- 2d context stub (records nothing, crashes never)
+// ---- 2d context stub (crashes never) with a REAL text metric.
+// measureText used to be  () => ({ width: 10 })  -- a CONSTANT. Text overflow
+// is purely a function of the measured width, so with a constant no test in
+// this repo could ever see one, which is exactly why the overflows existed.
+// The only state the stub now has to keep is the font, because the width
+// depends on it. See textmetrics.js for how the numbers were established.
 function makeCtx() {
+  let font = "10px 'Press Start 2P', monospace";
   return new Proxy({}, {
     get(t, k) {
-      if (k === "measureText") return () => ({ width: 10 });
+      if (k === "font") return font;
+      if (k === "measureText") return (s) => ({ width: TM.measure(s, font) });
       if (k === "getImageData") return (x, y, w, h) => ({ data: new Uint8ClampedArray(Math.max(4, w * h * 4)) });
       if (k === "createLinearGradient") return () => ({ addColorStop() { } });
       if (k === "canvas") return null;
       return () => { };
     },
-    set() { return true; },
+    set(t, k, v) { if (k === "font") font = String(v); return true; },
   });
 }
 function makeCanvasStub() {
@@ -122,4 +130,9 @@ function touch(ev, list) {
 function resetTouches() { liveTouches.clear(); }
 
 const G = () => global.window.__game;
-module.exports = { step, stepFor, key, mouse, touch, resetTouches, G, store, keyHold, keyRelease };
+module.exports = {
+  step, stepFor, key, mouse, touch, resetTouches, G, store, keyHold, keyRelease,
+  // the real metric, so a test can assert a box width against the same number
+  // a browser would produce
+  measureTextWidth: TM.measure, fontPx: TM.pxOf, textEm: TM.widthEm,
+};
