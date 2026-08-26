@@ -638,7 +638,7 @@
   function lsInt(key, def) { const n = parseInt(lsGet(key), 10); return Number.isFinite(n) ? n : def; }
 
   const G = {
-    state: "loading",
+    state: "loading", bootT: 0,
     rosters: null, season: null,
     my: null, opp: null, sheets: {}, ball: null, ballSpr: null,
     score: { A: 0, B: 0 }, quarter: 1, clock: 120, drive: "A",
@@ -6257,7 +6257,7 @@
       halftimePress();
       return;
     }
-    if (S === "menu") { menuTapAt(mouse.x, mouse.y); return; }
+    if (S === "menu" || S === "allmodes") { menuTapAt(mouse.x, mouse.y); return; }
     if (S === "qbs") { G.state = "menu"; return; }
     if (S === "settings") { settingsClick(); return; }
     if (S === "dead") { // timeout chip first; any other tap advances the beat
@@ -6584,7 +6584,7 @@
     const S = G.state;
     if (S === "online_wait") { if (k === "escape") cancelMatch(); return; }
     if (S === "title" && (k === "enter" || k === " ")) { G.state = "menu"; G.menuIdx = 0; return; }
-    if (S === "menu") { menuKey(k); return; }
+    if (S === "menu" || S === "allmodes") { menuKey(k); return; }
     if (S === "qbs") { if (k === "escape" || k === "enter" || k === " ") { G.state = "menu"; } return; }
     if (S === "tutorial") {
       if (k === "arrowright" || k === "d" || k === "enter" || k === " ") G.tut = Math.min(TUT_PAGES.length - 1, (G.tut || 0) + 1);
@@ -6805,6 +6805,32 @@
   }
 
   // ---------------------------------------------------------------- menus
+  // TWO LAYERS. "menu" is the front door: four big cards, the things almost
+  // everybody wants. "allmodes" is the full grid that used to BE the front
+  // door — versus, online, career, practice, the lab — reached from MORE
+  // MODES. Thirteen cards is a directory, not a welcome.
+  //
+  // The labels here deliberately map onto the SAME action branches the grid
+  // uses (see menuKey): PLAY GAME resolves to EXHIBITION, and PLAY SEASON
+  // resolves to whichever of CONTINUE CAREER / CONTINUE SEASON / NEW SEASON
+  // your saves call for. So there is exactly one implementation of every
+  // mode, and the front door is a routing layer over it.
+  function homeOptions() {
+    const sz = loadSeason(), cr = loadCareer();
+    const opts = [["PLAY GAME", "one game, any two teams"]];
+    if (sz && cr) opts.push(["PLAY SEASON", cr.name + " · " + TEAMS[cr.team][0]]);
+    else if (sz) opts.push(["PLAY SEASON", "pick up where you left off"]);
+    else opts.push(["PLAY SEASON", "17 games + the DINO BOWL"]);
+    opts.push(["MORE MODES", "versus · online · career · lab"]);
+    opts.push(["SETTINGS", "difficulty · flow · halftime"]);
+    return opts;
+  }
+  const menuIsGrid = () => G.state === "allmodes";
+  const activeMenuOptions = () => (menuIsGrid() ? menuOptions() : homeOptions());
+  // the front door gets fewer, bigger cards; the grid keeps its three columns
+  const menuGrid = () => (menuIsGrid()
+    ? { cols: 3, cw: 284, chh: 88, gapx: 18, gapy: 14 }
+    : { cols: 2, cw: 372, chh: 118, gapx: 22, gapy: 18 });
   function menuOptions() {
     const opts = [["EXHIBITION", "one game, any matchup"]];
     opts.push(["2-PLAYER VERSUS", "you vs a friend on one screen"]);
@@ -6826,15 +6852,24 @@
     return opts;
   }
   function menuKey(k) {
-    const opts = menuOptions();
+    const opts = activeMenuOptions();
+    const cols = menuGrid().cols;   // was hard-coded 3, which stranded the cursor
     if (k === "arrowright" || k === "d") G.menuIdx = (G.menuIdx + 1) % opts.length;
     if (k === "arrowleft" || k === "a") G.menuIdx = (G.menuIdx + opts.length - 1) % opts.length;
-    if (k === "arrowdown" || k === "s") G.menuIdx = (G.menuIdx + 3) % opts.length;
-    if (k === "arrowup" || k === "w") G.menuIdx = (G.menuIdx + opts.length - 3) % opts.length;
-    if (k === "escape") { G.state = "title"; return; }
+    if (k === "arrowdown" || k === "s") G.menuIdx = (G.menuIdx + cols) % opts.length;
+    if (k === "arrowup" || k === "w") G.menuIdx = (G.menuIdx + opts.length - cols) % opts.length;
+    // ESC walks back out one layer at a time rather than all the way home
+    if (k === "escape") { G.state = menuIsGrid() ? "menu" : "title"; G.menuIdx = 0; return; }
     if (k !== "enter" && k !== " ") return;
     G.humanB = false; G.practice = false;   // reset; versus/practice re-enable below
-    const pick = opts[G.menuIdx][0];
+    let pick = opts[G.menuIdx][0];
+    // the front door routes; it does not reimplement
+    if (pick === "MORE MODES") { G.state = "allmodes"; G.menuIdx = 0; return; }
+    if (pick === "PLAY GAME") pick = "EXHIBITION";
+    if (pick === "PLAY SEASON") {
+      const sz2 = loadSeason(), cr2 = loadCareer();
+      pick = (sz2 && cr2) ? "CONTINUE CAREER" : sz2 ? "CONTINUE SEASON" : "NEW SEASON";
+    }
     if (pick === "EXHIBITION") {
       G.mode = "exhibition"; G.selectFor = "exh"; G.career = null; G.szn = null; G.humanB = false;
       G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
@@ -7290,6 +7325,11 @@
       return;
     }
     if (S === "intro") { G.intro.t += dt; if (G.intro.t > 6.4) { G.intro = null; G.state = "pregame"; } return; }
+    // The cold-open runs on the title clock. Nothing about INPUT changes:
+    // ENTER/tap still goes title -> menu at any point, during the animation or
+    // after it, so the boot adds no extra keypress to any flow (the battery
+    // navigates by mashing ENTER and would notice immediately).
+    if (S === "title") { G.bootT = (G.bootT || 0) + dt; return; }
     if (S === "kick") { updateKick(dt); return; }
     if (S === "kickfly") { updateKickFly(dt); return; }
     if (S === "halftime") { updateHalftime(dt); return; }
@@ -10320,7 +10360,7 @@
     if (S === "loading") { drawCenterText("LOADING DINO BOWL...", "", 0); cx.restore(); return; }
     if (S === "title") { drawTitle(); cx.restore(); return; }
     if (S === "online_wait") { drawOnlineWait(); cx.restore(); return; }
-    if (S === "menu") { drawMenu(); cx.restore(); return; }
+    if (S === "menu" || S === "allmodes") { drawMenu(); cx.restore(); return; }
     if (S === "settings") { drawSettings(); cx.restore(); return; }
     if (S === "qbs") { drawQBs(); cx.restore(); return; }
     if (S === "tutorial") { drawTutorial(); cx.restore(); return; }
@@ -11128,7 +11168,221 @@
   }
 
   // ------------------------------------------------------------- UI screens
+  // ============================================== THE COLD OPEN
+  // A dinosaur, grazing, notices the light go out. He looks up. Something
+  // dark is falling and getting bigger, and he is certain he knows what it
+  // is. He is wrong: it is a football.
+  //
+  // Drawn in the same discipline as the field — integer coordinates, banded
+  // colour instead of gradients, fillRect and nearest-neighbour blits only
+  // (AA_TRANSFORMATION 1). No new assets: the reveal is the game's own ball
+  // sprite scaled by an INTEGER factor so it stays crisp, and the "meteor" is
+  // that same silhouette before you can read it.
+  const BOOT_LEN = 6.0;
+  const BOOT = { graze: 0.7, dim: 1.8, look: 2.6, fall: 4.0, reveal: 4.9, land: 5.5 };
+  // integer-row disc: a circle made of scanlines, so it reads as pixel art
+  // rather than as an anti-aliased arc
+  function pxDisc(cx0, cy0, r, fill) {
+    cx.fillStyle = fill;
+    const R = Math.max(1, Math.round(r));
+    for (let dy = -R; dy <= R; dy++) {
+      const half = Math.round(Math.sqrt(Math.max(0, R * R - dy * dy)));
+      if (half <= 0) continue;
+      cx.fillRect(Math.round(cx0) - half, Math.round(cy0) + dy, half * 2, 1);
+    }
+  }
+  function drawBoot() {
+    const t = G.bootT || 0;
+    const ease = (a, b) => clamp((t - a) / Math.max(0.0001, b - a), 0, 1);
+    // ---- how dark the world has gone. The light drains as the thing falls,
+    // which is the whole reason he looks up in the first place.
+    const gloom = ease(BOOT.dim, BOOT.fall) * 0.72;
+    // ---- SKY, in bands. Dusk over a jungle: teal up top, amber at the
+    // horizon, every band dimmed by the gloom.
+    const HORIZON = 348;
+    const BANDS = 12;
+    for (let i = 0; i < BANDS; i++) {
+      const f = i / (BANDS - 1);
+      const r0 = Math.round((26 + 150 * f) * (1 - gloom));
+      const g0 = Math.round((58 + 92 * f) * (1 - gloom * 0.86));
+      const b0 = Math.round((74 - 34 * f) * (1 - gloom * 0.55));
+      cx.fillStyle = "rgb(" + r0 + "," + g0 + "," + b0 + ")";
+      cx.fillRect(0, Math.round(i * HORIZON / BANDS), W, Math.ceil(HORIZON / BANDS) + 1);
+    }
+    // a few stars, only once it is dark enough to see them
+    if (gloom > 0.28) {
+      cx.fillStyle = "rgba(244,246,241," + (gloom - 0.28).toFixed(3) + ")";
+      for (let i = 0; i < 34; i++) {
+        const sx = ((i * 137) % (W - 8)) + 4, sy = ((i * 61) % (HORIZON - 40)) + 8;
+        cx.fillRect(sx, sy, 2, 2);
+      }
+    }
+    // ---- TREELINE: flat-topped ferns as solid blocks, darker than the sky
+    cx.fillStyle = "rgb(" + Math.round(12 * (1 - gloom)) + "," + Math.round(38 * (1 - gloom)) + ",26)";
+    // OVERLAPPING, not abutting: 40px crowns on 46px centres left the amber
+    // sky showing through as bright vertical slots and read as a fence.
+    for (let i = 0; i < 24; i++) {
+      const bx = i * 44 - 16, bw = 52;
+      const bh = 26 + ((i * 53) % 52);
+      cx.fillRect(bx, HORIZON - bh, bw, bh + 6);
+    }
+    // ---- TURF
+    cx.fillStyle = "rgb(" + Math.round(18 * (1 - gloom)) + "," + Math.round(52 * (1 - gloom)) + ",30)";
+    cx.fillRect(0, HORIZON, W, H - HORIZON);
+
+    // ---- THE OBJECT. A dark silhouette that you read as a meteor because it
+    // is small, falling, and trailed by streaks — and which is the football
+    // the whole time. It enters at the top and grows on a curve so the last
+    // second of approach is the fast one.
+    // it starts falling BEFORE he looks up, so that when he does there is
+    // already something there. Entering on the look left the dread beat staring
+    // at empty sky for half a second.
+    const fall = ease(BOOT.dim + 0.4, BOOT.land);
+    // MOSTLY LINEAR, mildly accelerating. It was fall*fall, which kept the
+    // thing above y=0 until roughly a third of the way through its own fall —
+    // so the beat where he sees it and dreads it had nothing on screen at all.
+    // Rendered at t=3.2 the "meteor" sat at y=-24. Now it clears the top edge
+    // early and still speeds up into the landing.
+    const drop = HORIZON + 80;
+    const objX = Math.round(W * 0.62 - fall * 44);
+    const objY = Math.round(-14 + fall * drop * 0.72 + fall * fall * drop * 0.28);
+    const objR = Math.round(4 + Math.pow(fall, 1.7) * 62);
+    if (t > BOOT.dim + 0.45) {
+      // streaks: the meteor read. They shorten as it slows into frame, and
+      // stop entirely at the reveal — a tumbling ball has no tail.
+      const tail = t < BOOT.reveal ? 1 - ease(BOOT.fall, BOOT.reveal) * 0.8 : 0;
+      if (tail > 0.02) {
+        cx.fillStyle = "rgba(255,210,63," + (0.30 * tail).toFixed(3) + ")";
+        for (let i = 1; i <= 5; i++) {
+          const ty = objY - i * (18 + objR * 0.5) * tail;
+          const tw = Math.max(2, Math.round(objR * 0.7 * (1 - i / 6)));
+          if (ty > -30) cx.fillRect(objX - tw, Math.round(ty), tw * 2, 3);
+        }
+      }
+      if (t < BOOT.reveal) {
+        // unreadable: a dark lump with a hot rim. This IS the ball, you just
+        // cannot tell yet.
+        pxDisc(objX, objY, objR + 2, "rgba(255,210,63,.22)");
+        pxDisc(objX, objY, objR, "#120d08");
+      } else {
+        // THE REVEAL: same object, now legibly a football, tumbling end over
+        // end. Integer scale keeps every pixel square.
+        const spin = (t - BOOT.reveal) * 7.5;
+        const scale = Math.max(2, Math.round(objR / 5));
+        cx.save();
+        cx.translate(objX, objY);
+        cx.rotate(spin);
+        if (G.ballSpr) cx.drawImage(G.ballSpr, -8 * scale, -5 * scale, 16 * scale, 10 * scale);
+        else pxDisc(0, 0, objR, "#7a4a1e");
+        cx.restore();
+      }
+    }
+
+    // ---- THE DINO, from behind his own brow. This is the POV: his head fills
+    // the bottom of frame, and when he looks UP the whole mass drops and
+    // rotates a little, opening the sky. The eye is the performance — the
+    // pupil climbs from the turf to the sky and the lid snaps open at the
+    // reveal.
+    const look = ease(BOOT.dim, BOOT.look);
+    const bob = Math.sin(t * 2.4) * (1 - look) * 3;
+    const headY = Math.round(H - 96 + look * 44 + bob);
+    const tilt = -look * 0.14;
+    cx.save();
+    cx.translate(Math.round(W * 0.40), headY);
+    cx.rotate(tilt);
+    // skull mass + snout, blocked in. Silhouette only — he is between us and
+    // the light, so he is nearly black however bright the sky is.
+    cx.fillStyle = "#08150e";
+    // the base mass runs well past every edge so the tilt can never reveal
+    // ground or sky behind the head (it did, as a wedge at the lower left)
+    cx.fillRect(-620, 8, 1500, 460);
+    cx.fillRect(-300, -24, 620, 40);
+    cx.fillRect(-190, -54, 420, 36);
+    // the SNOUT: stepped down and out to the right so the profile reads as a
+    // muzzle rather than as the top of a hill
+    cx.fillRect(70, -44, 210, 34);
+    cx.fillRect(196, -30, 190, 30);
+    cx.fillRect(300, -16, 150, 26);
+    cx.fillRect(-104, -78, 210, 28);        // brow ridge over the eye
+    // nostril + a hint of jaw, so the mass reads as a head and not a hill
+    cx.fillStyle = "#020905";
+    cx.fillRect(232, -30, 22, 12);
+    cx.fillRect(-120, 30, 420, 6);
+    // horn nubs catching the last of the sky
+    cx.fillStyle = "rgb(" + Math.round(120 * (1 - gloom)) + "," + Math.round(96 * (1 - gloom)) + ",54)";
+    cx.fillRect(-56, -86, 16, 14);
+    cx.fillRect(14, -90, 16, 18);
+    // ---- THE EYE
+    const blink = (t > 1.15 && t < 1.28) || (t > 3.02 && t < 3.12);
+    const wide = t >= BOOT.reveal ? 1 : 0;   // the lid snaps at the punchline
+    // BIGGER. At 26x20 against a 600px head it read as a postage stamp, and
+    // the eye is the only actor in this shot.
+    const eyeH = blink ? 4 : Math.round(34 + wide * 12);
+    const eyeW = Math.round(44 + wide * 10);
+    const eyeX = -46, eyeY = -72;
+    cx.fillStyle = "#f4f6f1";
+    cx.fillRect(eyeX, eyeY, eyeW, eyeH);
+    if (!blink) {
+      // a warm sclera ring so it is an eye and not a sticker
+      cx.fillStyle = wide ? "#ffe9a8" : "#d8dcd2";
+      cx.fillRect(eyeX + 2, eyeY + 2, eyeW - 4, eyeH - 4);
+      // the pupil tracks: down at the grass, then up to the thing in the sky
+      const pw = Math.round(14 + wide * 2);
+      const px2 = Math.round(eyeX + 6 + (eyeW - 12 - pw) * (0.18 + look * 0.62));
+      const py2 = Math.round(eyeY + 5 + (eyeH - 10 - Math.max(8, eyeH - 16)) * (1 - look));
+      cx.fillStyle = "#0b1206";
+      cx.fillRect(px2, py2, pw, Math.max(8, eyeH - 16));
+      // a single specular pixel block — the one bit of life in the frame
+      cx.fillStyle = "#ffffff";
+      cx.fillRect(px2 + pw - 5, py2 + 3, 4, 4);
+    }
+    cx.restore();
+
+    // ---- WHAT HE THINKS IT IS. A thought bubble holding a tiny meteor, which
+    // flips to a football at the reveal. This is the joke, stated plainly
+    // rather than left to be inferred from a silhouette.
+    if (t > BOOT.look + 0.15 && t < BOOT.land) {
+      const bx = Math.round(W * 0.14), by = Math.round(H * 0.46);
+      const pop = t >= BOOT.reveal ? ease(BOOT.reveal, BOOT.reveal + 0.18) : 0;
+      cx.fillStyle = "rgba(244,246,241,.92)";
+      pxDisc(bx, by, 34 + pop * 4, "rgba(244,246,241,.92)");
+      pxDisc(bx + 30, by + 34, 9, "rgba(244,246,241,.92)");
+      pxDisc(bx + 46, by + 52, 5, "rgba(244,246,241,.92)");
+      if (t < BOOT.reveal) {
+        pxDisc(bx, by, 13, "#120d08");                 // a little meteor…
+        cx.fillStyle = "#e2622b";
+        cx.fillRect(bx - 22, by - 16, 12, 3);
+        cx.fillRect(bx - 26, by - 6, 14, 3);
+        cx.font = PF(16); cx.fillStyle = "#c0392b"; cx.textAlign = "center";
+        cx.fillText("?", bx + 1, by + 30);
+      } else if (G.ballSpr) {
+        cx.drawImage(G.ballSpr, bx - 16, by - 10, 32, 20);   // …no, a football
+        cx.font = PF(16); cx.fillStyle = "#2a6e37"; cx.textAlign = "center";
+        cx.fillText("!", bx + 1, by + 32);
+      }
+    }
+
+    // ---- the rumble he can feel before he can see it, and the thud
+    if (t > BOOT.fall && t < BOOT.land) G.shake = Math.max(G.shake || 0, 0.10 * ease(BOOT.fall, BOOT.land));
+    if (!G.bootThud && t >= BOOT.land) {
+      G.bootThud = true;
+      G.shake = Math.max(G.shake || 0, 0.5);
+      sfx.doink(); crowdCheer(0.45);
+      fxDust(objX, HORIZON + 10, 14);
+    }
+    if (!G.bootWhoosh && t >= BOOT.look) { G.bootWhoosh = true; beep(150, 1.5, "sawtooth", 0.05); }
+
+    // ---- and out. The last beat wipes to the title underneath.
+    const out = ease(BOOT.land + 0.15, BOOT_LEN);
+    if (out > 0) { cx.fillStyle = "rgba(5,12,8," + out.toFixed(3) + ")"; cx.fillRect(0, 0, W, H); }
+    cx.textAlign = "center";
+    cx.font = PF(8); cx.fillStyle = "rgba(157,176,164,.7)";
+    cx.fillText("ENTER / TAP TO SKIP", W / 2, H - 16);
+  }
+
   function drawTitle() {
+    // the cold open owns the first BOOT_LEN seconds of the title state
+    if ((G.bootT || 0) < BOOT_LEN) { drawBoot(); return; }
     // scrolling field backdrop
     G.camX = (G.camX + 0.6) % (FIELD_LEN - W);
     drawField();
@@ -11753,10 +12007,11 @@
     "NEW SEASON": ["spino", "📅"], "NEW CAREER": ["veloci", "⭐"], "MEET THE QBS": ["troodon", "🎓"],
     "TUTORIAL": ["pachy", "📖"], "SCOUTING": ["deinony", "🔎"], "PLAYBOOK LAB": ["deino", "✏"],
     "SETTINGS": ["stego", "⚙"],
+    "PLAY GAME": ["trex", "🏈"], "PLAY SEASON": ["spino", "📅"], "MORE MODES": ["carno", "🦖"],
   };
   function menuCardRects() {
-    const opts = menuOptions();
-    const cols = 3, cw = 284, chh = 88, gapx = 18, gapy = 14;
+    const opts = activeMenuOptions();
+    const { cols, cw, chh, gapx, gapy } = menuGrid();
     const rows = Math.ceil(opts.length / cols);
     const x0 = (W - (cols * cw + (cols - 1) * gapx)) / 2;
     const y0 = Math.max(96, (H - 40 - rows * (chh + gapy)) / 2 + 40);
@@ -11822,7 +12077,9 @@
       cx.fillText(sub, r2.x + 60, r2.y + 54);
     }
     cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#9db0a4";
-    cx.fillText("ARROWS + ENTER · CLICK/TAP A CARD · ESC BACK", W / 2, H - 14);
+    cx.fillText(menuIsGrid()
+      ? "ARROWS + ENTER · TAP A CARD · ESC = MAIN MENU"
+      : "ARROWS + ENTER · TAP A CARD · ESC = TITLE", W / 2, H - 14);
   }
 
   function drawHub() {

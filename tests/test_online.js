@@ -174,12 +174,16 @@ function makeInstance(label, sharedDb) {
   const optsA = A.G.debug ? null : null;
   // find QUICK MATCH index by walking the menu
   function tapQuickMatch(inst) {
-    // menu is open; press Enter after moving to QUICK MATCH. Easiest: drive the
-    // menu handler directly through the key path by matching the label.
-    // We can't read menuOptions() externally, so cycle right until the status
-    // path changes — instead just invoke via the known layout: EXHIBITION,
-    // 2-PLAYER VERSUS, QUICK MATCH ...  → index 2.
-    inst.key("d"); inst.key("d");        // move to QUICK MATCH (3rd card)
+    // LESSON #18 — this navigation changed with the DESIGN, not with the
+    // behaviour under test. The menu is two layers now: a four-card front door
+    // (PLAY GAME · PLAY SEASON · MORE MODES · SETTINGS) in front of the full
+    // mode grid that used to be the front page. QUICK MATCH still sits at grid
+    // index 2 (EXHIBITION, 2-PLAYER VERSUS, QUICK MATCH) — it is simply one
+    // layer deeper. We still cannot read menuOptions() from out here, so this
+    // walks the known layout exactly as before: two rights per layer.
+    inst.key("d"); inst.key("d");        // front door -> MORE MODES (3rd card)
+    inst.key("Enter");                   // open the full mode grid
+    inst.key("d"); inst.key("d");        // grid -> QUICK MATCH (3rd card)
     inst.key("Enter");
   }
   tapQuickMatch(A);
@@ -261,7 +265,9 @@ function makeInstance(label, sharedDb) {
   // ---- cancel path: a lone searcher can back out and clear its slot ----
   const C = makeInstance("C", db);
   for (let i = 0; i < 40 && C.G.state !== "title"; i++) { C.step(); await sleep(15); }
-  C.key("Enter"); C.key("d"); C.key("d"); C.key("Enter");
+  // two layers now, same as tapQuickMatch above: front door -> MORE MODES,
+  // then grid -> QUICK MATCH. (This inline copy is why the first fix missed.)
+  C.key("Enter"); C.key("d"); C.key("d"); C.key("Enter"); C.key("d"); C.key("d"); C.key("Enter");
   for (let i = 0; i < 20 && C.G.state !== "online_wait"; i++) { C.step(); await sleep(20); }
   await sleep(40); C.step();
   const parked = !!db.read("dinobowl/matchmaking/waiting");
