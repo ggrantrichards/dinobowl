@@ -11178,208 +11178,328 @@
   // (AA_TRANSFORMATION 1). No new assets: the reveal is the game's own ball
   // sprite scaled by an INTEGER factor so it stays crisp, and the "meteor" is
   // that same silhouette before you can read it.
-  const BOOT_LEN = 6.0;
-  const BOOT = { graze: 0.7, dim: 1.8, look: 2.6, fall: 4.0, reveal: 4.9, land: 5.5 };
-  // integer-row disc: a circle made of scanlines, so it reads as pixel art
-  // rather than as an anti-aliased arc
+  const BOOT_LEN = 7.4;
+  // A dusk jungle, in five depth planes, and an animal in the front one.
+  //  graze 0.9 · the light goes 2.0 · he looks up 2.9 · it falls 4.3
+  //  REVEAL 5.4 · impact 6.2 · out 7.4
+  const BOOT = { graze: 0.9, dim: 2.0, look: 2.9, fall: 4.3, reveal: 5.4, land: 6.2 };
+  const HZ = 372;                    // horizon
+
+  // ---- pixel primitives. Scanline fills, integer rows, so every shape is
+  // authored art rather than a stack of rectangles (AA_TRANSFORMATION 1).
   function pxDisc(cx0, cy0, r, fill) {
     cx.fillStyle = fill;
     const R = Math.max(1, Math.round(r));
     for (let dy = -R; dy <= R; dy++) {
       const half = Math.round(Math.sqrt(Math.max(0, R * R - dy * dy)));
-      if (half <= 0) continue;
-      cx.fillRect(Math.round(cx0) - half, Math.round(cy0) + dy, half * 2, 1);
+      if (half > 0) cx.fillRect(Math.round(cx0) - half, Math.round(cy0) + dy, half * 2, 1);
     }
   }
+  // even-odd scanline polygon fill: the workhorse for every silhouette here
+  function pxPoly(pts, fill) {
+    if (!pts.length) return;
+    cx.fillStyle = fill;
+    let lo = 1e9, hi = -1e9;
+    for (const p of pts) { if (p[1] < lo) lo = p[1]; if (p[1] > hi) hi = p[1]; }
+    lo = Math.floor(lo); hi = Math.ceil(hi);
+    for (let y = lo; y <= hi; y++) {
+      const xs = [];
+      for (let k = 0; k < pts.length; k++) {
+        const a = pts[k], b = pts[(k + 1) % pts.length];
+        if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) {
+          xs.push(a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+        }
+      }
+      if (xs.length < 2) continue;
+      xs.sort((p, q) => p - q);
+      for (let k = 0; k + 1 < xs.length; k += 2) {
+        const x0 = Math.round(xs[k]), x1 = Math.round(xs[k + 1]);
+        if (x1 > x0) cx.fillRect(x0, y, x1 - x0, 1);
+      }
+    }
+  }
+  // a fern frond: a tapering rachis with leaflets stepping down both edges.
+  // Drawn as one polygon so the notches stay crisp instead of turning to mush.
+  function frond(ox, oy, len, ang, wide, fill) {
+    const ca = Math.cos(ang), sa = Math.sin(ang);
+    const P = (d, o) => [ox + ca * d - sa * o, oy + sa * d + ca * o];
+    const up = [], dn = [];
+    const LEAF = 11;   // more, shallower leaflets reads as foliage
+    for (let i = 0; i <= LEAF; i++) {
+      const f = i / LEAF;
+      const d = f * len;
+      const w = wide * Math.sin(Math.PI * (0.18 + f * 0.82)) * (1 - f * 0.35);
+      up.push(P(d, -w));
+      up.push(P(d + len / LEAF * 0.5, -w * 0.74));    // a shallow leaflet edge —
+      dn.push(P(d, w));                               // deep notches read as a
+      dn.push(P(d + len / LEAF * 0.5, w * 0.74));     // lightning zigzag, not a fern
+    }
+    pxPoly(up.concat(dn.reverse()), fill);
+  }
+  // a tree fern: slim trunk, crown of fronds. The silhouette of the Mesozoic.
+  function treeFern(x, groundY, h, spread, fill, tilt) {
+    const tx = x + (tilt || 0) * h * 0.18;
+    pxPoly([[x - 4, groundY], [x + 4, groundY], [tx + 3, groundY - h], [tx - 3, groundY - h]], fill);
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI + (i + 0.5) / n * Math.PI;   // fan across the top
+      frond(tx, groundY - h, spread * (0.72 + 0.28 * Math.sin(i * 2.1)), a, spread * 0.17, fill);
+    }
+  }
+
   function drawBoot() {
     const t = G.bootT || 0;
     const ease = (a, b) => clamp((t - a) / Math.max(0.0001, b - a), 0, 1);
-    // ---- how dark the world has gone. The light drains as the thing falls,
-    // which is the whole reason he looks up in the first place.
-    const gloom = ease(BOOT.dim, BOOT.fall) * 0.72;
-    // ---- SKY, in bands. Dusk over a jungle: teal up top, amber at the
-    // horizon, every band dimmed by the gloom.
-    const HORIZON = 348;
-    const BANDS = 12;
+    const smooth = (v) => v * v * (3 - 2 * v);
+    // the light drains as the thing comes down — the reason he looks up
+    const gloom = smooth(ease(BOOT.dim, BOOT.fall)) * 0.80;
+    const look = smooth(ease(BOOT.dim + 0.3, BOOT.look));
+    // ---- CAMERA. A slow drift the whole time, and a tilt up on the look, so
+    // the shot is never still. Everything below is drawn through this.
+    const camPan = Math.sin(t * 0.22) * 9;
+    const camLift = look * 30;
+    cx.save();
+    cx.translate(Math.round(-camPan), Math.round(camLift));
+
+    // ---- 1. SKY, banded. Dusk amber at the horizon, deep teal overhead, and
+    // the whole ramp crushed toward black as the gloom takes hold.
+    const BANDS = 16;
     for (let i = 0; i < BANDS; i++) {
       const f = i / (BANDS - 1);
-      const r0 = Math.round((26 + 150 * f) * (1 - gloom));
-      const g0 = Math.round((58 + 92 * f) * (1 - gloom * 0.86));
-      const b0 = Math.round((74 - 34 * f) * (1 - gloom * 0.55));
+      const r0 = Math.round((22 + 196 * f * f) * (1 - gloom));
+      const g0 = Math.round((40 + 116 * f) * (1 - gloom * 0.88));
+      const b0 = Math.round((58 - 6 * f) * (1 - gloom * 0.5));
       cx.fillStyle = "rgb(" + r0 + "," + g0 + "," + b0 + ")";
-      cx.fillRect(0, Math.round(i * HORIZON / BANDS), W, Math.ceil(HORIZON / BANDS) + 1);
+      cx.fillRect(-40, Math.round(-40 + i * (HZ + 40) / BANDS), W + 80, Math.ceil((HZ + 40) / BANDS) + 1);
     }
-    // a few stars, only once it is dark enough to see them
-    if (gloom > 0.28) {
-      cx.fillStyle = "rgba(244,246,241," + (gloom - 0.28).toFixed(3) + ")";
-      for (let i = 0; i < 34; i++) {
-        const sx = ((i * 137) % (W - 8)) + 4, sy = ((i * 61) % (HORIZON - 40)) + 8;
-        cx.fillRect(sx, sy, 2, 2);
+    // stars, once it is dark enough to see them
+    if (gloom > 0.22) {
+      const a = Math.min(0.85, (gloom - 0.22) * 1.6);
+      for (let i = 0; i < 60; i++) {
+        const sx = (i * 197) % (W + 60) - 30, sy = (i * 89) % (HZ - 60) + 6;
+        const tw = 0.55 + 0.45 * Math.sin(t * 2.2 + i);
+        cx.fillStyle = "rgba(244,246,241," + (a * tw).toFixed(3) + ")";
+        cx.fillRect(sx, sy, (i % 7) ? 2 : 3, (i % 7) ? 2 : 3);
       }
     }
-    // ---- TREELINE: flat-topped ferns as solid blocks, darker than the sky
-    cx.fillStyle = "rgb(" + Math.round(12 * (1 - gloom)) + "," + Math.round(38 * (1 - gloom)) + ",26)";
-    // OVERLAPPING, not abutting: 40px crowns on 46px centres left the amber
-    // sky showing through as bright vertical slots and read as a fence.
-    for (let i = 0; i < 24; i++) {
-      const bx = i * 44 - 16, bw = 52;
-      const bh = 26 + ((i * 53) % 52);
-      cx.fillRect(bx, HORIZON - bh, bw, bh + 6);
-    }
-    // ---- TURF
-    cx.fillStyle = "rgb(" + Math.round(18 * (1 - gloom)) + "," + Math.round(52 * (1 - gloom)) + ",30)";
-    cx.fillRect(0, HORIZON, W, H - HORIZON);
 
-    // ---- THE OBJECT. A dark silhouette that you read as a meteor because it
-    // is small, falling, and trailed by streaks — and which is the football
-    // the whole time. It enters at the top and grows on a curve so the last
-    // second of approach is the fast one.
-    // it starts falling BEFORE he looks up, so that when he does there is
-    // already something there. Entering on the look left the dread beat staring
-    // at empty sky for half a second.
-    const fall = ease(BOOT.dim + 0.4, BOOT.land);
-    // MOSTLY LINEAR, mildly accelerating. It was fall*fall, which kept the
-    // thing above y=0 until roughly a third of the way through its own fall —
-    // so the beat where he sees it and dreads it had nothing on screen at all.
-    // Rendered at t=3.2 the "meteor" sat at y=-24. Now it clears the top edge
-    // early and still speeds up into the landing.
-    const drop = HORIZON + 80;
-    const objX = Math.round(W * 0.62 - fall * 44);
-    const objY = Math.round(-14 + fall * drop * 0.72 + fall * fall * drop * 0.28);
-    const objR = Math.round(4 + Math.pow(fall, 1.7) * 62);
-    if (t > BOOT.dim + 0.45) {
-      // streaks: the meteor read. They shorten as it slows into frame, and
-      // stop entirely at the reveal — a tumbling ball has no tail.
-      const tail = t < BOOT.reveal ? 1 - ease(BOOT.fall, BOOT.reveal) * 0.8 : 0;
+    // ---- 2. FAR PLANE: a volcano, because this is the Mesozoic and it should
+    // be unmistakable in the first half second. Its glow is the only warm
+    // light left once the sky goes out.
+    const far = -camPan * 0.25;
+    const vX = 742 + far, vBase = HZ + 4, vH = 176;
+    pxPoly([[vX - 210, vBase], [vX - 52, vBase - vH], [vX + 44, vBase - vH], [vX + 232, vBase]],
+      "rgb(" + Math.round(20 * (1 - gloom * 0.6)) + "," + Math.round(30 * (1 - gloom * 0.6)) + ",34)");
+    // crater glow + a lazy ash plume that leans with the wind
+    const glow = 0.45 + 0.55 * Math.sin(t * 0.9);
+    pxPoly([[vX - 52, vBase - vH], [vX + 44, vBase - vH], [vX + 26, vBase - vH + 13], [vX - 34, vBase - vH + 13]],
+      "rgba(255,107,53," + (0.5 + 0.3 * glow).toFixed(3) + ")");
+    for (let i = 0; i < 9; i++) {
+      const f = i / 8;
+      const px2 = vX - 6 + Math.sin(t * 0.5 + f * 2.4) * (10 + f * 40) + f * 34;
+      const py2 = vBase - vH - 8 - f * 46;
+      pxDisc(px2, py2, 7 + f * 17, "rgba(28,26,30," + (0.36 - f * 0.035).toFixed(3) + ")");
+    }
+    // distant ridge, so the volcano sits IN a landscape
+    const ridge = [];
+    for (let x = -40; x <= W + 40; x += 40) ridge.push([x, HZ - 26 - 22 * Math.sin(x * 0.011) - 14 * Math.sin(x * 0.03)]);
+    ridge.push([W + 40, HZ + 8], [-40, HZ + 8]);
+    pxPoly(ridge, "rgb(" + Math.round(15 * (1 - gloom * 0.5)) + "," + Math.round(28 * (1 - gloom * 0.5)) + ",26)");
+
+    // ---- 3. MIST. Two slow bands over the ridge — depth for almost nothing.
+    for (let i = 0; i < 2; i++) {
+      const my = HZ - 34 + i * 20;
+      const mx = ((t * (9 + i * 6)) % (W + 240)) - 120;
+      cx.fillStyle = "rgba(150,178,168," + (0.05 + 0.03 * i).toFixed(3) + ")";
+      cx.fillRect(mx - 260, my, 520, 9 + i * 4);
+      cx.fillRect(mx + 300, my + 4, 380, 7);
+    }
+
+    // ---- 4. MID PLANE: the canopy. Tree ferns and cycads at two removes, the
+    // nearer rank darker, which is what actually sells depth in silhouette.
+    const midFar = "rgb(" + Math.round(11 * (1 - gloom * 0.4)) + "," + Math.round(26 * (1 - gloom * 0.4)) + ",20)";
+    const mid = "rgb(" + Math.round(7 * (1 - gloom * 0.3)) + "," + Math.round(18 * (1 - gloom * 0.3)) + ",14)";
+    const p1 = -camPan * 0.5, p2 = -camPan * 0.8;
+    for (let i = 0; i < 7; i++) {
+      const x = -40 + i * 168 + p1;
+      treeFern(x, HZ + 10, 92 + ((i * 37) % 46), 62 + ((i * 23) % 26), midFar, ((i % 3) - 1) * 0.3);
+    }
+    for (let i = 0; i < 6; i++) {
+      const x = 30 + i * 196 + p2;
+      treeFern(x, HZ + 26, 128 + ((i * 51) % 62), 84 + ((i * 31) % 34), mid, ((i % 2) ? 1 : -1) * 0.22);
+    }
+    // ---- 5. GROUND
+    cx.fillStyle = "rgb(" + Math.round(9 * (1 - gloom * 0.3)) + "," + Math.round(20 * (1 - gloom * 0.3)) + ",14)";
+    cx.fillRect(-40, HZ + 18, W + 80, H);
+
+    // ---- THE OBJECT. Dark, rim-lit, trailing streaks: you read "meteor"
+    // because it is small, falling and on fire. It is the football the whole
+    // time — the game's own sprite, at an INTEGER scale so it stays crisp.
+    const fall = ease(BOOT.dim + 0.35, BOOT.land);
+    // the ball stays IN THE SKY. Let it descend into the head band and the
+    // silhouette is drawn over its middle, splitting it into two brown chunks —
+    // measured, one object at x461-570 cut by the skull. The growing ground
+    // SHADOW plus the impact flash sell the landing; the ball itself never has
+    // to reach the turf, and this holds regardless of the render transform.
+    const drop = HZ - 60;
+    const objX = Math.round(W * 0.60 - fall * 58 - camPan * 1.2);
+    const objY = Math.round(-16 + fall * drop * 0.66 + fall * fall * drop * 0.34);
+    const objR = Math.round(3 + Math.pow(fall, 1.8) * 66);
+    const shown = t > BOOT.dim + 0.3;
+    // its shadow arrives on the ground before it does — the oldest trick there
+    // is for selling something falling toward you, and it is nearly free
+    if (shown && objY > 40) {
+      const sh = Math.max(4, objR * (0.5 + fall * 0.9));
+      cx.fillStyle = "rgba(0,0,0," + (0.20 + 0.42 * fall).toFixed(3) + ")";
+      for (let dy = -3; dy <= 3; dy++) {
+        const hw = Math.round(sh * Math.sqrt(Math.max(0, 1 - (dy / 3.4) * (dy / 3.4))));
+        cx.fillRect(objX - hw, HZ + 44 + dy * 3, hw * 2, 3);
+      }
+    }
+    if (shown) {
+      const tail = t < BOOT.reveal ? 1 - smooth(ease(BOOT.fall, BOOT.reveal)) * 0.85 : 0;
       if (tail > 0.02) {
-        cx.fillStyle = "rgba(255,210,63," + (0.30 * tail).toFixed(3) + ")";
-        for (let i = 1; i <= 5; i++) {
-          const ty = objY - i * (18 + objR * 0.5) * tail;
-          const tw = Math.max(2, Math.round(objR * 0.7 * (1 - i / 6)));
-          if (ty > -30) cx.fillRect(objX - tw, Math.round(ty), tw * 2, 3);
+        for (let i = 1; i <= 6; i++) {
+          const ty = objY - i * (16 + objR * 0.46) * tail;
+          const tw = Math.max(2, Math.round(objR * 0.66 * (1 - i / 7)));
+          if (ty > -34) {
+            cx.fillStyle = "rgba(255," + (150 + i * 12) + ",63," + (0.30 * tail * (1 - i / 7)).toFixed(3) + ")";
+            cx.fillRect(objX - tw, Math.round(ty), tw * 2, 3);
+          }
         }
       }
       if (t < BOOT.reveal) {
-        // unreadable: a dark lump with a hot rim. This IS the ball, you just
-        // cannot tell yet.
-        pxDisc(objX, objY, objR + 2, "rgba(255,210,63,.22)");
-        pxDisc(objX, objY, objR, "#120d08");
+        pxDisc(objX, objY, objR + 3, "rgba(255,140,50,.20)");
+        pxDisc(objX, objY, objR + 1, "rgba(255,190,90,.38)");   // the burning rim
+        pxDisc(objX, objY, objR, "#100b06");
       } else {
-        // THE REVEAL: same object, now legibly a football, tumbling end over
-        // end. Integer scale keeps every pixel square.
-        const spin = (t - BOOT.reveal) * 7.5;
         const scale = Math.max(2, Math.round(objR / 5));
         cx.save();
         cx.translate(objX, objY);
-        cx.rotate(spin);
+        cx.rotate((t - BOOT.reveal) * 6.2);
         if (G.ballSpr) cx.drawImage(G.ballSpr, -8 * scale, -5 * scale, 16 * scale, 10 * scale);
         else pxDisc(0, 0, objR, "#7a4a1e");
         cx.restore();
       }
     }
 
-    // ---- THE DINO, from behind his own brow. This is the POV: his head fills
-    // the bottom of frame, and when he looks UP the whole mass drops and
-    // rotates a little, opening the sky. The eye is the performance — the
-    // pupil climbs from the turf to the sky and the lid snaps open at the
-    // reveal.
-    const look = ease(BOOT.dim, BOOT.look);
-    const bob = Math.sin(t * 2.4) * (1 - look) * 3;
-    const headY = Math.round(H - 96 + look * 44 + bob);
-    const tilt = -look * 0.14;
+    // ---- 6. NEAR PLANE: giant fronds hanging into frame. This is what makes
+    // it a JUNGLE rather than a field at night — the camera is inside the
+    // foliage, not looking at it.
+    const near = "#030805";
+    const np = -camPan * 1.5;
+    frond(-30 + np, -20, 330, 1.02, 46, near);
+    frond(70 + np, -46, 270, 1.24, 36, near);
+    frond(W + 40 + np, -30, 340, 2.05, 48, near);
+    frond(W - 60 + np, -60, 250, 1.92, 34, near);
+
+    // ---- 7. THE ANIMAL. A theropod head in profile, authored as a polygon so
+    // it reads as a skull and not as a stepped mound. He fills the lower left,
+    // snout to the right, and tilts UP on the look. The eye does the acting.
+    const bob = Math.sin(t * 2.1) * (1 - look) * 2.6;
+    const tilt = 0.085 - look * 0.235;      // nose down grazing, nose up looking
     cx.save();
-    cx.translate(Math.round(W * 0.40), headY);
+    cx.translate(Math.round(96), Math.round(322 + bob + look * 16));
     cx.rotate(tilt);
-    // skull mass + snout, blocked in. Silhouette only — he is between us and
-    // the light, so he is nearly black however bright the sky is.
-    cx.fillStyle = "#08150e";
-    // the base mass runs well past every edge so the tilt can never reveal
-    // ground or sky behind the head (it did, as a wedge at the lower left)
-    cx.fillRect(-620, 8, 1500, 460);
-    cx.fillRect(-300, -24, 620, 40);
-    cx.fillRect(-190, -54, 420, 36);
-    // the SNOUT: stepped down and out to the right so the profile reads as a
-    // muzzle rather than as the top of a hill
-    cx.fillRect(70, -44, 210, 34);
-    cx.fillRect(196, -30, 190, 30);
-    cx.fillRect(300, -16, 150, 26);
-    cx.fillRect(-104, -78, 210, 28);        // brow ridge over the eye
-    // nostril + a hint of jaw, so the mass reads as a head and not a hill
-    cx.fillStyle = "#020905";
-    cx.fillRect(232, -30, 22, 12);
-    cx.fillRect(-120, 30, 420, 6);
-    // horn nubs catching the last of the sky
-    cx.fillStyle = "rgb(" + Math.round(120 * (1 - gloom)) + "," + Math.round(96 * (1 - gloom)) + ",54)";
-    cx.fillRect(-56, -86, 16, 14);
-    cx.fillRect(14, -90, 16, 18);
+    const SK = 1.24;
+    cx.scale(SK, SK);
+    const HEAD = [
+      [396, 120], [372, 96], [338, 85], [300, 79], [262, 65], [232, 43],
+      [196, 25], [152, 17], [102, 23], [56, 43], [18, 77], [-120, 128],
+      [-120, 460], [214, 460], [222, 196], [250, 170], [290, 152], [332, 139], [372, 131],
+    ];
+    pxPoly(HEAD, "#040a06");
+    // jaw line and a few teeth — tiny marks, but they turn a shape into a jaw
+    pxPoly([[236, 176], [372, 132], [378, 140], [242, 186]], "#0a1409");
+    for (let i = 0; i < 6; i++) {
+      const f = i / 5, jx = 250 + f * 118, jy = 172 - f * 30;
+      pxPoly([[jx, jy], [jx + 7, jy - 2], [jx + 4, jy + 8]], "#9aa38f");
+    }
+    // nostril
+    pxPoly([[348, 100], [366, 96], [364, 106], [346, 109]], "#000000");
+    // brow ridge catching the last warm light in the sky
+    // NO RIM LIGHT. Two attempts at one — first desaturated, then warm and
+    // thinned — both read as a stick laid across his skull rather than as light
+    // on an edge, because at this scale a highlight long enough to see is long
+    // enough to look like a drawn line. The silhouette is stronger clean, and
+    // the eye is already the focal point it needs.
     // ---- THE EYE
-    const blink = (t > 1.15 && t < 1.28) || (t > 3.02 && t < 3.12);
-    const wide = t >= BOOT.reveal ? 1 : 0;   // the lid snaps at the punchline
-    // BIGGER. At 26x20 against a 600px head it read as a postage stamp, and
-    // the eye is the only actor in this shot.
-    const eyeH = blink ? 4 : Math.round(34 + wide * 12);
-    const eyeW = Math.round(44 + wide * 10);
-    const eyeX = -46, eyeY = -72;
-    cx.fillStyle = "#f4f6f1";
-    cx.fillRect(eyeX, eyeY, eyeW, eyeH);
+    const blink = (t > 1.42 && t < 1.56) || (t > 3.34 && t < 3.44);
+    const wide = t >= BOOT.reveal ? 1 : 0;
+    const eW = 52, eH = blink ? 5 : Math.round(36 + wide * 12);
+    const eX = 150, eY = 48;
+    pxDisc(eX + eW / 2, eY + eH / 2, Math.max(eW, eH) / 2 + 3, "#020603");
     if (!blink) {
-      // a warm sclera ring so it is an eye and not a sticker
-      cx.fillStyle = wide ? "#ffe9a8" : "#d8dcd2";
-      cx.fillRect(eyeX + 2, eyeY + 2, eyeW - 4, eyeH - 4);
-      // the pupil tracks: down at the grass, then up to the thing in the sky
-      const pw = Math.round(14 + wide * 2);
-      const px2 = Math.round(eyeX + 6 + (eyeW - 12 - pw) * (0.18 + look * 0.62));
-      const py2 = Math.round(eyeY + 5 + (eyeH - 10 - Math.max(8, eyeH - 16)) * (1 - look));
-      cx.fillStyle = "#0b1206";
-      cx.fillRect(px2, py2, pw, Math.max(8, eyeH - 16));
-      // a single specular pixel block — the one bit of life in the frame
+      pxDisc(eX + eW / 2, eY + eH / 2, eH / 2, wide ? "#fff3c4" : "#e8e2cf");
+      // a reptile slit that widens at the punchline
+      const pupW = Math.round(9 + wide * 7);
+      const px2 = Math.round(eX + eW / 2 - pupW / 2 + look * 12);
+      const py2 = Math.round(eY + eH / 2 - eH * 0.30 + (1 - look) * eH * 0.30);
+      cx.fillStyle = "#050a04";
+      cx.fillRect(px2, py2, pupW, Math.round(eH * 0.62));
       cx.fillStyle = "#ffffff";
-      cx.fillRect(px2 + pw - 5, py2 + 3, 4, 4);
+      cx.fillRect(px2 + pupW - 4, py2 + 3, 3, 3);
+    } else {
+      cx.fillStyle = "#0a1207";
+      cx.fillRect(eX + 6, eY + eH / 2, eW - 12, 4);
     }
     cx.restore();
 
-    // ---- WHAT HE THINKS IT IS. A thought bubble holding a tiny meteor, which
-    // flips to a football at the reveal. This is the joke, stated plainly
-    // rather than left to be inferred from a silhouette.
-    if (t > BOOT.look + 0.15 && t < BOOT.land) {
-      const bx = Math.round(W * 0.14), by = Math.round(H * 0.46);
-      const pop = t >= BOOT.reveal ? ease(BOOT.reveal, BOOT.reveal + 0.18) : 0;
-      cx.fillStyle = "rgba(244,246,241,.92)";
-      pxDisc(bx, by, 34 + pop * 4, "rgba(244,246,241,.92)");
-      pxDisc(bx + 30, by + 34, 9, "rgba(244,246,241,.92)");
-      pxDisc(bx + 46, by + 52, 5, "rgba(244,246,241,.92)");
-      if (t < BOOT.reveal) {
-        pxDisc(bx, by, 13, "#120d08");                 // a little meteor…
-        cx.fillStyle = "#e2622b";
-        cx.fillRect(bx - 22, by - 16, 12, 3);
-        cx.fillRect(bx - 26, by - 6, 14, 3);
-        cx.font = PF(16); cx.fillStyle = "#c0392b"; cx.textAlign = "center";
-        cx.fillText("?", bx + 1, by + 30);
-      } else if (G.ballSpr) {
-        cx.drawImage(G.ballSpr, bx - 16, by - 10, 32, 20);   // …no, a football
-        cx.font = PF(16); cx.fillStyle = "#2a6e37"; cx.textAlign = "center";
-        cx.fillText("!", bx + 1, by + 32);
+    // ---- WHAT HE THINKS IT IS. The joke, stated: a meteor in the bubble,
+    // which becomes a football at the reveal.
+    if (t > BOOT.look + 0.25 && t < BOOT.land + 0.2) {
+      const bx = Math.round(W * 0.30), by = Math.round(150);
+      const grow = smooth(ease(BOOT.look + 0.25, BOOT.look + 0.55));
+      const R = Math.round(38 * grow);
+      if (R > 4) {
+        pxDisc(bx - 40, by + 62, Math.round(5 * grow), "rgba(240,244,235,.9)");
+        pxDisc(bx - 26, by + 42, Math.round(9 * grow), "rgba(240,244,235,.9)");
+        pxDisc(bx, by, R, "rgba(240,244,235,.94)");
+        pxDisc(bx - R * 0.5, by - R * 0.42, Math.round(R * 0.5), "rgba(240,244,235,.94)");
+        pxDisc(bx + R * 0.52, by - R * 0.3, Math.round(R * 0.46), "rgba(240,244,235,.94)");
+        if (t < BOOT.reveal) {
+          pxDisc(bx + 2, by + 2, 12, "#120d08");
+          cx.fillStyle = "#e2622b";
+          cx.fillRect(bx - 24, by - 12, 13, 3); cx.fillRect(bx - 28, by - 2, 15, 3);
+        } else if (G.ballSpr) {
+          cx.drawImage(G.ballSpr, bx - 18, by - 11, 36, 22);
+        }
       }
     }
 
-    // ---- the rumble he can feel before he can see it, and the thud
-    if (t > BOOT.fall && t < BOOT.land) G.shake = Math.max(G.shake || 0, 0.10 * ease(BOOT.fall, BOOT.land));
+    // ---- EMBERS. Ash from the volcano, drifting up-left across every plane.
+    for (let i = 0; i < 16; i++) {
+      const life = (t * 0.28 + i * 0.0625) % 1;
+      const ex = (vX - 40 - life * 520 + Math.sin(t * 0.8 + i) * 26);
+      const ey = vBase - vH - life * 150 + Math.cos(t * 0.6 + i * 2) * 16;
+      const a = (1 - life) * 0.6;
+      if (a > 0.03 && ey > -20) {
+        cx.fillStyle = "rgba(255," + (140 + ((i * 13) % 70)) + ",70," + a.toFixed(3) + ")";
+        cx.fillRect(Math.round(ex), Math.round(ey), 2, 2);
+      }
+    }
+    cx.restore();
+
+    // ---- IMPACT. A hard white frame, then dust, then the world settles.
     if (!G.bootThud && t >= BOOT.land) {
       G.bootThud = true;
-      G.shake = Math.max(G.shake || 0, 0.5);
-      sfx.doink(); crowdCheer(0.45);
-      fxDust(objX, HORIZON + 10, 14);
+      G.shake = Math.max(G.shake || 0, 0.62);
+      sfx.doink(); crowdCheer(0.5);
     }
-    if (!G.bootWhoosh && t >= BOOT.look) { G.bootWhoosh = true; beep(150, 1.5, "sawtooth", 0.05); }
-
-    // ---- and out. The last beat wipes to the title underneath.
-    const out = ease(BOOT.land + 0.15, BOOT_LEN);
+    if (t > BOOT.fall && t < BOOT.land) G.shake = Math.max(G.shake || 0, 0.12 * ease(BOOT.fall, BOOT.land));
+    if (!G.bootWhoosh && t >= BOOT.look) { G.bootWhoosh = true; beep(140, 1.9, "sawtooth", 0.055); }
+    const flash = 1 - clamp((t - BOOT.land) / 0.22, 0, 1);
+    if (t >= BOOT.land && flash > 0) {
+      cx.fillStyle = "rgba(255,244,214," + (flash * 0.85).toFixed(3) + ")";
+      cx.fillRect(0, 0, W, H);
+    }
+    // ---- and out to the title
+    const out = smooth(ease(BOOT.land + 0.5, BOOT_LEN));
     if (out > 0) { cx.fillStyle = "rgba(5,12,8," + out.toFixed(3) + ")"; cx.fillRect(0, 0, W, H); }
     cx.textAlign = "center";
-    cx.font = PF(8); cx.fillStyle = "rgba(157,176,164,.7)";
+    cx.font = PF(8); cx.fillStyle = "rgba(157,176,164,.55)";
     cx.fillText("ENTER / TAP TO SKIP", W / 2, H - 16);
   }
-
   function drawTitle() {
     // the cold open owns the first BOOT_LEN seconds of the title state
     if ((G.bootT || 0) < BOOT_LEN) { drawBoot(); return; }

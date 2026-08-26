@@ -659,6 +659,21 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     };
     const gains = [], blockedTackler = [], creaseFits = [];
     let frozenRuns = 0, worstFrozen = 0, carriesRun = 0, contactFrames = 0;
+    // PIN THE STREAM for the run trials, the way blocking_bench and
+    // qa_botgame both do. G3/G4 are SHARE assertions over 36 unpinned carries:
+    // at n=36 the standard error on a ~38% rate is about 8 points, so a 45%
+    // threshold was being crossed by chance roughly one run in six (measured:
+    // "50.0% of 36"). That is noise reported as a regression, which is worse
+    // than no assertion. A fixed stream makes the same claim deterministically.
+    const __rnd = Math.random;
+    (function () {
+      let a = 20260826 >>> 0;
+      Math.random = function () {
+        a = (a + 0x6D2B79F5) >>> 0; let x = a;
+        x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61);
+        return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+      };
+    })();
     for (let t = 0; t < 36; t++) {
       g.state = "dead"; g.deadT = 0; g.deadNext = null; g.half = null;
       g.replay = null; g.celebrate = null; g.ramp = null;
@@ -756,6 +771,7 @@ check("A7 every localStorage touch is guarded (helpers or an enclosing try)",
     };
     const share = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
     const medGain = med(gains);
+    Math.random = __rnd;   // restore before anything else measures
     const blkShare = share(blockedTackler), fitShare = share(creaseFits);
     check("G0 the gate sampled real RB carries off ordinary run calls",
       carriesRun >= 20, carriesRun + " carries");
