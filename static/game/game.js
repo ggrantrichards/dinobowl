@@ -11247,6 +11247,119 @@
     }
   }
 
+  // ---- THE DISTANCE IS BAKED ONCE, exactly like G.crowd and G.fieldCv. That
+  // buys two things: the per-frame cost collapses to a couple of blits, and
+  // because the bake is a one-off we can afford REAL ORDERED DITHERING, which
+  // is the single biggest difference between hand-made 8-bit art and a
+  // generated gradient. This game already dithers — the crowd is a field of
+  // hashed pixel blocks — so it is the house idiom, not an import.
+  const SKY_RAMP = ["#0d1828", "#142334", "#1b2f3d", "#263c3e", "#3d4e37", "#67602c", "#a37c28", "#d59f3a"];
+  const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+  function bootBake() {
+    if (G.bootSky) return;
+    const BL = 2;                       // 2px dither blocks: chunky, and honest
+    // ---- SKY: an 8-step ramp, dithered between adjacent steps. Flat bands
+    // read as a machine gradient; a Bayer threshold breaks the seams the way a
+    // pixel artist would, with no extra colours in the palette.
+    const skyH = HZ + 40;
+    const sc = document.createElement("canvas"); sc.width = W; sc.height = skyH;
+    const sg = sc.getContext("2d");
+    const n = SKY_RAMP.length;
+    for (let by = 0; by * BL < skyH; by++) {
+      const y = by * BL;
+      const pos = (y / (skyH - 1)) * (n - 1);
+      const i = Math.min(n - 2, Math.floor(pos)), f = pos - i;
+      for (let bx = 0; bx * BL < W; bx++) {
+        const thr = (BAYER4[((by & 3) << 2) | (bx & 3)] + 0.5) / 16;
+        sg.fillStyle = SKY_RAMP[f > thr ? i + 1 : i];
+        sg.fillRect(bx * BL, y, BL, BL);
+      }
+    }
+    G.bootSky = sc;
+    // ---- SCENE: volcano body, ridge, both fern ranks and the ground, on one
+    // transparent layer wider than the screen so the parallax has somewhere to
+    // scroll. Every plane gets TWO tones plus a lit edge — one flat colour per
+    // plane is the other thing that reads as generated.
+    const PAD = 160;
+    const nc = document.createElement("canvas"); nc.width = W + PAD * 2; nc.height = H;
+    const ng = nc.getContext("2d");
+    const O = PAD;                       // scene-space origin offset
+    const poly = (pts, fill) => {
+      if (!pts.length) return;
+      ng.fillStyle = fill;
+      let lo = 1e9, hi = -1e9;
+      for (const p of pts) { if (p[1] < lo) lo = p[1]; if (p[1] > hi) hi = p[1]; }
+      for (let y = Math.floor(lo); y <= Math.ceil(hi); y++) {
+        const xs = [];
+        for (let k = 0; k < pts.length; k++) {
+          const a = pts[k], b = pts[(k + 1) % pts.length];
+          if ((a[1] <= y && b[1] > y) || (b[1] <= y && a[1] > y)) xs.push(a[0] + (y - a[1]) / (b[1] - a[1]) * (b[0] - a[0]));
+        }
+        if (xs.length < 2) continue;
+        xs.sort((p, q) => p - q);
+        for (let k = 0; k + 1 < xs.length; k += 2) {
+          const x0 = Math.round(xs[k]), x1 = Math.round(xs[k + 1]);
+          if (x1 > x0) ng.fillRect(x0, y, x1 - x0, 1);
+        }
+      }
+    };
+    const fr = (ox, oy, len, ang, wide, fill) => {
+      const ca = Math.cos(ang), sa = Math.sin(ang);
+      const P = (d, o) => [ox + ca * d - sa * o, oy + sa * d + ca * o];
+      const up = [], dn = [], LEAF = 11;
+      for (let i = 0; i <= LEAF; i++) {
+        const f2 = i / LEAF, d = f2 * len;
+        const w = wide * Math.sin(Math.PI * (0.18 + f2 * 0.82)) * (1 - f2 * 0.35);
+        up.push(P(d, -w)); up.push(P(d + len / LEAF * 0.5, -w * 0.74));
+        dn.push(P(d, w)); dn.push(P(d + len / LEAF * 0.5, w * 0.74));
+      }
+      poly(up.concat(dn.reverse()), fill);
+    };
+    const tf = (x, groundY, h, spread, fill, tip, tilt) => {
+      const tx = x + (tilt || 0) * h * 0.18;
+      poly([[x - 4, groundY], [x + 4, groundY], [tx + 3, groundY - h], [tx - 3, groundY - h]], fill);
+      for (let i = 0; i < 7; i++) {
+        const a = -Math.PI + (i + 0.5) / 7 * Math.PI;
+        const L = spread * (0.72 + 0.28 * Math.sin(i * 2.1));
+        fr(tx, groundY - h, L, a, spread * 0.17, fill);
+        // lit tips: the last third of each frond a shade up, so the crown has
+        // a form instead of being a flat cutout
+        fr(tx + Math.cos(a) * L * 0.66, groundY - h + Math.sin(a) * L * 0.66, L * 0.34, a, spread * 0.1, tip);
+      }
+    };
+    // volcano: body, a lighter sunward flank, and a dark caldera lip
+    const vX = 742 + O, vB = HZ + 4, vH = 176;
+    poly([[vX - 210, vB], [vX - 52, vB - vH], [vX + 44, vB - vH], [vX + 232, vB]], "#141d22");
+    poly([[vX + 8, vB - vH], [vX + 44, vB - vH], [vX + 232, vB], [vX + 96, vB]], "#1b262a");
+    poly([[vX - 52, vB - vH], [vX + 44, vB - vH], [vX + 30, vB - vH + 9], [vX - 38, vB - vH + 9]], "#0a0f12");
+    // ridge + a lit crest line
+    const rg = [];
+    for (let x = -20; x <= W + PAD * 2 + 20; x += 40) rg.push([x, HZ - 26 - 22 * Math.sin(x * 0.011) - 14 * Math.sin(x * 0.03)]);
+    const crest = rg.slice();
+    rg.push([W + PAD * 2 + 20, HZ + 8], [-20, HZ + 8]);
+    poly(rg, "#0f1c1a");
+    for (const p of crest) ng.fillStyle = "#1a2a24", ng.fillRect(Math.round(p[0]) - 20, Math.round(p[1]), 40, 2);
+    // fern ranks, far then near, each with lit tips
+    for (let i = 0; i < 8; i++) tf(-40 + i * 168 + O, HZ + 10, 92 + ((i * 37) % 46), 62 + ((i * 23) % 26), "#0b1a14", "#12271d", ((i % 3) - 1) * 0.3);
+    for (let i = 0; i < 7; i++) tf(30 + i * 196 + O, HZ + 26, 128 + ((i * 51) % 62), 84 + ((i * 31) % 34), "#06120e", "#0b1d15", ((i % 2) ? 1 : -1) * 0.22);
+    // ground: base, a lit strip at the horizon, and tufts so it is not a slab
+    // darker than it was: the near ground has to sit BEHIND a near-black animal
+    // without competing with him, and the tufts supply the texture instead.
+    ng.fillStyle = "#05100c"; ng.fillRect(0, HZ + 18, nc.width, H);
+    ng.fillStyle = "#0a1a13"; ng.fillRect(0, HZ + 18, nc.width, 3);
+    for (let i = 0; i < 150; i++) {
+      const seed = ((i * 2654435761) >>> 0);
+      const gx = (seed % (nc.width - 8)) + 4;
+      const gy = HZ + 24 + ((seed >>> 9) % 84);
+      const gh = 4 + ((seed >>> 17) % 7);
+      ng.fillStyle = ((seed >>> 5) & 3) ? "#08160f" : "#0b1e14";
+      ng.fillRect(gx, gy - gh, 2, gh);
+      ng.fillRect(gx - 2, gy - gh + 2, 2, gh - 2);
+      ng.fillRect(gx + 2, gy - gh + 1, 2, gh - 1);
+    }
+    G.bootScene = nc; G.bootScenePad = PAD; G.bootVX = 742;
+  }
+
   function drawBoot() {
     const t = G.bootT || 0;
     const ease = (a, b) => clamp((t - a) / Math.max(0.0001, b - a), 0, 1);
@@ -11261,18 +11374,21 @@
     cx.save();
     cx.translate(Math.round(-camPan), Math.round(camLift));
 
-    // ---- 1. SKY, banded. Dusk amber at the horizon, deep teal overhead, and
-    // the whole ramp crushed toward black as the gloom takes hold.
-    const BANDS = 16;
-    for (let i = 0; i < BANDS; i++) {
-      const f = i / (BANDS - 1);
-      const r0 = Math.round((22 + 196 * f * f) * (1 - gloom));
-      const g0 = Math.round((40 + 116 * f) * (1 - gloom * 0.88));
-      const b0 = Math.round((58 - 6 * f) * (1 - gloom * 0.5));
-      cx.fillStyle = "rgb(" + r0 + "," + g0 + "," + b0 + ")";
-      cx.fillRect(-40, Math.round(-40 + i * (HZ + 40) / BANDS), W + 80, Math.ceil((HZ + 40) / BANDS) + 1);
+    bootBake();
+    // ---- 1. THE DISTANCE, in two blits. Sky first, then the scene layer at
+    // its parallax offset.
+    cx.drawImage(G.bootSky, 0, -40);
+    const pad = G.bootScenePad;
+    cx.drawImage(G.bootScene, -pad - camPan * 0.55, 0);
+    // ---- 2. ATMOSPHERE. ONE overlay dims everything in the distance as the
+    // light goes. Drawn here so the foreground (fronds, the animal) stays
+    // near-black on its own terms rather than being washed twice.
+    if (gloom > 0.01) {
+      cx.fillStyle = "rgba(3,7,10," + gloom.toFixed(3) + ")";
+      cx.fillRect(-40, -40, W + 80, H + 80);
     }
-    // stars, once it is dark enough to see them
+    const vX = G.bootVX - camPan * 0.55, vBase = HZ + 4, vH = 176;
+    // stars come out over the dimmed sky
     if (gloom > 0.22) {
       const a = Math.min(0.85, (gloom - 0.22) * 1.6);
       for (let i = 0; i < 60; i++) {
@@ -11282,31 +11398,35 @@
         cx.fillRect(sx, sy, (i % 7) ? 2 : 3, (i % 7) ? 2 : 3);
       }
     }
-
-    // ---- 2. FAR PLANE: a volcano, because this is the Mesozoic and it should
-    // be unmistakable in the first half second. Its glow is the only warm
-    // light left once the sky goes out.
-    const far = -camPan * 0.25;
-    const vX = 742 + far, vBase = HZ + 4, vH = 176;
-    pxPoly([[vX - 210, vBase], [vX - 52, vBase - vH], [vX + 44, vBase - vH], [vX + 232, vBase]],
-      "rgb(" + Math.round(20 * (1 - gloom * 0.6)) + "," + Math.round(30 * (1 - gloom * 0.6)) + ",34)");
-    // crater glow + a lazy ash plume that leans with the wind
+    // the crater glow PULSES, so it stays live rather than baked
+    // THE CALDERA. A flat fillRect here read as an orange bar stuck on the
+    // summit. It wants to be lava sitting IN a crater, with heat bleeding up
+    // out of it: a dark lip, a hot pool, and a soft bloom above.
     const glow = 0.45 + 0.55 * Math.sin(t * 0.9);
-    pxPoly([[vX - 52, vBase - vH], [vX + 44, vBase - vH], [vX + 26, vBase - vH + 13], [vX - 34, vBase - vH + 13]],
-      "rgba(255,107,53," + (0.5 + 0.3 * glow).toFixed(3) + ")");
+    const cy0 = vBase - vH;
+    // bloom first, so the lip and pool sit crisply on top of it
+    pxDisc(vX - 4, cy0 - 2, 30 + glow * 8, "rgba(255,120,50," + (0.10 + 0.07 * glow).toFixed(3) + ")");
+    pxDisc(vX - 4, cy0 - 1, 18 + glow * 5, "rgba(255,150,70," + (0.13 + 0.09 * glow).toFixed(3) + ")");
+    // the pool: a shallow lens, brightest at its centre
+    for (let i = 0; i < 5; i++) {
+      const hw = Math.round(30 - i * 5);
+      const a = 0.30 + i * 0.13 + glow * 0.16;
+      cx.fillStyle = "rgba(" + (255) + "," + Math.round(96 + i * 26) + "," + Math.round(38 + i * 14) + "," + Math.min(0.95, a).toFixed(3) + ")";
+      cx.fillRect(vX - 4 - hw, cy0 + 1 + i, hw * 2, 1);
+    }
+    // and the dark lip in front of it, so the lava is contained
+    cx.fillStyle = "#0a0f12";
+    cx.fillRect(vX - 40, cy0 + 6, 72, 3);
+    cx.fillRect(vX - 34, cy0 - 1, 8, 2);
+    cx.fillRect(vX + 16, cy0 - 1, 9, 2);
     for (let i = 0; i < 9; i++) {
       const f = i / 8;
       const px2 = vX - 6 + Math.sin(t * 0.5 + f * 2.4) * (10 + f * 40) + f * 34;
       const py2 = vBase - vH - 8 - f * 46;
-      pxDisc(px2, py2, 7 + f * 17, "rgba(28,26,30," + (0.36 - f * 0.035).toFixed(3) + ")");
+      pxDisc(px2, py2, 7 + f * 17, "rgba(26,24,28," + (0.34 - f * 0.033).toFixed(3) + ")");
     }
-    // distant ridge, so the volcano sits IN a landscape
-    const ridge = [];
-    for (let x = -40; x <= W + 40; x += 40) ridge.push([x, HZ - 26 - 22 * Math.sin(x * 0.011) - 14 * Math.sin(x * 0.03)]);
-    ridge.push([W + 40, HZ + 8], [-40, HZ + 8]);
-    pxPoly(ridge, "rgb(" + Math.round(15 * (1 - gloom * 0.5)) + "," + Math.round(28 * (1 - gloom * 0.5)) + ",26)");
-
-    // ---- 3. MIST. Two slow bands over the ridge — depth for almost nothing.
+    // ---- MIST, live: two slow bands over the ridge. Depth for almost nothing,
+    // and it has to drift, so it is the one distance element that is not baked.
     for (let i = 0; i < 2; i++) {
       const my = HZ - 34 + i * 20;
       const mx = ((t * (9 + i * 6)) % (W + 240)) - 120;
@@ -11314,28 +11434,28 @@
       cx.fillRect(mx - 260, my, 520, 9 + i * 4);
       cx.fillRect(mx + 300, my + 4, 380, 7);
     }
-
-    // ---- 4. MID PLANE: the canopy. Tree ferns and cycads at two removes, the
-    // nearer rank darker, which is what actually sells depth in silhouette.
-    const midFar = "rgb(" + Math.round(11 * (1 - gloom * 0.4)) + "," + Math.round(26 * (1 - gloom * 0.4)) + ",20)";
-    const mid = "rgb(" + Math.round(7 * (1 - gloom * 0.3)) + "," + Math.round(18 * (1 - gloom * 0.3)) + ",14)";
-    const p1 = -camPan * 0.5, p2 = -camPan * 0.8;
-    for (let i = 0; i < 7; i++) {
-      const x = -40 + i * 168 + p1;
-      treeFern(x, HZ + 10, 92 + ((i * 37) % 46), 62 + ((i * 23) % 26), midFar, ((i % 3) - 1) * 0.3);
+    // ---- mid-ground fronds, in front of the baked canopy but BEHIND the
+    // object, so the middle distance moves too without occluding the ball.
+    {
+      const sw = (i, amp) => Math.sin(t * (0.5 + i * 0.13) + i * 2.3) * amp;
+      const mp = -camPan * 0.9;
+      frond(250 + mp, HZ - 96, 150, -0.42 + sw(4, 0.055), 22, "#071310");
+      frond(620 + mp, HZ - 74, 132, -2.72 + sw(5, 0.050), 20, "#071310");
     }
-    for (let i = 0; i < 6; i++) {
-      const x = 30 + i * 196 + p2;
-      treeFern(x, HZ + 26, 128 + ((i * 51) % 62), 84 + ((i * 31) % 34), mid, ((i % 2) ? 1 : -1) * 0.22);
-    }
-    // ---- 5. GROUND
-    cx.fillStyle = "rgb(" + Math.round(9 * (1 - gloom * 0.3)) + "," + Math.round(20 * (1 - gloom * 0.3)) + ",14)";
-    cx.fillRect(-40, HZ + 18, W + 80, H);
 
     // ---- THE OBJECT. Dark, rim-lit, trailing streaks: you read "meteor"
     // because it is small, falling and on fire. It is the football the whole
     // time — the game's own sprite, at an INTEGER scale so it stays crisp.
-    const fall = ease(BOOT.dim + 0.35, BOOT.land);
+    // THE HOLD. Between the reveal and reveal+0.3 the fall barely advances, so
+    // the ball hangs for a beat exactly when the audience is realising what it
+    // is. Comic timing, and it costs one clamp.
+    let fall = ease(BOOT.dim + 0.35, BOOT.land);
+    {
+      const hold0 = (BOOT.reveal - (BOOT.dim + 0.35)) / (BOOT.land - (BOOT.dim + 0.35));
+      const hold1 = (BOOT.reveal + 0.3 - (BOOT.dim + 0.35)) / (BOOT.land - (BOOT.dim + 0.35));
+      if (fall > hold0 && fall < hold1) fall = hold0 + (fall - hold0) * 0.18;
+      else if (fall >= hold1) fall = hold0 + (hold1 - hold0) * 0.18 + (fall - hold1);
+    }
     // the ball stays IN THE SKY. Let it descend into the head band and the
     // silhouette is drawn over its middle, splitting it into two brown chunks —
     // measured, one object at x461-570 cut by the skull. The growing ground
@@ -11386,12 +11506,20 @@
     // ---- 6. NEAR PLANE: giant fronds hanging into frame. This is what makes
     // it a JUNGLE rather than a field at night — the camera is inside the
     // foliage, not looking at it.
+    // SWAY. Static foliage is the single loudest "this is a still image" tell,
+    // and it costs one sine per frond. Each gets its own rate and phase so they
+    // never pulse in unison, and the near ones swing widest because they are
+    // closest to the camera.
     const near = "#030805";
     const np = -camPan * 1.5;
-    frond(-30 + np, -20, 330, 1.02, 46, near);
-    frond(70 + np, -46, 270, 1.24, 36, near);
-    frond(W + 40 + np, -30, 340, 2.05, 48, near);
-    frond(W - 60 + np, -60, 250, 1.92, 34, near);
+    const sway = (i, amp) => Math.sin(t * (0.5 + i * 0.13) + i * 2.3) * amp;
+    frond(-30 + np, -20, 330, 1.02 + sway(0, 0.052), 46, near);
+    frond(70 + np, -46, 270, 1.24 + sway(1, 0.040), 36, near);
+    frond(W + 40 + np, -30, 340, 2.05 + sway(2, 0.048), 48, near);
+    frond(W - 60 + np, -60, 250, 1.92 + sway(3, 0.036), 34, near);
+    // NOTE the two mid-ground swaying fronds are drawn earlier, with the mist,
+    // because anything in this NEAR pass lands on top of the falling ball —
+    // which it did, straight across the football at the reveal.
 
     // ---- 7. THE ANIMAL. A theropod head in profile, authored as a polygon so
     // it reads as a skull and not as a stepped mound. He fills the lower left,
@@ -11408,7 +11536,25 @@
       [196, 25], [152, 17], [102, 23], [56, 43], [18, 77], [-120, 128],
       [-120, 460], [214, 460], [222, 196], [250, 170], [290, 152], [332, 139], [372, 131],
     ];
-    pxPoly(HEAD, "#040a06");
+    // THREE TONES, not one. He is backlit, so he stays very dark — but a single
+    // flat fill reads as a cutout pasted over the scene. A base, a slightly
+    // lifted dorsal plane where the sky grazes his back and snout, and a darker
+    // underside, is enough to make him an object with a form.
+    pxPoly(HEAD, "#030805");
+    // dorsal plane: the upper surface of the skull and snout
+    pxPoly([[152, 17], [196, 25], [232, 43], [262, 65], [300, 79], [338, 85], [372, 96],
+      [368, 104], [332, 95], [296, 88], [258, 74], [228, 52], [194, 34], [150, 26], [104, 32], [58, 52]], "#07100a");
+    // underside of the jaw, darker still
+    pxPoly([[214, 460], [222, 196], [250, 170], [290, 152], [332, 139], [372, 131], [378, 143],
+      [336, 151], [296, 164], [258, 182], [236, 206], [230, 460]], "#020603");
+    // SCUTES along the brow and neck — the osteoderm row is what says
+    // "archosaur" faster than any amount of outline does
+    for (let i = 0; i < 9; i++) {
+      const f = i / 8;
+      const sx2 = 168 - f * 150, sy2 = 20 + f * 34;
+      const h2 = 7 - f * 2.5;
+      pxPoly([[sx2, sy2], [sx2 + 9, sy2 - 1], [sx2 + 5, sy2 - h2]], "#0c1710");
+    }
     // jaw line and a few teeth — tiny marks, but they turn a shape into a jaw
     pxPoly([[236, 176], [372, 132], [378, 140], [242, 186]], "#0a1409");
     for (let i = 0; i < 6; i++) {
@@ -11426,22 +11572,30 @@
     // ---- THE EYE
     const blink = (t > 1.42 && t < 1.56) || (t > 3.34 && t < 3.44);
     const wide = t >= BOOT.reveal ? 1 : 0;
-    const eW = 52, eH = blink ? 5 : Math.round(36 + wide * 12);
-    const eX = 150, eY = 48;
-    pxDisc(eX + eW / 2, eY + eH / 2, Math.max(eW, eH) / 2 + 3, "#020603");
+    // A REAL EYE, in four parts. It was a flat cream disc, which is the one
+    // thing in the frame the viewer looks at, so it has to hold up: a sunken
+    // socket, an AMBER IRIS with a hotter inner ring, a vertical reptile slit,
+    // and one specular block. The slit widens at the punchline.
+    const eH = blink ? 5 : Math.round(34 + wide * 10);
+    const eCx = 176, eCy = 66;
+    pxDisc(eCx, eCy, eH / 2 + 5, "#010402");                    // socket
     if (!blink) {
-      pxDisc(eX + eW / 2, eY + eH / 2, eH / 2, wide ? "#fff3c4" : "#e8e2cf");
-      // a reptile slit that widens at the punchline
-      const pupW = Math.round(9 + wide * 7);
-      const px2 = Math.round(eX + eW / 2 - pupW / 2 + look * 12);
-      const py2 = Math.round(eY + eH / 2 - eH * 0.30 + (1 - look) * eH * 0.30);
-      cx.fillStyle = "#050a04";
-      cx.fillRect(px2, py2, pupW, Math.round(eH * 0.62));
-      cx.fillStyle = "#ffffff";
-      cx.fillRect(px2 + pupW - 4, py2 + 3, 3, 3);
+      pxDisc(eCx, eCy, eH / 2, wide ? "#e8a63a" : "#b8791f");   // iris
+      pxDisc(eCx, eCy, eH / 2 - 4, wide ? "#ffd98a" : "#d99a34"); // hotter centre
+      const pupW = Math.round(7 + wide * 6);
+      const pupH = Math.round(eH * 0.86);
+      const px2 = Math.round(eCx - pupW / 2 + look * 9);
+      const py2 = Math.round(eCy - pupH / 2 + (1 - look) * 5);
+      cx.fillStyle = "#04070a";
+      cx.fillRect(px2, py2, pupW, pupH);                        // the slit
+      cx.fillStyle = "#fffdf2";
+      cx.fillRect(px2 + pupW + 2, py2 + 4, 3, 3);               // specular
+      // a lid line over the top of the eye so it sits IN the skull
+      cx.fillStyle = "#060f09";
+      cx.fillRect(eCx - eH / 2 - 4, eCy - eH / 2 - 2, eH + 8, 3);
     } else {
       cx.fillStyle = "#0a1207";
-      cx.fillRect(eX + 6, eY + eH / 2, eW - 12, 4);
+      cx.fillRect(eCx - 20, eCy - 1, 40, 4);
     }
     cx.restore();
 
@@ -11492,6 +11646,59 @@
     if (t >= BOOT.land && flash > 0) {
       cx.fillStyle = "rgba(255,244,214," + (flash * 0.85).toFixed(3) + ")";
       cx.fillRect(0, 0, W, H);
+    }
+    // ---- THE PAYOFF. A flash on its own is a cut, not an impact. Three things
+    // land together: a dust ring running out along the ground, debris thrown up
+    // out of it, and — the part that sells the scale — every pterosaur in the
+    // canopy breaking for the sky at once.
+    if (t >= BOOT.land) {
+      const bt = t - BOOT.land;
+      // dust ring: expanding, thinning, hugging the turf
+      if (bt < 1.5) {
+        const rr = 30 + bt * 300;
+        const a = Math.max(0, 0.5 - bt * 0.34);
+        for (let k = 0; k < 3; k++) {
+          const r2 = rr - k * 22;
+          if (r2 < 8) continue;
+          cx.fillStyle = "rgba(196,186,150," + (a * (1 - k * 0.3)).toFixed(3) + ")";
+          for (let dy = -2; dy <= 2; dy++) {
+            const hw = Math.round(r2 * Math.sqrt(Math.max(0, 1 - (dy / 2.6) * (dy / 2.6))));
+            cx.fillRect(objX - hw, HZ + 48 + dy * 4, 5, 3);
+            cx.fillRect(objX + hw - 5, HZ + 48 + dy * 4, 5, 3);
+          }
+        }
+      }
+      // debris thrown up out of the ring
+      if (bt < 1.1) {
+        for (let i = 0; i < 22; i++) {
+          const sd = ((i * 2654435761) >>> 0);
+          const dir = (sd & 1) ? 1 : -1;
+          const sp = 90 + (sd >>> 7) % 200;
+          const dx2 = objX + dir * sp * bt * (0.5 + ((sd >>> 3) % 5) / 10);
+          const dy2 = HZ + 44 - (170 + ((sd >>> 11) % 90)) * bt + 300 * bt * bt;
+          if (dy2 > HZ + 52) continue;
+          cx.fillStyle = "rgba(176,166,132," + Math.max(0, 0.75 - bt * 0.7).toFixed(3) + ")";
+          cx.fillRect(Math.round(dx2), Math.round(dy2), 3, 3);
+        }
+      }
+      // PTEROSAURS. Nine of them off the canopy, each on its own heading, wings
+      // beating on its own phase. Two authored cels — wings up, wings down —
+      // because a flap is what makes a silhouette a living thing.
+      for (let i = 0; i < 9; i++) {
+        const ph = i * 0.83;
+        const bx = Math.round(180 + i * 74 - bt * (86 + i * 16));
+        const by = Math.round(HZ - 52 - bt * (54 + (i % 3) * 22) - Math.sin(bt * 5 + ph) * 7);
+        if (bx < -30 || by < -24) continue;
+        cx.fillStyle = "#0b1712";
+        if (Math.sin(bt * 12 + ph) > 0) {
+          cx.fillRect(bx - 7, by, 6, 2); cx.fillRect(bx + 2, by, 6, 2);
+          cx.fillRect(bx - 1, by + 1, 3, 2);
+        } else {
+          cx.fillRect(bx - 7, by - 4, 5, 2); cx.fillRect(bx + 3, by - 4, 5, 2);
+          cx.fillRect(bx - 3, by - 2, 3, 2); cx.fillRect(bx + 1, by - 2, 3, 2);
+          cx.fillRect(bx - 1, by, 3, 2);
+        }
+      }
     }
     // ---- and out to the title
     const out = smooth(ease(BOOT.land + 0.5, BOOT_LEN));
