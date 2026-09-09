@@ -3903,6 +3903,7 @@
     T = (0.55 + dist(qb, to) / 470) * (0.8 + 0.28 * pull);
     const read = assessPassWindow(qb, rec, to, T);
     G.ball = { mode: "air", kind: "lob", from: { x: qb.x, y: qb.y }, to, t: 0, T, x: qb.x, y: qb.y, z: 12, holder: null, target: rec, read, pull };
+    G.qbImprov = false;   // nobody is improvising once the ball is gone (see the man-coverage rally)
     qb.attCount = (qb.attCount || 0) + 1;
     G.phase = "air"; G.aim = null; G.slingAnchor = null; qb.state = "idle"; qb.throwT = 0.3; playPose(qb, "throw", 0.32);
     controlIntendedReceiver(to, rec);
@@ -3952,6 +3953,7 @@
     const d = dist(qb, tgt), T = d / 430;
     const read = assessPassWindow(qb, rec, tgt, T);
     G.ball = { mode: "air", kind: "bullet", from: { x: qb.x, y: qb.y }, to: tgt, t: 0, T, x: qb.x, y: qb.y, z: 14, holder: null, target: rec, read };
+    G.qbImprov = false;
     G.phase = "air"; G.aim = null; G.slingAnchor = null; qb.state = "idle"; qb.throwT = 0.3; playPose(qb, "throw", 0.32);
     controlIntendedReceiver(tgt, rec);
     if (G.carrier === qb) { G.carrier = null; qb.canPass = false; qb.hasThrown = true; }
@@ -6706,7 +6708,7 @@
         // G.ball.holder.x without checking it, and it left the sling armed
         const qb = G.ball.holder;
         G.ball = { mode: "air", kind: "lob", away: true, from: { x: qb.x, y: qb.y }, to: { x: qb.x + 160, y: TOP - 40 }, t: 0, T: 0.8, x: qb.x, y: qb.y, z: 12, holder: null };
-        G.phase = "air"; G.aim = null; G.slingAnchor = null; G.slingPull = null;
+        G.phase = "air"; G.aim = null; G.slingAnchor = null; G.slingPull = null; G.qbImprov = false;
         qb.throwT = 0.3; playPose(qb, "throw", 0.32);
         sfx.throw();
       }
@@ -8468,7 +8470,17 @@
         if (G.carrier) { pursue(e, G.carrier, sp * 1.0, dt); break; }
         // scramble rally: a man defender whose receiver has FINISHED his
         // route plasters off and closes on the improvising QB
-        if (G.qbImprov && (!e.coverSlot || !G.players.some((p) => p.role === e.coverSlot &&
+        // THE FREEZE ON A LATE THROW (owner report 2026-09-09: "QB ran backwards
+        // and threw pretty far forward"). G.qbImprov is recomputed AFTER this
+        // entity pass each tick, so on the first frame after an improvising QB
+        // released the ball the flag was still true while G.ball.holder was
+        // already null, and pursue(e, null) threw out of update(). update()
+        // threw before it could ever recompute the flag, so it threw again on
+        // every frame after: the field froze under "Cannot read properties of
+        // null (reading 'x')" for the rest of the session. The rally needs a
+        // man to rally to — no holder, no rally. (The throw paths also drop the
+        // flag now, so this is belt and braces.)
+        if (G.qbImprov && G.ball.holder && (!e.coverSlot || !G.players.some((p) => p.role === e.coverSlot &&
           p.state === "route" && p.path && p.pathI < p.path.length))) {
           pursue(e, G.ball.holder, sp * 0.92, dt); break;
         }
@@ -8520,7 +8532,7 @@
         if (G.carrier) { pursue(e, G.carrier, sp * 1.0, dt); break; }
         // scramble rally: underneath zones collapse on the improvising QB;
         // safeties keep the deep lid so the late bomb still gets punished
-        if (G.qbImprov && e.role !== "S") { pursue(e, G.ball.holder, sp * 0.9, dt); break; }
+        if (G.qbImprov && G.ball.holder && e.role !== "S") { pursue(e, G.ball.holder, sp * 0.9, dt); break; }
         if (e.zone) {
           // smart zone: don't just stand on your landmark — pick up the most
           // dangerous receiver entering your area and shade onto him
