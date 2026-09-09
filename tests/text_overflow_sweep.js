@@ -338,6 +338,30 @@ const findings = [];
 const scenes = [];
 let QUIET = false;
 const say = (m) => { if (!QUIET) console.log(m); };
+// OVERLAP -- two framed boxes (strokeRect borders) that intersect while
+// neither contains the other. A frame drawn INSIDE a panel is a design
+// (nested); a frame whose top edge lands inside the panel above it is a
+// layout bug (owner report 2026-09-09: the pregame rampager card's top sat
+// nine pixels into the starter columns). Touching edges are fine.
+function overlaps(rects, where) {
+  const boxes = rects.filter(r => r.kind === "stroke" && r.w >= 40 && r.h >= 24 && r.alpha >= 0.3);
+  const out = [];
+  const str = (r) => "box(" + r.x.toFixed(0) + "," + r.y.toFixed(0) + "," + r.w.toFixed(0) + "x" + r.h.toFixed(0) + ")";
+  const contains = (p, q) => p.x <= q.x + 1 && p.y <= q.y + 1 && p.x + p.w >= q.x + q.w - 1 && p.y + p.h >= q.y + q.h - 1;
+  for (let i = 0; i < boxes.length; i++) {
+    for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      const ox = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x);
+      const oy = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+      if (ox <= 2 || oy <= 2) continue;
+      if (contains(a, b) || contains(b, a)) continue;
+      out.push({ kind: "OVERLAP", where, text: str(a), other: str(b), fontPx: 0,
+        measuredPx: +ox.toFixed(0), boxPx: +oy.toFixed(0), overflowPx: +Math.min(ox, oy).toFixed(1),
+        at: "the boxes share a " + ox.toFixed(0) + "x" + oy.toFixed(0) + "px region" });
+    }
+  }
+  return out;
+}
 function shot(label) {
   let f;
   try { f = capture(); }
@@ -347,7 +371,7 @@ function shot(label) {
     say("  !! " + label + " " + why); G().lastErr = null;
     scenes.push({ label, ok: false, why }); return;
   }
-  const r = analyze(f, label);
+  const r = analyze(f, label).concat(overlaps(f.rects, label));
   say("  " + label + ": " + f.texts.length + " strings " + f.rects.length + " rects -> " + r.length);
   scenes.push({ label, ok: true, texts: f.texts.length, rects: f.rects.length, hits: r.length });
   findings.push(...r);
@@ -665,7 +689,7 @@ async function drive(opts) {
   // floating card), and two strings printed on one baseline are every bit as
   // unreadable as one hanging out of its card.
   const gating = uniq.filter(f => f.kind === "BOUNDS" || f.kind === "VBOUNDS" ||
-    f.kind === "COLLIDE" || (f.kind === "BOX" && f.confidence === "HIGH"));
+    f.kind === "COLLIDE" || f.kind === "OVERLAP" || (f.kind === "BOX" && f.confidence === "HIGH"));
   // Once nothing can leave its box, the only cost left is WORDS: fitText
   // shrinks and then ellipsizes. The game records every string it actually had
   // to cut, so that cost is a list rather than a surprise in a screenshot.
@@ -691,7 +715,7 @@ function report(res) {
   }
   console.log("");
   console.log(res.scenes.length + " scenes driven, " + bad.length + " failed to render");
-  console.log(res.gating.length + " gating hit(s) (BOUNDS, VBOUNDS, COLLIDE, or BOX at HIGH confidence)");
+  console.log(res.gating.length + " gating hit(s) (BOUNDS, VBOUNDS, COLLIDE, OVERLAP, or BOX at HIGH confidence)");
 }
 
 // analyze and span are exported so tests/test_textboxes.js can hand the

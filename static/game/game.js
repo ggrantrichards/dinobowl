@@ -1556,6 +1556,10 @@
   // ONE shared truth for the STOP CLOCK chip: the draw and the tap hotspot
   // must always agree, or taps get eaten by an invisible box
   function stopChipVisible() {
+    // 2.0: an overlay that owns the screen (box score, help card) hides the
+    // chip AND its hotspot — it used to draw straight across the top-left of
+    // both, the one box-on-box overlap the sweep found in 448 screens.
+    if (G.showBox || G.help) return false;
     return G.state === "dead" && !G.practice && !G.patMode && !G.clockStopped && !G.celebrate &&
       G.timeouts && G.timeouts[G.humanB ? G.drive : "A"] > 0 && G.clock > 0;
   }
@@ -4825,6 +4829,7 @@
   // length of this beat. G.tape is cleared only in snap(), so at this beat it
   // still holds the play that just happened.
   function highlightBeat() {
+    if (G.showBox || G.help) return false;   // same rule as stopChipVisible
     return G.state === "dead" && !G.replay && !!G.tape && G.tape.length >= 50 &&
       ((G.score.A + G.score.B) !== (G.hlScore0 || 0) ||
         !!(G.lastDead && G.lastDead.turnover) || G.down > 4);
@@ -12144,20 +12149,23 @@
       if (sheet && sheet[spec]) {
         const t = performance.now() / 200 | 0;
         const fi2 = t % sheet[spec].R.length;
-        cx.drawImage(sheet[spec].R[fi2], cx0 - 32, 306, 64, 64);
+        cx.drawImage(sheet[spec].R[fi2], cx0 - 32, 325, 64, 64);
         // the signature feature rides the animated frame's pixels
         if (RAMP_FEAT[abbr]) drawQBFeature(RAMP_FEAT[abbr], cx0 - 32,
-          306 + frameBobDy(sheet[spec], "R", fi2) * (64 / sheet[spec].h), 64);
+          325 + frameBobDy(sheet[spec], "R", fi2) * (64 / sheet[spec].h), 64);
       }
-      cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#ff5533"; cx.fillText("★ RAMPAGER · " + pos, cx0, 300);
+      cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#ff5533"; cx.fillText("★ RAMPAGER · " + pos, cx0, 319);
       // TEXT BOX: half of the 520px showcase card, centred on cx0. The
       // 16-character cut turned CHRISTIAN GONZALEZ into CHRISTIAN GONZAL for
       // no reason at all -- 18 characters is 180px in 240px of room.
-      cx.fillStyle = "#fff"; fitText(info[0].toUpperCase(), cx0, 382, 240, 10, 8);
-      cx.font = PF(9); cx.fillStyle = "#ffd23f"; cx.fillText(pk.label, cx0, 401);
+      cx.fillStyle = "#fff"; fitText(info[0].toUpperCase(), cx0, 401, 240, 10, 8);
+      cx.font = PF(9); cx.fillStyle = "#ffd23f"; cx.fillText(pk.label, cx0, 420);
     };
-    cx.fillStyle = "rgba(255,85,51,.08)"; cx.fillRect(W / 2 - 260, 285, 520, 150);
-    cx.strokeStyle = "#ff5533"; cx.strokeRect(W / 2 - 260, 285, 520, 150);
+    // 2.0 (owner): this card's top edge was drawn at y=285, nine pixels INTO
+    // the starter columns above it (they end at 294). It sits at 304 now, a
+    // clean 10px below them, and everything inside moved down with it.
+    cx.fillStyle = "rgba(255,85,51,.08)"; cx.fillRect(W / 2 - 260, 304, 520, 150);
+    cx.strokeStyle = "#ff5533"; cx.strokeRect(W / 2 - 260, 304, 520, 150);
     showRamp(G.my, W / 2 - 150, "A");
     showRamp(G.opp, W / 2 + 150, "B");
     // passive descriptions — WRAPPED inside each half of the card. Unwrapped
@@ -12175,8 +12183,8 @@
       lines.forEach((l, i) => cx.fillText(l, cxp, y0 + i * 11));
     };
     cx.textAlign = "center"; cx.font = PF(7); cx.fillStyle = "#9db0a4";
-    wrapText((PASSIVES[(RAMPAGERS[G.my] || [0, "truck"])[1]]).desc, W / 2 - 132, 414, 226, 2);
-    wrapText((PASSIVES[(RAMPAGERS[G.opp] || [0, "truck"])[1]]).desc, W / 2 + 132, 414, 226, 2);
+    wrapText((PASSIVES[(RAMPAGERS[G.my] || [0, "truck"])[1]]).desc, W / 2 - 132, 433, 226, 2);
+    wrapText((PASSIVES[(RAMPAGERS[G.opp] || [0, "truck"])[1]]).desc, W / 2 + 132, 433, 226, 2);
 
     cx.font = PF(13); cx.fillStyle = Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6";
     cx.fillText("PRESS ENTER / TAP TO KICK OFF", W / 2, H - 34);
