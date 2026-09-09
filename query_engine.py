@@ -161,7 +161,7 @@
 #             col = st[0]
 #             conds.append({"kind": "rank", "col": col, "n": 1,
 #                           "asc": col in ASCENDING_GOOD})
-#             notes.append(f"led the league in {DISPLAY[col]}")
+#             notes.append(f"led the league in {DISPLAY.get(col, col)}")
 
 #     # --- top-N / bottom-N ranks ---
 #     # A single "top N" can distribute across several stats joined by "and"/commas,
@@ -194,7 +194,7 @@
 #             arrow = "lowest" if wants_low else "highest"
 #             word = ("bottom" if direction == "bottom" and col not in ASCENDING_GOOD
 #                     else "top")
-#             notes.append(f"{word} {n} in {DISPLAY[col]} ({arrow})")
+#             notes.append(f"{word} {n} in {DISPLAY.get(col, col)} ({arrow})")
 #             pos = s_end
 #             found_any = True
 #         if not found_any:
@@ -210,7 +210,7 @@
 #         if not st:
 #             continue
 #         col = st[0]
-        
+
 #         # Determine exact operator
 #         if op_word in ("over", "more than", "above"):
 #             op = ">"
@@ -245,7 +245,7 @@
 #         conds.append({"kind": "threshold", "col": col, "op": ">=" if gte else "<=",
 #                       "value": num})
 #         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
-#         notes.append(f"{DISPLAY[col]} {'≥' if gte else '≤'} {shown}")
+#         notes.append(f"{DISPLAY.get(col, col)} {'≥' if gte else '≤'} {shown}")
 
 #     if not conds:
 #         raise QueryError(
@@ -283,7 +283,7 @@
 #         elif c["kind"] == "rank":
 #             col = c["col"]
 #             is_natively_asc = col in ASCENDING_GOOD
-            
+
 #             # If the user is asking for the natural "best" direction, use precomputed ranks
 #             if c["asc"] == is_natively_asc:
 #                 rank_col = f"{col}_rank"
@@ -319,7 +319,121 @@ from rapidfuzz import process, fuzz, utils
 
 pd.set_option('future.no_silent_downcasting', True)
 
+# ORDER MATTERS: _find_stat takes the alias that starts EARLIEST in the text,
+# and on a tie the one listed FIRST. So every phrase must appear before any
+# shorter phrase it begins with ("sack percentage" before "sack", "passer
+# rating allowed" before "passer rating", "pressure rate" before "pressures").
+# The catch-all stats block (2.1) sits at the top for exactly that reason.
 STAT_ALIASES = [
+    # ---- efficiency: EPA, CPOE, QBR, passer rating
+    ("passing epa per play", "pass_epa_per_play"), ("epa per dropback", "pass_epa_per_play"),
+    ("passing epa per dropback", "pass_epa_per_play"), ("epa per pass play", "pass_epa_per_play"),
+    ("rushing epa per carry", "rush_epa_per_carry"), ("epa per carry", "rush_epa_per_carry"),
+    ("epa per rush", "rush_epa_per_carry"), ("receiving epa per target", "rec_epa_per_target"),
+    ("epa per target", "rec_epa_per_target"), ("epa per play", "epa_per_play"), ("epa/play", "epa_per_play"),
+    ("passing epa", "pass_epa"), ("pass epa", "pass_epa"), ("rushing epa", "rush_epa"), ("rush epa", "rush_epa"),
+    ("receiving epa", "rec_epa"), ("rec epa", "rec_epa"), ("epa", "epa_per_play"),
+    ("ngs cpoe", "cpoe_ngs"), ("completion percentage over expected", "cpoe"),
+    ("completion percentage above expectation", "cpoe"), ("completion % over expected", "cpoe"), ("cpoe", "cpoe"),
+    ("expected completion percentage", "xcomp_pct"), ("expected completion %", "xcomp_pct"),
+    ("total qbr", "qbr"), ("espn qbr", "qbr"), ("qbr", "qbr"),
+    ("passer rating allowed", "cov_rating"), ("rating allowed", "cov_rating"),
+    ("passer rating", "passer_rating"), ("qb rating", "passer_rating"), ("quarterback rating", "passer_rating"),
+    # ---- per-attempt / per-game rates
+    ("passing yards per game", "pass_ypg"), ("pass yards per game", "pass_ypg"), ("passing yards/game", "pass_ypg"),
+    ("rushing yards per game", "rush_ypg"), ("rush yards per game", "rush_ypg"),
+    ("receiving yards per game", "rec_ypg"), ("rec yards per game", "rec_ypg"),
+    ("yards per game", "total_ypg"), ("yards/game", "total_ypg"), ("y/g", "total_ypg"), ("ypg", "total_ypg"),
+    ("yards per attempt", "ypa"), ("yards/attempt", "ypa"), ("y/a", "ypa"), ("ypa", "ypa"),
+    ("yards per carry", "ypc"), ("yards per rush", "ypc"), ("y/c", "ypc"), ("ypc", "ypc"),
+    ("yards per reception", "ypr"), ("yards per catch", "ypr"), ("y/r", "ypr"), ("ypr", "ypr"),
+    ("catch percentage", "catch_pct"), ("catch rate", "catch_pct"), ("catch pct", "catch_pct"), ("catch %", "catch_pct"),
+    ("touchdown percentage", "td_pct"), ("td percentage", "td_pct"), ("td rate", "td_pct"), ("td%", "td_pct"), ("td %", "td_pct"),
+    ("total yards", "total_yards"), ("yards from scrimmage", "total_yards"), ("scrimmage yards", "total_yards"),
+    ("all-purpose yards", "total_yards"),
+    # ---- sacks, ball security
+    ("sack percentage", "sack_pct"), ("sack rate", "sack_pct"), ("sack pct", "sack_pct"), ("sack%", "sack_pct"),
+    ("sack %", "sack_pct"), ("sk%", "sack_pct"), ("sk %", "sack_pct"),
+    ("sack to blitz ratio", "sack_per_blitz"), ("sacks per blitz", "sack_per_blitz"), ("sack-to-blitz", "sack_per_blitz"),
+    ("sack yards lost", "sack_yards_lost"), ("sacks allowed", "sacks_taken"), ("times sacked", "sacks_taken"),
+    ("sacks taken", "sacks_taken"), ("sacks suffered", "sacks_taken"), ("sacked", "sacks_taken"),
+    ("sacks caused", "sacks"), ("sack yards", "sack_yards"),
+    ("turnover percentage", "turnover_pct"), ("turnover rate", "turnover_pct"), ("turnover pct", "turnover_pct"),
+    ("turnover%", "turnover_pct"), ("turnover %", "turnover_pct"), ("to%", "turnover_pct"),
+    ("turnovers", "turnovers"), ("giveaways", "turnovers"),
+    ("fumbles lost", "fumbles_lost"), ("lost fumbles", "fumbles_lost"),
+    ("fumble recoveries", "fumble_recoveries"), ("fumbles recovered", "fumble_recoveries"), ("recovered fumbles", "fumble_recoveries"),
+    ("fr", "fumble_recoveries"), ("forced fumbles", "forced_fumbles"), ("fumbles forced", "forced_fumbles"), ("ff", "forced_fumbles"),
+    ("fumbles", "fumbles"), ("fumble", "fumbles"),
+    ("int%", "int_rate"), ("int %", "int_rate"),
+    # ---- pass rush, pressure, blitz (PFR advanced + snap counts)
+    ("pass rush win rate", "pressure_rate"), ("pass-rush win rate", "pressure_rate"), ("prwr", "pressure_rate"),
+    ("run stop win rate", "tackles_for_loss"), ("run defense win rate", "tackles_for_loss"), ("rswr", "tackles_for_loss"),
+    ("pressure rate", "pressure_rate"), ("pressure percentage", "pressure_rate"), ("pressure pct", "pressure_rate"),
+    ("pressure%", "pressure_rate"), ("pressure %", "pressure_rate"), ("pressures per snap", "pressure_rate"),
+    ("pressures", "pressures"), ("pressure", "pressures"),
+    ("blitz percentage", "blitz_pct"), ("blitz rate", "blitz_pct"), ("blitz pct", "blitz_pct"), ("blitz%", "blitz_pct"),
+    ("blitz %", "blitz_pct"), ("blitzes", "blitzes"), ("blitz", "blitzes"),
+    ("times blitzed", "times_blitzed"), ("blitzed", "times_blitzed"),
+    ("pressured percentage", "pressured_pct"), ("pressure faced", "pressured_pct"), ("pressured rate", "pressured_pct"),
+    ("times pressured", "times_pressured"), ("pressured", "times_pressured"),
+    ("times hurried", "times_hurried"), ("hurries", "hurries"), ("hurry", "hurries"),
+    ("qb hit rate", "qb_hit_rate"), ("quarterback hit rate", "qb_hit_rate"),
+    ("qb hits", "qb_hits"), ("quarterback hits", "qb_hits"), ("times hit", "times_hit"),
+    ("qb knockdowns", "qb_knockdowns"), ("knockdowns", "qb_knockdowns"),
+    ("pocket time", "pocket_time"), ("time to throw", "time_to_throw"), ("time-to-throw", "time_to_throw"),
+    ("aggressiveness", "aggressiveness"), ("throwaways", "throwaways"), ("scrambles", "scrambles"),
+    ("bad throw percentage", "bad_throw_pct"), ("bad throw rate", "bad_throw_pct"), ("bad throws", "bad_throws"),
+    ("on target percentage", "on_target_pct"), ("on-target percentage", "on_target_pct"), ("on target rate", "on_target_pct"),
+    ("intended air yards per attempt", "iay_per_att"), ("air yards to the sticks", "air_yards_to_sticks"),
+    ("air yards to sticks", "air_yards_to_sticks"),
+    # ---- coverage, tackling (PFR advanced)
+    ("completion percentage allowed", "cov_cmp_pct"), ("completion % allowed", "cov_cmp_pct"), ("cmp% allowed", "cov_cmp_pct"),
+    ("yards allowed", "cov_yards"), ("touchdowns allowed", "cov_tds"), ("tds allowed", "cov_tds"),
+    ("completions allowed", "cov_completions"), ("targets as nearest defender", "cov_targets"), ("coverage targets", "cov_targets"),
+    ("times targeted", "cov_targets"), ("missed tackle percentage", "missed_tackle_pct"), ("missed tackle rate", "missed_tackle_pct"),
+    ("missed tackles", "missed_tackles"), ("solo tackles", "tackles_solo"), ("tackles per game", "tackles_per_game"),
+    ("tfl yards", "tfl_yards"), ("interception yards", "def_int_yards"), ("int yards", "def_int_yards"),
+    ("defensive safeties", "safeties"), ("safeties scored", "safeties"),
+    ("defensive snaps", "def_snaps"), ("offensive snaps", "off_snaps"), ("special teams snaps", "st_snaps"), ("snaps", "def_snaps"),
+    # ---- receiving / rushing tracking (NGS, PFR)
+    ("yards after catch above expectation", "yac_oe"), ("yac over expected", "yac_oe"), ("yac above expectation", "yac_oe"),
+    ("yards after catch", "rec_yac"), ("yac", "rec_yac"), ("yards before contact per attempt", "ybc_per_att"),
+    ("yards before contact", "ybc_per_att"), ("yards after contact per attempt", "yac_per_att"), ("yards after contact", "yac_per_att"),
+    ("broken tackles", "broken_tackles_rush"), ("separation", "separation"), ("cushion", "cushion"),
+    ("average depth of target", "adot"), ("adot", "adot"), ("drop percentage", "drop_pct"), ("drop rate", "drop_pct"),
+    ("drop pct", "drop_pct"), ("drops", "drops"), ("dropped passes", "drops"),
+    ("rush yards over expected per attempt", "ryoe_per_att"), ("ryoe per attempt", "ryoe_per_att"), ("ryoe/att", "ryoe_per_att"),
+    ("rush yards over expected", "ryoe"), ("rushing yards over expected", "ryoe"), ("ryoe", "ryoe"),
+    ("rush percentage over expected", "rush_pct_oe"), ("stacked box rate", "stacked_box_pct"), ("eight defenders in the box", "stacked_box_pct"),
+    ("rushing efficiency", "rush_efficiency"), ("time to line of scrimmage", "time_to_los"), ("time to los", "time_to_los"),
+    ("passing air yards", "pass_air_yards"), ("receiving air yards", "rec_air_yards"), ("air yards share", "air_yards_share"),
+    ("intended air yards", "rec_iay"), ("target share", "target_share"), ("wopr", "wopr"), ("racr", "racr"), ("pacr", "pacr"),
+    ("passing first downs", "pass_first_downs"), ("rushing first downs", "rush_first_downs"), ("receiving first downs", "rec_first_downs"),
+    # ---- special teams, misc
+    ("field goal percentage", "fg_pct"), ("fg percentage", "fg_pct"), ("fg%", "fg_pct"), ("fg %", "fg_pct"),
+    ("field goals made", "fg_made"), ("field goals", "fg_made"), ("fgm", "fg_made"), ("field goal attempts", "fg_att"),
+    ("long field goal", "fg_long"), ("longest field goal", "fg_long"), ("extra points", "pat_made"), ("pats", "pat_made"),
+    ("punts inside the 20", "punts_inside_20"), ("punts inside 20", "punts_inside_20"), ("punt yards", "punt_yards"), ("punts", "punts"),
+    ("punt return yards", "punt_return_yards"), ("punt returns", "punt_returns"),
+    ("kick return yards", "kickoff_return_yards"), ("kickoff return yards", "kickoff_return_yards"), ("kick returns", "kickoff_returns"),
+    ("return touchdowns", "special_teams_tds"), ("special teams touchdowns", "special_teams_tds"), ("return tds", "special_teams_tds"),
+    ("penalty yards", "penalty_yards"), ("penalties", "penalties"),
+    ("games played", "games"), ("games", "games"),
+    ("standard fantasy points", "fantasy_std"), ("fantasy points standard", "fantasy_std"),
+    # ---- defensive touchdowns split, coverage counting stats
+    ("interception return touchdowns", "int_tds"), ("interception return tds", "int_tds"), ("pick sixes", "int_tds"),
+    ("pick-sixes", "int_tds"), ("int tds", "int_tds"), ("inttd", "int_tds"), ("int td", "int_tds"),
+    ("fumble return touchdowns", "fumble_rec_tds"), ("fumble return tds", "fumble_rec_tds"), ("frtd", "fumble_rec_tds"),
+    ("fumble recovery touchdowns", "fumble_rec_tds"), ("interceptions plus passes defended", "int_plus_pd"),
+    ("ints plus pds", "int_plus_pd"), ("ball production", "int_plus_pd"),
+    ("pd", "passes_defended"), ("pds", "passes_defended"), ("passes defensed", "passes_defended"),
+    # ---- bio
+    ("height", "height"), ("tall", "height"), ("weight", "weight"), ("weigh", "weight"), ("pounds", "weight"), ("lbs", "weight"),
+    ("draft round", "draft_round"), ("round drafted", "draft_round"), ("draft pick", "draft_pick"), ("overall pick", "draft_pick"),
+    ("draft year", "draft_year"), ("drafted in", "draft_year"), ("years of experience", "experience"), ("experience", "experience"),
+    ("seasons played", "experience"), ("rookie season", "rookie_season"),
+    # ---- the originals
     ("passing yards", "passing_yards"), ("pass yards", "passing_yards"),
     ("passing touchdowns", "passing_tds"), ("passing tds", "passing_tds"),
     ("pass tds", "passing_tds"), ("passing td", "passing_tds"),
@@ -420,14 +534,110 @@ DISPLAY = {
     "carries": "carries", "receiving_yards": "receiving yards",
     "receiving_tds": "receiving TDs", "receptions": "receptions",
     "targets": "targets", "sacks_taken": "sacks taken", "fantasy_ppr": "fantasy pts (PPR)",
-    "age": "age",
+    "fantasy_std": "fantasy pts (standard)", "age": "age", "games": "games",
     "tackles": "tackles", "tackles_for_loss": "tackles for loss", "sacks": "sacks",
     "def_interceptions": "interceptions made", "passes_defended": "passes defended",
     "forced_fumbles": "forced fumbles", "def_tds": "defensive TDs",
+    # efficiency
+    "epa_per_play": "EPA per play", "pass_epa_per_play": "passing EPA per play", "rush_epa_per_carry": "rushing EPA per carry",
+    "rec_epa_per_target": "receiving EPA per target", "pass_epa": "passing EPA", "rush_epa": "rushing EPA", "rec_epa": "receiving EPA",
+    "cpoe": "CPOE", "cpoe_ngs": "CPOE (NGS)", "xcomp_pct": "expected completion %", "qbr": "Total QBR",
+    "qbr_raw": "raw QBR", "qbr_pts_added": "QBR points added", "qbr_plays": "QBR plays",
+    "passer_rating": "passer rating", "td_pct": "TD %", "ypa": "yards/attempt", "ypc": "yards/carry", "ypr": "yards/reception",
+    "catch_pct": "catch %", "pass_ypg": "passing yards/game", "rush_ypg": "rushing yards/game", "rec_ypg": "receiving yards/game",
+    "total_ypg": "yards/game", "total_yards": "total yards", "touches": "touches",
+    "pacr": "PACR", "racr": "RACR", "target_share": "target share", "air_yards_share": "air-yards share", "wopr": "WOPR",
+    # sacks, ball security
+    "sack_pct": "sack %", "sack_yards_lost": "sack yards lost", "sack_fumbles": "sack fumbles", "sack_fumbles_lost": "sack fumbles lost",
+    "turnovers": "turnovers", "turnover_pct": "turnover %", "fumbles": "fumbles", "fumbles_lost": "fumbles lost",
+    "rushing_fumbles": "rushing fumbles", "receiving_fumbles": "receiving fumbles",
+    "fumble_recoveries": "fumble recoveries", "fumble_rec_own": "own fumbles recovered", "fumble_rec_tds": "fumble-return TDs",
+    "int_tds": "interception-return TDs", "int_plus_pd": "INT + PD", "def_int_yards": "interception return yards",
+    # pass rush / pressure / blitz
+    "pressures": "pressures", "pressure_rate": "pressure rate (pressures per defensive snap; ESPN PRWR is not public)",
+    "hurries": "hurries", "qb_knockdowns": "QB knockdowns", "qb_hits": "QB hits", "qb_hit_rate": "QB hit rate",
+    "blitzes": "blitzes", "blitz_pct": "blitz %", "sack_per_blitz": "sacks per blitz", "sack_yards": "sack yards",
+    "times_blitzed": "times blitzed", "times_hurried": "times hurried", "times_hit": "times hit", "times_pressured": "times pressured",
+    "pressured_pct": "pressured %", "pocket_time": "pocket time (s)", "time_to_throw": "time to throw (s)",
+    "aggressiveness": "aggressiveness", "throwaways": "throwaways", "scrambles": "scrambles",
+    "bad_throws": "bad throws", "bad_throw_pct": "bad throw %", "on_target_pct": "on-target %",
+    "iay_per_att": "intended air yards/attempt", "air_yards_to_sticks": "air yards to sticks", "ngs_cay": "completed air yards (avg)",
+    "ngs_iay": "intended air yards (avg)", "air_yards_diff": "air-yards differential", "max_completed_air": "longest completed air distance",
+    # coverage / tackling
+    "cov_targets": "targets (nearest defender)", "cov_completions": "completions allowed", "cov_cmp_pct": "completion % allowed",
+    "cov_yards": "yards allowed", "cov_tds": "TDs allowed", "cov_rating": "passer rating allowed", "cov_adot": "depth of target allowed",
+    "missed_tackles": "missed tackles", "missed_tackle_pct": "missed tackle %", "pfr_comb_tackles": "combined tackles (PFR)",
+    "tackles_solo": "solo tackles", "tackles_per_game": "tackles/game", "tfl_yards": "TFL yards", "safeties": "safeties",
+    "def_fumbles": "own fumbles (defense)", "def_snaps": "defensive snaps", "off_snaps": "offensive snaps", "st_snaps": "special-teams snaps",
+    # receiving / rushing tracking
+    "rec_yac": "yards after catch", "pass_yac": "passing yards after catch", "yac_oe": "YAC over expected", "x_yac": "expected YAC",
+    "ybc_per_att": "yards before contact/att", "yac_per_att": "yards after contact/att", "broken_tackles_rush": "broken tackles (rush)",
+    "broken_tackles_rec": "broken tackles (rec)", "separation": "separation (yds)", "cushion": "cushion (yds)", "adot": "aDOT",
+    "drops": "drops", "drop_pct": "drop %", "drops_suffered": "drops by receivers", "drop_pct_suffered": "drop % by receivers",
+    "ryoe": "rush yards over expected", "ryoe_per_att": "RYOE/attempt", "x_rush_yards": "expected rush yards", "rush_pct_oe": "rush % over expected",
+    "stacked_box_pct": "stacked-box rate", "rush_efficiency": "rushing efficiency", "time_to_los": "time to LOS (s)",
+    "pass_air_yards": "passing air yards", "rec_air_yards": "receiving air yards", "rec_iay": "intended air yards (rec)", "iay_share": "intended air-yards share",
+    "pass_first_downs": "passing first downs", "rush_first_downs": "rushing first downs", "rec_first_downs": "receiving first downs",
+    "pass_2pt": "2-pt passes", "penalties": "penalties", "penalty_yards": "penalty yards", "special_teams_tds": "special-teams TDs",
+    # kicking / returns
+    "fg_made": "field goals made", "fg_att": "field goal attempts", "fg_pct": "FG %", "fg_long": "long FG", "pat_made": "extra points",
+    "pat_att": "extra point attempts", "punts": "punts", "punt_yards": "punt yards", "punts_inside_20": "punts inside the 20",
+    "punt_returns": "punt returns", "punt_return_yards": "punt return yards", "kickoff_returns": "kick returns", "kickoff_return_yards": "kick return yards",
+    # bio
+    "height": "height", "weight": "weight", "college": "college", "draft_year": "draft year", "draft_round": "draft round",
+    "draft_pick": "draft pick", "rookie_season": "rookie season", "experience": "years of experience",
 }
 
-ASCENDING_GOOD = {"interceptions", "int_rate", "sacks_taken"}
-PCT_STATS = {"completion_pct", "int_rate"}
+# lower is better
+ASCENDING_GOOD = {"interceptions", "int_rate", "sacks_taken", "sack_pct", "sack_yards_lost", "sack_fumbles", "sack_fumbles_lost",
+                  "turnovers", "turnover_pct", "fumbles", "fumbles_lost", "rushing_fumbles", "receiving_fumbles", "def_fumbles",
+                  "times_pressured", "pressured_pct", "times_hurried", "times_hit", "bad_throws", "bad_throw_pct",
+                  "drops", "drop_pct", "drops_suffered", "drop_pct_suffered", "missed_tackles", "missed_tackle_pct",
+                  "cov_cmp_pct", "cov_yards", "cov_tds", "cov_rating", "cov_completions", "penalties", "penalty_yards",
+                  "time_to_throw", "rush_efficiency", "draft_round", "draft_pick"}
+# fractions shown as percentages
+PCT_STATS = {"completion_pct", "int_rate", "td_pct", "sack_pct", "turnover_pct", "catch_pct", "pressure_rate", "blitz_pct",
+             "qb_hit_rate", "missed_tackle_pct", "cov_cmp_pct", "pressured_pct", "drop_pct", "drop_pct_suffered",
+             "bad_throw_pct", "on_target_pct", "aggressiveness", "stacked_box_pct", "iay_share", "xcomp_pct",
+             "target_share", "air_yards_share", "fg_pct", "rush_pct_oe"}
+# already in percentage points (shown with a sign, no scaling)
+PP_STATS = {"cpoe", "cpoe_ngs"}
+
+# Which columns a result table shows: the identity columns, every stat the
+# question named, and the default set for the positions in the answer. Any
+# column that is empty for every matched row is dropped afterwards.
+ALWAYS_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games", "made_playoffs", "age"]
+POS_DEFAULTS = {
+    "QB": ["pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "interceptions", "int_rate",
+           "passer_rating", "qbr", "epa_per_play", "cpoe", "ypa", "sacks_taken", "sack_pct", "turnover_pct", "rushing_yards", "rushing_tds"],
+    "RB": ["carries", "rushing_yards", "ypc", "rushing_tds", "receptions", "receiving_yards", "receiving_tds", "total_yards",
+           "total_ypg", "fumbles_lost", "epa_per_play", "ryoe_per_att", "fantasy_ppr"],
+    "WR": ["targets", "receptions", "catch_pct", "receiving_yards", "ypr", "receiving_tds", "rec_ypg", "rec_yac", "drops",
+           "target_share", "separation", "rec_epa_per_target", "fantasy_ppr"],
+    "DEF": ["tackles", "tackles_for_loss", "sacks", "qb_hits", "pressures", "pressure_rate", "forced_fumbles", "fumble_recoveries",
+            "def_interceptions", "passes_defended", "def_tds", "int_tds", "fumble_rec_tds", "missed_tackle_pct", "cov_cmp_pct"],
+    "K": ["fg_made", "fg_att", "fg_pct", "fg_long", "pat_made", "pat_att"],
+    "P": ["punts", "punt_yards", "punts_inside_20"],
+}
+POS_DEFAULTS["TE"] = POS_DEFAULTS["WR"]; POS_DEFAULTS["FB"] = POS_DEFAULTS["RB"]
+DEF_CODES = {"CB", "DB", "S", "FS", "SS", "SAF", "LB", "ILB", "OLB", "MLB", "DE", "DT", "DL", "NT", "EDGE"}
+DEF_STAT_COLS = set(POS_DEFAULTS["DEF"]) | {"hurries", "qb_knockdowns", "blitzes", "blitz_pct", "sack_per_blitz", "cov_rating", "cov_yards", "cov_tds", "tackles_solo", "safeties", "tfl_yards", "def_int_yards", "int_plus_pd"}
+
+def result_columns(res, conds):
+    """Ordered columns for a result frame (see the note above)."""
+    named = [c["col"] for c in conds if c.get("col")]
+    positions = set(res["position"].dropna().unique()) if "position" in res else set()
+    groups = []
+    for p in positions:
+        key = "DEF" if p in DEF_CODES else ("WR" if p == "TE" else ("RB" if p == "FB" else p))
+        if key in POS_DEFAULTS and key not in groups: groups.append(key)
+    if not groups and any(c in DEF_STAT_COLS for c in named): groups = ["DEF"]
+    if not groups and named:
+        groups = ["QB"] if any(c.startswith(("pass", "completion", "int_rate", "qbr", "sack_pct")) for c in named) else ["RB", "WR"]
+    ordered = []
+    for c in ALWAYS_COLS + named + [c for g in groups for c in POS_DEFAULTS[g]]:
+        if c in res.columns and c not in ordered: ordered.append(c)
+    return [c for c in ordered if c in ALWAYS_COLS or res[c].notna().any()]
 
 class QueryError(Exception):
     pass
@@ -435,23 +645,23 @@ class QueryError(Exception):
 def _find_stat(text, start=0):
     search_text = text[start:].strip()
     if not search_text: return None
-        
+
     best = None
-    
+
     # 1. Exact Match
     for phrase, col in STAT_ALIASES:
         idx = text.find(phrase, start)
         if idx != -1 and (best is None or idx < best[1]):
             best = (col, idx, idx + len(phrase))
-            
+
     if best: return best
-        
+
     # 2. Strict Chunk-Based Fuzzy Matching
     words = search_text.split()
     best_match = None
     best_idx = -1
     best_len = 0
-    
+
     for n in (3, 2, 1):
         for i in range(len(words) - n + 1):
             chunk = " ".join(words[i:i+n])
@@ -462,15 +672,39 @@ def _find_stat(text, start=0):
                     best_match = match[0]
                     best_idx = chunk_idx
                     best_len = len(chunk)
-                    
+
     if best_match:
         col = next(c for p, c in STAT_ALIASES if p == best_match)
         return (col, best_idx, best_idx + best_len)
-        
+
     return None
+
+# comparison words that carry their own stat when none is named nearby
+COMPARE_GT = {"over", "more than", "above", "taller than", "heavier than", "older than", "longer than",
+              "greater than", "higher than", "bigger than", "faster than"}
+COMPARE_LT = {"under", "less than", "fewer than", "below", "shorter than", "lighter than", "younger than",
+              "lower than", "smaller than", "slower than"}
+COMPARE_COL = {"taller than": "height", "shorter than": "height", "heavier than": "weight", "lighter than": "weight",
+               "older than": "age", "younger than": "age"}
+_COMPARE_RE = "|".join(sorted(COMPARE_GT | COMPARE_LT | {"at least", "at most"}, key=len, reverse=True))
+# a stat found FORWARD of a number that sits past a conjunction belongs to the
+# NEXT clause ("QBR over 70 and EPA per play above 0.2"), so prefer the stat
+# behind the number in that case
+_CLAUSE_BREAK = re.compile(r"\b(and|with|who|that|or|while)\b|,")
+
+def _stat_for_number(q, start, end, fwd_len):
+    fwd = q[end:end + fwd_len]
+    st = _find_stat(fwd, 0)
+    if st and _CLAUSE_BREAK.search(fwd[:st[1]]):
+        back = _find_stat(q[max(0, start - 40):start], 0)
+        if back: return back
+    if st: return st
+    return _find_stat(q[max(0, start - 40):start], 0)
 
 def parse(query):
     q = " " + query.lower().strip() + " "
+    # 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
+    q = re.sub(r"(\d)['\u2019-](\d{1,2})(?:\"|''|\u201d| in\b|\b)", lambda m: str(int(m.group(1)) * 12 + int(m.group(2))), q)
     conds, notes = [], []
 
     for word in sorted(POSITIONS, key=len, reverse=True):
@@ -509,7 +743,7 @@ def parse(query):
         if st:
             col = st[0]
             conds.append({"kind": "rank", "col": col, "n": 1, "asc": col in ASCENDING_GOOD})
-            notes.append(f"led the league in {DISPLAY[col]}")
+            notes.append(f"led the league in {DISPLAY.get(col, col)}")
 
     rank_starts = [m.start() for m in re.finditer(r"(top|bottom)\s+\d+", q)]
     for mm in re.finditer(r"(top|bottom)\s+(\d+)", q):
@@ -526,46 +760,41 @@ def parse(query):
             if not st: break
             col, s_start, s_end = st
             pre = window[:s_start]
-            
+
             if "lowest" in pre or "fewest" in pre or direction == "bottom":
                 wants_low = True
             elif "highest" in pre or "most" in pre:
                 wants_low = False
             else:
                 wants_low = col in ASCENDING_GOOD
-                
+
             conds.append({"kind": "rank", "col": col, "n": n, "asc": wants_low})
             arrow = "lowest" if wants_low else "highest"
             word = ("bottom" if direction == "bottom" and col not in ASCENDING_GOOD else "top")
-            notes.append(f"{word} {n} in {DISPLAY[col]} ({arrow})")
+            notes.append(f"{word} {n} in {DISPLAY.get(col, col)} ({arrow})")
             pos = s_end
             found_any = True
         if not found_any: continue
 
-    thresh_pat = (r"(over|more than|at least|above|under|less than|fewer than|below|at most)\s+([\d,\.]+)")
+    thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]+)\s*(%|percent)?"
     for mm in re.finditer(thresh_pat, q):
-        op_word, num = mm.group(1), float(mm.group(2).replace(",", ""))
-        
-        window_fwd = q[mm.end():mm.end() + 40]
-        st = _find_stat(window_fwd, 0)
-        
-        if not st:
-            window_bwd = q[max(0, mm.start()-40):mm.start()]
-            st = _find_stat(window_bwd, 0)
-            
-        if not st:
-            if 18 <= num <= 50: col = "age"
-            else: continue
-        else:
-            col = st[0]
-        
-        if op_word in ("over", "more than", "above"): op = ">"
+        op_word, num, pct_mark = mm.group(1), float(mm.group(2).replace(",", "")), bool(mm.group(3))
+        st = None
+        if op_word not in COMPARE_COL:
+            st = _stat_for_number(q, mm.start(), mm.end(), 40)
+        if st: col = st[0]
+        elif op_word in COMPARE_COL: col = COMPARE_COL[op_word]
+        elif 18 <= num <= 50: col = "age"
+        else: continue
+        if op_word in COMPARE_GT: op = ">"
         elif op_word == "at least": op = ">="
-        elif op_word in ("under", "less than", "fewer than", "below"): op = "<"
-        elif op_word == "at most": op = "<="
-
+        elif op_word in COMPARE_LT: op = "<"
+        else: op = "<="
+        if pct_mark or col in PCT_STATS:
+            num = num / 100.0 if num > 1 else num
         conds.append({"kind": "threshold", "col": col, "op": op, "value": num})
-        notes.append(f"{DISPLAY[col]} {op} {num:g}")
+        shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
+        notes.append(f"{DISPLAY.get(col, col)} {op} {shown}")
 
     post_pat = r"([\d,\.]+)\s*(\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(%|percent|years old)?"
     for mm in re.finditer(post_pat, q):
@@ -573,16 +802,15 @@ def parse(query):
         phrase = mm.group(2)
         is_pct = bool(mm.group(3))
         gte = phrase in ("+", "or more", "or higher", "or older")
-        
+
         window_fwd = q[mm.end():mm.end() + 45]
         cut = re.search(r"\b(and|over|more than|at least|above|under|less than|fewer than|below|at most|who|top|bottom|since|before|between|led|for|on)\b", window_fwd)
         stat_window = window_fwd[:cut.start()] if cut else window_fwd
-        
         st = _find_stat(stat_window, 0)
         if not st:
             window_bwd = q[max(0, mm.start()-40):mm.start()]
             st = _find_stat(window_bwd, 0)
-            
+
         if not st:
             if 18 <= num <= 50: col = "age"
             else: continue
@@ -593,13 +821,18 @@ def parse(query):
             num = num / 100.0 if num > 1 else num
         conds.append({"kind": "threshold", "col": col, "op": ">=" if gte else "<=", "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
-        notes.append(f"{DISPLAY[col]} {'≥' if gte else '≤'} {shown}")
+        notes.append(f"{DISPLAY.get(col, col)} {'≥' if gte else '≤'} {shown}")
 
     if not conds:
         raise QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.")
     return conds, notes
 
 def run(df, query):
+    res, notes, _conds = run_full(df, query)
+    return res, notes
+
+def run_full(df, query):
+    """Like run(), but also returns the parsed conditions (for column selection)."""
     conds, notes = parse(query)
     mask = df.index == df.index
 
@@ -636,7 +869,7 @@ def run(df, query):
                 mask &= aligned_rank.notna() & (aligned_rank <= c["n"])
 
     res = df[mask].copy()
-    return res, notes
+    return res, notes, conds
 
 RESULT_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games",
                "made_playoffs", "passing_yards", "passing_tds", "completions",

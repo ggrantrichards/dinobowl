@@ -53,17 +53,15 @@ def api_query():
         return jsonify({"error": "Type a query first."}), 400
     try:
         df = get_df()
-        res, notes = qe.run(df, q)
+        res, notes, conds = qe.run_full(df, q)
     except qe.QueryError as e:
         return jsonify({"error": str(e), "notes": []}), 200
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 500
 
-    cols = [c for c in qe.RESULT_COLS if c in res.columns]
-    # hide stat columns that are empty for every matched row (e.g. tackles for a QB query)
-    ALWAYS = {"headshot_url", "player_id", "season", "player_display_name",
-              "position", "recent_team", "games", "made_playoffs", "age"}
-    cols = [c for c in cols if c in ALWAYS or res[c].notna().any()]
+    # identity columns + every stat the question named + the defaults for the
+    # positions in the answer; all-empty columns dropped (see query_engine)
+    cols = qe.result_columns(res, conds)
     res = res.sort_values(["season", "player_display_name"], ascending=[False, True])
     rows = [{c: _clean(r[c]) for c in cols} for _, r in res.iterrows()]
     LIMIT = 2000
