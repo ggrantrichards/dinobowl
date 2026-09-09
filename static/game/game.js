@@ -26,6 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
+  const BUILD = "2.0";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -229,9 +230,15 @@
   // Gridiron): the crowd is a bed UNDER the action, never over it — its bus
   // ceiling keeps every roar below the action SFX layer.
   let masterBus = null, musicBus = null, sfxBus = null, crowdBus = null;
-  let volMusic = 0.7, volSfx = 1.0;
+  let volMusic = 0.7, volSfx = 1.0, volCrowd = 0.7;
   try { const v = localStorage.getItem("dinobowl_vol_music"); if (v != null) volMusic = Math.max(0, Math.min(1, Number(v))); } catch (_) { }
   try { const v = localStorage.getItem("dinobowl_vol_sfx"); if (v != null) volSfx = Math.max(0, Math.min(1, Number(v))); } catch (_) { }
+  try { const v = localStorage.getItem("dinobowl_vol_crowd"); if (v != null) volCrowd = Math.max(0, Math.min(1, Number(v))); } catch (_) { }
+  // ROADMAP P0-24 (second half): the crowd bus was pinned at 1.1 — ABOVE the
+  // action layer, against the owner mix law — and had no slider, so at SFX 0
+  // the roar still played at full. It now has its own volume (default 70%)
+  // and its ceiling keeps every roar under the SFX layer.
+  const CROWD_CEIL = 0.85;
   function ensureAC() {
     if (!AC) {
       AC = new (window.AudioContext || window.webkitAudioContext)();
@@ -259,7 +266,7 @@
       // crowd must read; music is a bed, the field is the band
       musicBus = AC.createGain(); musicBus.gain.value = 0.32 * volMusic;
       sfxBus = AC.createGain(); sfxBus.gain.value = volSfx;
-      crowdBus = AC.createGain(); crowdBus.gain.value = 1.1;
+      crowdBus = AC.createGain(); crowdBus.gain.value = CROWD_CEIL * volCrowd;
       musicBus.connect(masterBus); sfxBus.connect(masterBus); crowdBus.connect(masterBus);
     }
     return AC;
@@ -267,6 +274,7 @@
   function setVol(kind, v) {
     v = Math.max(0, Math.min(1, v));
     if (kind === "music") { volMusic = v; if (musicBus) musicBus.gain.value = 0.32 * v; }
+    else if (kind === "crowd") { volCrowd = v; if (crowdBus) crowdBus.gain.value = CROWD_CEIL * v; }
     else { volSfx = v; if (sfxBus) sfxBus.gain.value = v; }
     try { localStorage.setItem("dinobowl_vol_" + kind, String(v)); } catch (_) { }
   }
@@ -4687,6 +4695,14 @@
     } else if (G.carrier) {
       addStat(G.carrier, "rushYds", g2); addStat(G.carrier, "car"); addStat(G.carrier, "rushTd");
     }
+    // ROADMAP P0-6: the scoring play never passed through playDead's yardage
+    // gate, so a 60-yard touchdown bomb credited the passer and receiver and
+    // left the post-game "YOUR DAY" total untouched — a scoring game could
+    // read "0 TOTAL YDS · 1 TD". The team total gets the same yards here.
+    if (t === "A") {
+      if (G.playPass && G.playPass.receiver) G.stats.passYds += g2;
+      else if (G.carrier) G.stats.rushYds += g2;
+    }
     const scoringAbbr = t === "A" ? G.my : G.opp;
     const rainParty = G.weather.type === "RAIN";
     const story = G.driveStory && G.driveStory.side === t ? G.driveStory : null;
@@ -5196,6 +5212,13 @@
       "TAP/SPACE = HURDLE THE ROCKS · FACEPLANTS KILL YOUR SPEED · GO GO GO");
   }
 
+  // Arm a FRESH dead beat: the read-lockout clock starts over for this beat,
+  // so a ceremony chained after a play's whistle cannot be tapped away on its
+  // first frame (ROADMAP P0-11 — the timer belonged to the state, not the
+  // beat). Routine play whistles still go through playDead, unchanged.
+  function deadBeat(secs) {
+    G.state = "dead"; G.deadT = secs; G.deadT0 = secs; G.deadElapsed = 0;
+  }
   function endQuarter() {
     if (G.quarter === 2) {
       G.quarter = 3; G.clock = (G.qlen || QUARTER_LEN);
@@ -5205,12 +5228,12 @@
       };
       if (G.halftimeShow) {
         banner("HALFTIME", "Mascot minigame time — four shows in the rotation!", 2.0);
-        G.state = "dead"; G.deadT = 2.0;
+        deadBeat(2.0);
         G.deadNext = () => startHalftimeShow(secondHalf);
       } else {
         // Retro Bowl style: a beat on the score, straight into the 3rd
         banner("HALFTIME", G.score.A + " — " + G.score.B, 1.6);
-        G.state = "dead"; G.deadT = 1.6; G.deadNext = secondHalf;
+        deadBeat(1.6); G.deadNext = secondHalf;
       }
     } else if (G.quarter >= 4) {
       // A PLAYOFF GAME CANNOT END LEVEL. Overtime was a single timed 5th quarter,
@@ -5229,14 +5252,14 @@
         G.drive = otBall; G.losYd = 25; G.down = 1; G.toGain = 10; G.hashY = MID;
         banner(otNo > 1 ? "OVERTIME " + otNo + "!" : "OVERTIME!",
           TEAMS[teamAbbrOf(otBall)][0].toUpperCase() + " wins the toss — next score wins", 2.2);
-        G.state = "dead"; G.deadT = 2.2; G.deadNext = enterPlaycall;
+        deadBeat(2.2); G.deadNext = enterPlaycall;
       } else {
         gameOver();
       }
     } else {
       G.quarter += 1; G.clock = (G.qlen || QUARTER_LEN);
       banner("END OF Q" + (G.quarter - 1), "", 1.6);
-      G.state = "dead"; G.deadT = 1.6; G.deadNext = enterPlaycall;
+      deadBeat(1.6); G.deadNext = enterPlaycall;
     }
   }
 
@@ -5357,7 +5380,7 @@
     // team at its own 25, exactly as before.
     sfx.kick(); crowdCheer(0.25);
     banner("KICKOFF", "…sails through the end zone — touchback, out at the 25", 1.6);
-    G.state = "dead"; G.deadT = 1.7; G.clockStopped = true;
+    deadBeat(1.7); G.clockStopped = true;
     const teeX = xAtYd(35);
     buildKickoffSet(teeX);
     // T 1.45 inside the 1.7s beat leaves the ball a quarter-second on the deck
@@ -5561,6 +5584,15 @@
     if (k.stage === 0) { k.power = k.val; k.stage = 1; k.t = 0; beep(880, 0.05, "square", 0.045); return; }
     if (!Number.isFinite(k.power)) k.power = k.val;
     k.acc = k.val - 50; // -50..50, 0 is perfect
+    // 2.0: the 2.4%-wide centre stripe was drawn and promised for a year and
+    // nothing ever read it. Landing in it is now a MOMENT — banner, sparks, a
+    // cheer — and only a moment: the kick resolves exactly as it always did.
+    if (Math.abs(k.acc) <= 1.2) {
+      k.perfect = true;
+      banner("PERFECT!", "dead centre of the meter", 0.8);
+      if (G.ball) fxSparks(G.ball.x, G.ball.y, 12);
+      crowdCheer(0.35); sfx.catch(true);
+    }
     k.stage = 2; k.t = 0;
     resolveKick();
   }
@@ -6299,8 +6331,10 @@
     if (S === "intro") { G.intro = null; G.state = "pregame"; return; }   // tap skips
     if (S === "pregame") { kickoffAfterPregame(); return; }
     if (S === "hub") {
-      if (G.szn && G.szn.phase !== "done" && mouse.x > W / 2 - 90 && mouse.x < W / 2 + 90 && mouse.y > 448 && mouse.y < 482) { openUpgrade(); return; }
-      if (G.szn && G.szn.phase === "done") hubKey("enter"); else startSeasonGame(); return;
+      if (G.szn && G.szn.phase === "done") { hubKey("enter"); return; }
+      const chip = hubChipAt(mouse.x, mouse.y);
+      if (chip) hubKey(chip.key);   // a tap on empty hub space is not a kickoff any more
+      return;
     }
     if (S === "upgrade") { upgradeClick(); return; }
     if (S === "standings" || S === "sznstats") { G.state = "hub"; return; }
@@ -6840,7 +6874,14 @@
     const sz = loadSeason(), cr = loadCareer();
     const opts = [["PLAY GAME", "one game, any two teams"]];
     if (sz && cr) opts.push(["PLAY SEASON", cr.name + " · " + TEAMS[cr.team][0]]);
-    else if (sz) opts.push(["PLAY SEASON", "pick up where you left off"]);
+    else if (sz) {
+      // 2.0: the card names the season it resumes — team, record, week, next
+      // opponent — instead of a generic "pick up where you left off"
+      const r = sz.records && sz.records[sz.team];
+      const nx = sz.phase === "regular" && sz.schedule && sz.schedule[sz.week - 1] ? (sz.schedule[sz.week - 1].home ? " vs " : " @ ") + sz.schedule[sz.week - 1].opp : "";
+      opts.push(["PLAY SEASON", TEAMS[sz.team][0].toUpperCase() + (r ? " · " + r.w + "-" + r.l + (r.t ? "-" + r.t : "") : "") +
+        (sz.phase === "regular" ? " · WEEK " + sz.week + nx : sz.phase === "playoffs" ? " · PLAYOFFS" : " · SEASON OVER")]);
+    }
     else opts.push(["PLAY SEASON", "17 games + the DINO BOWL"]);
     opts.push(["MORE MODES", "versus · online · career · lab"]);
     opts.push(["SETTINGS", "difficulty · flow · halftime"]);
@@ -6953,6 +6994,8 @@
       () => setVol("music", volMusic >= 0.99 ? 0 : volMusic + 0.25)],
     ["SFX VOLUME", volSfx <= 0 ? "OFF" : Math.round(volSfx * 100) + "%",
       () => setVol("sfx", volSfx >= 0.99 ? 0 : volSfx + 0.25)],
+    ["CROWD VOLUME", volCrowd <= 0 ? "OFF" : Math.round(volCrowd * 100) + "%",
+      () => setVol("crowd", volCrowd >= 0.99 ? 0 : volCrowd + 0.25)],
     ["CRT SCANLINES", G.crt ? "ON — phosphor and vignette over the field" : "OFF — clean pixels",
       () => { G.crt = !G.crt; settingSet("dinobowl_crt", G.crt); applyCrt(); }],
   ];
@@ -6968,7 +7011,7 @@
     if (n >= 1 && n <= rows.length) { rows[n - 1][2](); sfx.juke(); return; }
     if (k === "escape" || k === "enter") { G.state = "menu"; }
   }
-  const SET_Y0 = 118, SET_DY = 48;   // 8 rows must fit the 540px screen
+  const SET_Y0 = 108, SET_DY = 45;   // 9 rows must fit the 540px screen (last row ends at 490, hint at 508)
   function settingsClick() {
     const rows = SETTINGS_ROWS();
     for (let i = 0; i < rows.length; i++) {
@@ -11960,6 +12003,9 @@
     cx.fillText("H = CONTROLS  ·  M = MUTE  ·  G = MEET THE HERD", W / 2, 456);
     cx.fillText("D = DIFFICULTY: " + diff().name + "   ·   ALL-TIME " + G.record.w + "-" + G.record.l + (G.record.t ? "-" + G.record.t : ""), W / 2, 478);
     if (G.msg) { cx.fillStyle = "#ff7a6b"; cx.fillText(G.msg, W / 2, 502); }
+    cx.textAlign = "right"; cx.font = PF(7); cx.fillStyle = "rgba(157,176,164,.7)";
+    cx.fillText("V" + BUILD, W - 14, H - 10);
+    cx.textAlign = "center";
     if (G.gallery) drawGallery();
   }
 
@@ -12678,68 +12724,218 @@
       : "ARROWS + ENTER · TAP A CARD · ESC = TITLE", W / 2, H - 14);
   }
 
+  // ============================================== 2.0 · THE FRANCHISE HOME
+  // WHAT WAS WEAK: the hub was six centred lines of text on a dark screen —
+  // the place a season player spends the most time between games, and the
+  // one screen with no colour, no dinosaur and nothing to look at. Retro Bowl
+  // lives on its hub. This one now has the team's colours, its mascot, the
+  // next opponent as a matchup, the coaching staff, the last five results,
+  // the whole 17-week schedule, and TAPPABLE actions. Every key it had still
+  // works (ENTER / S / T / U / ESC), the "done" ceremony is unchanged, and the
+  // season data it reads is exactly what it read before — nothing about the
+  // season itself moved.
+  //
+  // one lean mascot sheet per team (the troodon standing pack — see qbSheet)
+  function mascotSheet(ab) {
+    G.qbSheets = G.qbSheets || {};
+    if (!G.qbSheets[ab]) {
+      const t = TEAMS[ab];
+      G.qbSheets[ab] = DinoSprites.buildSpeciesSprites
+        ? { troodon: DinoSprites.buildSpeciesSprites("troodon", t[1], t[2]) }
+        : DinoSprites.buildTeamSprites(t[1], t[2]);
+    }
+    return G.qbSheets[ab].troodon;
+  }
+  function drawMascot(ab, x, y, size, animate, faceLeft) {
+    const spr = mascotSheet(ab);
+    if (!spr) return;
+    const f = animate ? (performance.now() / 220 | 0) % 2 : 0;
+    cx.drawImage((faceLeft ? spr.L : spr.R)[f], Math.round(x), Math.round(y), size, size);
+  }
+  const ORD = (n) => n + (n === 1 ? "ST" : n === 2 ? "ND" : n === 3 ? "RD" : "TH");
+  const recStr = (r) => r.w + "-" + r.l + (r.t ? "-" + r.t : "");
+  const recPts = (r) => r.w + (r.t || 0) * 0.5;
+  function divRank(z, team) {
+    const div = divisionOf(team);
+    const sorted = DIVISIONS[div].slice().sort((a, b) => (recPts(z.records[b]) - recPts(z.records[a])) || (z.records[a].l - z.records[b].l));
+    return { rank: sorted.indexOf(team) + 1, div, leader: sorted[0] };
+  }
+  function streakOf(z) {
+    let n = 0, kind = null;
+    for (let i = z.results.length - 1; i >= 0; i--) {
+      const r = z.results[i], k = r.my > r.them ? "W" : r.my < r.them ? "L" : "T";
+      if (kind === null) kind = k;
+      if (k !== kind) break;
+      n++;
+    }
+    return kind ? { kind, n } : null;
+  }
+  // text that stays legible on top of ANY jersey colour
+  const onTeam = (ab) => lum(TEAMS[ab][1]) > 150 ? "#0a1410" : "#f4f6f1";
+  // a framed panel in the house style, with an optional eyebrow title
+  function panel(x, y, w, h, title) {
+    cx.fillStyle = "#0d2519"; cx.fillRect(x, y, w, h);
+    cx.strokeStyle = "#1d4030"; cx.lineWidth = 2; cx.strokeRect(x, y, w, h);
+    if (title) { cx.textAlign = "left"; cx.font = PF(7); cx.fillStyle = "#69be28"; cx.fillText(title, x + 10, y + 17); }
+  }
+  // the team-colour header band shared by the season screens
+  function drawTeamBand(ab, rec, sub) {
+    const t = TEAMS[ab];
+    cx.fillStyle = t[1]; cx.fillRect(0, 0, W, 96);
+    cx.fillStyle = shade(t[1], -30); cx.fillRect(0, 88, W, 8);
+    cx.fillStyle = "rgba(0,0,0,.18)"; cx.fillRect(0, 0, W, 6);
+    drawMascot(ab, 34, 18, 64, true);
+    cx.textAlign = "left"; cx.font = PF(22); cx.fillStyle = hudColor(ab);
+    fitText(t[0].toUpperCase(), 116, 50, 560, 22, 14);
+    if (sub) { cx.font = PF(8); cx.fillStyle = onTeam(ab); fitText(sub, 116, 74, 620, 8, 7); }
+    if (rec) { cx.textAlign = "right"; cx.font = PF(26); cx.fillStyle = hudColor(ab); cx.fillText(rec, W - 40, 60); }
+  }
+  // the hub's actions are TAPPABLE as well as keyed; one list drives both
+  function hubChips() {
+    const z = G.szn; if (!z) return [];
+    const play = z.phase === "regular" ? "PLAY WEEK " + z.week
+      : "PLAY " + ((z.playoffs && z.playoffs.roundNames[z.playoffs.round]) || "PLAYOFFS");
+    const pts = z.trainPts || 0;
+    const defs = [
+      { id: "play", label: "▶ " + play, key: "enter", w: 250, hot: true },
+      { id: "standings", label: "STANDINGS", key: "s", w: 150 },
+      { id: "stats", label: "TEAM STATS", key: "t", w: 160 },
+      { id: "train", label: "TRAIN · " + pts + " PTS", key: "u", w: 170, glow: pts > 0 },
+      { id: "menu", label: "MENU", key: "escape", w: 96 },
+    ];
+    const gap = 10, total = defs.reduce((a, d) => a + d.w, 0) + gap * (defs.length - 1);
+    let x = Math.round((W - total) / 2);
+    for (const d of defs) { d.x = x; d.y = H - 58; d.h = 40; x += d.w + gap; }
+    return defs;
+  }
+  function hubChipAt(mx, my) {
+    return hubChips().find((c) => mx >= c.x && mx <= c.x + c.w && my >= c.y && my <= c.y + c.h) || null;
+  }
+  function drawChips(chips) {
+    for (const c of chips) {
+      const hot = c.hot || c.glow;
+      cx.fillStyle = c.hot ? "#14402a" : "#0d2519"; cx.fillRect(c.x, c.y, c.w, c.h);
+      cx.strokeStyle = c.hot ? (Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6") : c.glow ? "#ffd23f" : "#1d4030";
+      cx.lineWidth = 2; cx.strokeRect(c.x, c.y, c.w, c.h);
+      cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = hot ? "#ffd23f" : "#f4f6f1";
+      fitText(c.label, c.x + c.w / 2, c.y + 25, c.w - 16, 8, 7);
+    }
+  }
   function drawHub() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
     const z = G.szn;
     if (!z) { G.state = "menu"; return; }
-    const t = TEAMS[z.team];
-    cx.textAlign = "center";
-    cx.font = PF(20); cx.fillStyle = t[2];
-    cx.fillText(t[0].toUpperCase() + "  ·  " + z.records[z.team].w + "-" + z.records[z.team].l, W / 2, 70);
+    const ab = z.team, t = TEAMS[ab];
+    const dr = divRank(z, ab), st = streakOf(z);
     if (z.phase === "done") {
+      drawTeamBand(ab, recStr(z.records[ab]), "SEASON COMPLETE  ·  " + ORD(dr.rank) + " IN THE " + dr.div);
       const champ = z.champion;
+      cx.textAlign = "center";
       cx.font = PF(24); cx.fillStyle = "#ffd23f";
-      cx.fillText(champ === z.team ? "🏆 DINO BOWL CHAMPIONS!" : "SEASON OVER", W / 2, 180);
+      cx.fillText(champ === z.team ? "🏆 DINO BOWL CHAMPIONS!" : "SEASON OVER", W / 2, 190);
       cx.font = PF(12); cx.fillStyle = "#f4f6f1";
-      cx.fillText(champ === z.team ? "The " + t[0] + " rule the Cretaceous." : TEAMS[champ][0].toUpperCase() + " win the DINO BOWL.", W / 2, 220);
-      if (G.career) drawCareerSummary(300);
-      cx.font = PF(10); cx.fillStyle = "#ffd23f";
-      cx.fillText("ENTER = BACK TO MENU", W / 2, H - 60);
+      cx.fillText(champ === z.team ? "The " + t[0] + " rule the Cretaceous." : TEAMS[champ][0].toUpperCase() + " win the DINO BOWL.", W / 2, 230);
+      drawMascot(champ && TEAMS[champ] ? champ : ab, W / 2 - 44, 250, 88, true);
+      if (G.career) drawCareerSummary(380);
+      cx.font = PF(10); cx.fillStyle = "#ffd23f"; cx.textAlign = "center";
+      cx.fillText("ENTER = BACK TO MENU", W / 2, H - 40);
       return;
     }
-    let heading, subline;
-    if (z.phase === "regular") {
-      const sched = z.schedule[z.week - 1];
-      heading = "WEEK " + z.week + " / 17";
-      subline = (sched.home ? "vs " : "@ ") + TEAMS[sched.opp][0].toUpperCase() + "  (" + z.records[sched.opp].w + "-" + z.records[sched.opp].l + ")";
+    const verb = st ? (st.kind === "W" ? "WON" : st.kind === "L" ? "LOST" : "TIED") : "";
+    const streakTxt = !st ? "" : st.n === 1 ? "  ·  " + verb + " LAST TIME OUT" : "  ·  " + verb + " " + st.n + " STRAIGHT";
+    const seedTxt = z.phase === "playoffs" ? "  ·  SEED #" + z.playoffs.seed : "";
+    drawTeamBand(ab, recStr(z.records[ab]), ORD(dr.rank) + " IN THE " + dr.div + streakTxt + seedTxt);
+
+    // ---- NEXT UP: the opponent as a matchup, not a line of text
+    let oppAb = null, home = true, heading;
+    if (z.phase === "regular") { const s = z.schedule[z.week - 1]; oppAb = s.opp; home = s.home; heading = "WEEK " + z.week + " OF 17"; }
+    else { oppAb = z.playoffs.curOpp || null; home = z.playoffs.seed <= 2; heading = z.playoffs.roundNames[z.playoffs.round] || "PLAYOFFS"; }
+    panel(40, 112, 440, 168, "NEXT UP  ·  " + heading);
+    if (oppAb) {
+      drawMascot(oppAb, 56, 150, 88, true, true);
+      cx.textAlign = "left"; cx.font = PF(14); cx.fillStyle = "#f4f6f1";
+      fitText((home ? "VS " : "AT ") + TEAMS[oppAb][0].toUpperCase(), 160, 158, 306, 14, 9);
+      cx.font = PF(8); cx.fillStyle = "#9db0a4";
+      const od = divRank(z, oppAb);
+      fitText(recStr(z.records[oppAb]) + "  ·  " + (home ? "HOME" : "AWAY") + "  ·  " + ORD(od.rank) + " IN THE " + od.div, 160, 182, 306, 8, 7);
+      const mo = teamOvr(ab), oo = teamOvr(oppAb);
+      cx.fillStyle = "#f4f6f1"; cx.font = PF(8);
+      cx.fillText("OVR  " + mo + "  vs  " + oo, 160, 212);
+      const bx = 160, by = 222, bw = 306;
+      const share = clamp(0.5 + (mo - oo) / 40, 0.12, 0.88), sw = Math.round(bw * share);
+      cx.fillStyle = t[1]; cx.fillRect(bx, by, sw, 10);
+      cx.fillStyle = TEAMS[oppAb][1]; cx.fillRect(bx + sw, by, bw - sw, 10);
+      cx.fillStyle = "#f4f6f1"; cx.fillRect(bx + sw - 1, by - 2, 2, 14);
+      cx.fillStyle = "#9db0a4"; cx.font = PF(7);
+      cx.fillText(mo >= oo + 4 ? "YOU ARE THE FAVOURITE" : oo >= mo + 4 ? "THEY ARE THE FAVOURITE" : "EVEN MATCH", 160, 254);
     } else {
-      heading = z.playoffs.roundNames[z.playoffs.round] || "PLAYOFFS";
-      subline = "seed #" + z.playoffs.seed + " — win or go extinct";
+      cx.textAlign = "left"; cx.font = PF(10); cx.fillStyle = "#f4f6f1";
+      cx.fillText("OPPONENT SET AT KICKOFF", 56, 190);
+      cx.font = PF(8); cx.fillStyle = "#9db0a4";
+      if (z.playoffs && z.playoffs.alive) cx.fillText("WIN OR GO EXTINCT", 56, 214);
     }
-    cx.font = PF(13); cx.fillStyle = "#f4f6f1"; cx.fillText(heading, W / 2, 130);
-    cx.font = PF(11); cx.fillStyle = "#9db0a4"; cx.fillText(subline, W / 2, 158);
-    // the coaching staff (older saves get one generated on the spot)
+
+    // ---- STAFF + FORM
+    panel(496, 112, 424, 168, "COACHING STAFF");
     if (!z.staff) { z.staff = genStaff(); saveSeason(); }
-    cx.font = PF(7); cx.fillStyle = "#69be28";
-    cx.fillText("HC " + z.staff.hc.name.toUpperCase() + " " + "★".repeat(z.staff.hc.stars) +
-      "   ·   OC " + z.staff.oc.name.toUpperCase() + " " + "★".repeat(z.staff.oc.stars) +
-      "   ·   DC " + z.staff.dc.name.toUpperCase() + " " + "★".repeat(z.staff.dc.stars), W / 2, 182);
-    // recent results
-    cx.font = PF(8); cx.fillStyle = "#9db0a4";
-    const recent = z.results.slice(-5);
-    recent.forEach((r2, i) => {
-      const wl = r2.my > r2.them ? "W" : "L";
-      cx.fillStyle = wl === "W" ? "#69be28" : "#ff7a6b";
-      cx.fillText("WK" + r2.week + "  " + wl + " " + r2.my + "-" + r2.them + " " + (r2.home ? "vs" : "@") + " " + r2.opp, W / 2, 210 + i * 22);
+    [["HC", z.staff.hc], ["OC", z.staff.oc], ["DC", z.staff.dc]].forEach(([role, s], i) => {
+      cx.textAlign = "left"; cx.font = PF(8); cx.fillStyle = "#f4f6f1";
+      fitText(role + "  " + s.name.toUpperCase(), 512, 142 + i * 20, 270, 8, 7);
+      cx.textAlign = "right"; cx.fillStyle = "#ffd23f";
+      cx.fillText("★".repeat(Math.max(0, Math.min(5, s.stars))), 904, 142 + i * 20);
     });
-    if (G.career) drawCareerHubPanel();
-    cx.font = PF(13); cx.fillStyle = Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6";
-    cx.fillText("ENTER = PLAY", W / 2, 400);
-    cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    cx.fillText("S = STANDINGS  ·  T = TEAM STATS  ·  U = TRAIN  ·  ESC = MENU", W / 2, 434);
-    // tappable TRAIN chip with the point balance
-    const pts = (z.trainPts || 0);
-    cx.fillStyle = pts > 0 ? "#14402a" : "rgba(13,37,25,.8)";
-    cx.fillRect(W / 2 - 90, 448, 180, 34);
-    cx.strokeStyle = pts > 0 ? "#ffd23f" : "#1d4030"; cx.lineWidth = 2;
-    cx.strokeRect(W / 2 - 90, 448, 180, 34);
-    cx.font = PF(9); cx.fillStyle = pts > 0 ? "#ffd23f" : "#9db0a4";
-    cx.fillText("🏋 TRAIN (" + pts + " PTS)", W / 2, 470);
+    const recent = z.results.slice(-5);
+    cx.textAlign = "left"; cx.font = PF(7); cx.fillStyle = "#69be28"; cx.fillText("RECENT FORM", 512, 214);
+    if (!recent.length) { cx.fillStyle = "#9db0a4"; cx.font = PF(8); cx.fillText("SEASON OPENER — NO GAMES YET", 512, 246); }
+    recent.forEach((r2, i) => {
+      const won = r2.my > r2.them, tie = r2.my === r2.them;
+      const x = 512 + i * 80;
+      cx.fillStyle = tie ? "#3a3f2c" : won ? "#1f5c33" : "#5a2222"; cx.fillRect(x, 224, 72, 42);
+      cx.fillStyle = "#f4f6f1"; cx.font = PF(8); cx.textAlign = "center";
+      fitText((tie ? "T " : won ? "W " : "L ") + r2.my + "-" + r2.them, x + 36, 242, 66, 8, 7);
+      cx.font = PF(7); cx.fillStyle = "#9db0a4";
+      cx.fillText((r2.home ? "vs " : "@ ") + r2.opp, x + 36, 258);
+    });
+
+    // ---- THE SEASON, week by week
+    panel(40, 296, 880, 128, "SCHEDULE");
+    const cw = 48, cg = 3, x0 = 52, y0 = 322;
+    for (let i = 0; i < 17; i++) {
+      const s = z.schedule[i]; if (!s) continue;
+      const x = x0 + i * (cw + cg);
+      const res = z.results.find((r2) => r2.week === i + 1);
+      const cur = z.phase === "regular" && i + 1 === z.week;
+      cx.fillStyle = res ? (res.my > res.them ? "#1f5c33" : res.my < res.them ? "#5a2222" : "#3a3f2c") : cur ? "#14402a" : "#0a1f14";
+      cx.fillRect(x, y0, cw, 74);
+      if (cur) { cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(x, y0, cw, 74); }
+      cx.textAlign = "center"; cx.font = PF(7);
+      cx.fillStyle = cur ? "#ffd23f" : "#9db0a4"; cx.fillText("WK" + (i + 1), x + cw / 2, y0 + 14);
+      cx.fillStyle = TEAMS[s.opp][1]; cx.fillRect(x + 8, y0 + 20, cw - 16, 8);
+      cx.fillStyle = "#f4f6f1"; cx.fillText((s.home ? "" : "@") + s.opp, x + cw / 2, y0 + 42);
+      if (res) {
+        cx.fillStyle = "#f4f6f1"; cx.fillText(res.my > res.them ? "W" : res.my < res.them ? "L" : "T", x + cw / 2, y0 + 56);
+        cx.fillStyle = "#9db0a4"; cx.fillText(res.my + "-" + res.them, x + cw / 2, y0 + 68);
+      } else if (cur) { cx.fillStyle = "#ffd23f"; cx.fillText("NEXT", x + cw / 2, y0 + 60); }
+    }
+    if (z.phase === "playoffs") {
+      cx.textAlign = "center"; cx.font = PF(7); cx.fillStyle = "#ffd23f";
+      cx.fillText("PLAYOFFS  ·  " + (z.playoffs.roundNames[z.playoffs.round] || "PLAYOFFS") + "  ·  SEED #" + z.playoffs.seed, W / 2, y0 + 92);
+    }
+
+    // ---- career player: the between-game read on YOU
+    if (G.career) {
+      const pl = G.career;
+      cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#ffd23f";
+      fitText("★ " + pl.name.toUpperCase() + " · " + pl.pos + " · LVL " + pl.level + "  ·  XP " + pl.xp + "/" + pl.level * 120 + "  ·  SPD " + pl.ratings.spd + " HND " + pl.ratings.hands + " STR " + pl.ratings.tkl, W / 2, 446, 860, 8, 7);
+      cx.fillStyle = "#0d2519"; cx.fillRect(W / 2 - 150, 454, 300, 8);
+      cx.fillStyle = "#69be28"; cx.fillRect(W / 2 - 150, 454, Math.round(300 * clamp(pl.xp / (pl.level * 120), 0, 1)), 8);
+    }
+
+    // ---- ACTIONS
+    drawChips(hubChips());
   }
 
-  // ---------------- TRAIN: the clickable upgrade room (#10) ----------------
-  // pick a starter, pick an attribute, spend a point: +1, up to +5 per
-  // attribute per season. Points come from wins and big offensive days.
+  // the training room: one point per stat, capped per season
   const TRAIN_CAP = 5;
   function trainCols(p2) {
     return p2.role === "QB" || p2.pos === "QB"
@@ -12823,27 +13019,52 @@
     cx.textAlign = "center"; cx.font = PF(9);
     cx.fillStyle = "#ffd23f"; cx.fillText("TAP HERE / ESC = BACK TO THE HUB", W / 2, H - 24);
   }
+  // ============================================== 2.0 · STANDINGS
+  // WHAT WAS WEAK: eight columns of 7px monospace, no colour, and the only
+  // hint of where YOU stood was a yellow row. Each division is a panel now:
+  // rank, team colour, name, record and a games-back column, the leader
+  // marked, your team framed, and a playoff-line footer for your conference.
   function drawStandings() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
+    const z = G.szn, my = z.team;
     cx.textAlign = "center"; cx.font = PF(14); cx.fillStyle = "#ffd23f";
-    cx.fillText("STANDINGS", W / 2, 46);
-    cx.font = PF(7);
+    cx.fillText("STANDINGS", W / 2, 40);
+    const pw = 210, ph = 178, gapx = 15;
     let col = 0;
     for (const [div, teams] of Object.entries(DIVISIONS)) {
-      const x = 60 + (col % 4) * 220, y0 = 80 + ((col / 4) | 0) * 220;
-      cx.textAlign = "left";
-      cx.fillStyle = "#ffd23f"; cx.fillText(div, x, y0);
-      const sorted = teams.slice().sort((a, b) => G.szn.records[b].w - G.szn.records[a].w);
+      const x = 40 + (col % 4) * (pw + gapx), y = 60 + ((col / 4) | 0) * (ph + 14);
+      panel(x, y, pw, ph, div);
+      const sorted = teams.slice().sort((a, b) => (recPts(z.records[b]) - recPts(z.records[a])) || (z.records[a].l - z.records[b].l));
+      const lead = recPts(z.records[sorted[0]]);
       sorted.forEach((tm, i) => {
-        cx.fillStyle = tm === G.szn.team ? "#ffd23f" : "#f4f6f1";
-        cx.fillText(tm.padEnd(4) + " " + G.szn.records[tm].w + "-" + G.szn.records[tm].l, x, y0 + 20 + i * 16);
+        const ry = y + 30 + i * 34;
+        if (tm === my) { cx.fillStyle = "#14402a"; cx.fillRect(x + 4, ry - 4, pw - 8, 30); cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(x + 4, ry - 4, pw - 8, 30); }
+        cx.fillStyle = TEAMS[tm][1]; cx.fillRect(x + 12, ry, 10, 22);
+        cx.fillStyle = TEAMS[tm][2]; cx.fillRect(x + 12, ry + 18, 10, 4);
+        cx.textAlign = "left"; cx.font = PF(7); cx.fillStyle = "#9db0a4";
+        cx.fillText(String(i + 1), x + 30, ry + 15);
+        cx.font = PF(8); cx.fillStyle = tm === my ? "#ffd23f" : "#f4f6f1";
+        fitText(TEAMS[tm][0].toUpperCase(), x + 44, ry + 15, 96, 8, 7);
+        cx.textAlign = "right"; cx.font = PF(8); cx.fillStyle = "#f4f6f1";
+        cx.fillText(recStr(z.records[tm]), x + pw - 12, ry + 15);
+        const gb = lead - recPts(z.records[tm]);
+        cx.font = PF(7); cx.fillStyle = "#9db0a4";
+        cx.fillText(i === 0 ? "▲" : gb ? gb + " GB" : "TIED", x + pw - 12, ry + 27);
       });
       col++;
     }
-    cx.textAlign = "center"; cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    cx.fillText("ENTER = BACK", W / 2, H - 26);
+    // the playoff line, for your conference
+    const conf = conferenceOf(my);
+    const confTeams = Object.entries(DIVISIONS).filter(([d]) => d.startsWith(conf)).reduce((a, [, ts]) => a.concat(ts), []);
+    const ranked = confTeams.slice().sort((a, b) => (recPts(z.records[b]) - recPts(z.records[a])) || (z.records[a].l - z.records[b].l));
+    const seed = ranked.indexOf(my) + 1;
+    cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = seed <= 7 ? "#69be28" : "#ff7a6b";
+    cx.fillText(z.phase === "regular"
+      ? (seed <= 7 ? "IN THE PLAYOFF PICTURE  ·  " + conf + " #" + seed + " OF 16  ·  TOP 7 GO" : "OUTSIDE THE PLAYOFF LINE  ·  " + conf + " #" + seed + " OF 16  ·  TOP 7 GO")
+      : "PLAYOFFS  ·  " + conf + " #" + seed + " SEED", W / 2, H - 42);
+    cx.font = PF(9); cx.fillStyle = "#9db0a4";
+    cx.fillText("ENTER / ESC = BACK TO THE HUB", W / 2, H - 20);
   }
-
   function drawSznStats() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
     cx.textAlign = "center"; cx.font = PF(14); cx.fillStyle = "#ffd23f";
@@ -12882,13 +13103,21 @@
     cx.fillText("ENTER = BACK", W / 2, H - 26);
   }
 
+  // ============================================== 2.0 · PICK YOUR TEAM
+  // WHAT WAS WEAK: 32 flat tiles with the abbreviation drawn in the helmet
+  // colour — near-invisible on a dozen jerseys (ATL, HOU, NE, SF, NYG ...) —
+  // and three lines of stats underneath. No dinosaur anywhere on the screen
+  // that decides which dinosaurs you get. The grid geometry is UNCHANGED
+  // (teamCellAt hit-tests the same 8x4 cells), so nothing about picking moved;
+  // the tile shows both team colours with text that is legible on any of
+  // them, and two side panels sell the pick: the mascot with the team's OVR
+  // on the left, the stars (or, on step two, the matchup) on the right.
   function drawSelect() {
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
     cx.textAlign = "center";
     cx.font = PF(20); cx.fillStyle = "#ffd23f";
     cx.fillText(G.selStep === 0 ? "PICK YOUR TEAM" : "PICK YOUR OPPONENT", W / 2, 60);
     cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    // a matched guest only WATCHES the host choose — make that clear
     cx.fillText(Net.remoteView ? "🌐 MATCHED! YOUR HOST IS PICKING THE TEAMS…" : "ARROWS / CLICK · ENTER TO CONFIRM", W / 2, 88);
     const sel = G.selStep === 0 ? G.selA : G.selB;
     const other = G.selStep === 1 ? G.selA : -1;
@@ -12896,32 +13125,69 @@
       const ab = ABBRS[i], t = TEAMS[ab];
       const x = 188 + (i % 8) * 74, y = 150 + ((i / 8) | 0) * 56;
       cx.fillStyle = t[1]; cx.fillRect(x, y, 66, 48);
-      cx.fillStyle = shade(t[1], -25); cx.fillRect(x, y + 40, 66, 8);
-      cx.font = PF(12); cx.fillStyle = t[2];
-      cx.fillText(ab, x + 33, y + 24);
-      if (i === other) { cx.font = PF(8); cx.fillStyle = "#fff"; cx.fillText("YOU", x + 33, y + 38); }
-      if (i === sel) {
-        cx.strokeStyle = "#ffd23f"; cx.lineWidth = 3;
-        cx.strokeRect(x - 3, y - 3, 72, 54);
-      }
+      cx.fillStyle = t[2]; cx.fillRect(x, y + 40, 66, 8);
+      cx.font = PF(12); cx.fillStyle = onTeam(ab);
+      cx.fillText(ab, x + 33, y + 23);
+      if (i === other) { cx.font = PF(7); cx.fillStyle = onTeam(ab); cx.fillText("YOU", x + 33, y + 36); }
+      if (i === sel) { cx.strokeStyle = "#ffd23f"; cx.lineWidth = 3; cx.strokeRect(x - 3, y - 3, 72, 54); }
     }
-    // roster preview panel
-    const ab = ABBRS[sel], ros = roster(ab);
-    const qb = ros.offense.find((p) => p.role === "QB");
-    const wr = ros.offense.find((p) => p.role === "WR");
-    const rb = ros.offense.find((p) => p.role === "RB");
+    const ab = ABBRS[sel], ros = roster(ab), t = TEAMS[ab];
+    // ---- LEFT: the team you are looking at
+    panel(24, 140, 150, 226, G.selStep === 0 ? "YOUR TEAM" : "OPPONENT");
+    cx.fillStyle = t[1]; cx.fillRect(34, 160, 130, 96);
+    cx.fillStyle = t[2]; cx.fillRect(34, 250, 130, 6);
+    drawMascot(ab, 51, 160, 96, true);
+    cx.textAlign = "center"; cx.font = PF(9); cx.fillStyle = "#f4f6f1";
+    fitText(t[0].toUpperCase(), 99, 278, 134, 9, 7);
+    cx.font = PF(7); cx.fillStyle = "#9db0a4"; fitText(divisionOf(ab), 99, 294, 134, 7, 7);
+    cx.font = PF(18); cx.fillStyle = "#ffd23f"; cx.fillText(String(ros.ovr), 99, 328);
+    cx.font = PF(7); cx.fillStyle = "#9db0a4"; cx.fillText("OVERALL", 99, 344);
+    cx.fillStyle = "#0a1f14"; cx.fillRect(34, 350, 130, 8);
+    cx.fillStyle = "#69be28"; cx.fillRect(34, 350, Math.round(130 * clamp((ros.ovr - 70) / 29, 0.05, 1)), 8);
+    // ---- RIGHT: the stars, or the matchup once both teams are on the table
+    panel(786, 140, 150, 226, G.selStep === 1 ? "THE MATCHUP" : "THE STARS");
+    if (G.selStep === 1) {
+      const me = ABBRS[G.selA], rm = roster(me);
+      drawMascot(me, 800, 160, 56, true); drawMascot(ab, 866, 160, 56, true, true);
+      cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = "#f4f6f1";
+      cx.fillText(me, 828, 232); cx.fillText(ab, 894, 232);
+      cx.font = PF(12); cx.fillStyle = "#ffd23f"; cx.fillText(String(rm.ovr), 828, 256); cx.fillText(String(ros.ovr), 894, 256);
+      cx.font = PF(7); cx.fillStyle = "#9db0a4";
+      const d = rm.ovr - ros.ovr;
+      const lines = wrapLines(d >= 4 ? "YOU ARE THE FAVOURITE" : d <= -4 ? "THEY ARE THE FAVOURITE. UNDERDOG STORY." : "EVEN MATCH. EARN IT.", 130, 3);
+      lines.forEach((l, i) => cx.fillText(l, 861, 288 + i * 12));
+    } else {
+      const qb = ros.offense.find((pl) => pl.role === "QB");
+      const rb = ros.offense.find((pl) => pl.role === "RB");
+      const wr = ros.offense.find((pl) => pl.role === "WR" || pl.role === "WR1");
+      const rows = [["QB", qb], ["RB", rb], ["WR", wr]];
+      cx.textAlign = "left";
+      rows.forEach(([pos, pl], i) => {
+        if (!pl) return;
+        const y = 172 + i * 44;
+        cx.font = PF(7); cx.fillStyle = "#9db0a4"; cx.fillText(pos, 798, y);
+        cx.font = PF(8); cx.fillStyle = "#f4f6f1"; fitText(lastName(pl.name).toUpperCase(), 798, y + 14, 128, 8, 7);
+        cx.font = PF(7); cx.fillStyle = "#ffd23f";
+        fitText(pos === "QB" ? (QB_ID[ab] ? QB_ID[ab][0] : "THE STARTER") : "OVR " + playerOvr(pl), 798, y + 27, 128, 7, 7);
+      });
+      cx.font = PF(7); cx.fillStyle = "#9db0a4"; cx.fillText("K", 798, 304);
+      cx.font = PF(8); cx.fillStyle = "#f4f6f1"; fitText(lastName(ros.kicker.name).toUpperCase(), 798, 318, 128, 8, 7);
+      cx.font = PF(7); cx.fillStyle = "#ffd23f"; cx.fillText("LEG " + ros.kicker.leg, 798, 331);
+    }
+    // ---- BOTTOM: the summary line, as before
     cx.font = PF(11); cx.fillStyle = "#f4f6f1"; cx.textAlign = "center";
-    let line = TEAMS[ab][0].toUpperCase() + "  ·  OVR " + ros.ovr;
-    if (qb) line += "  ·  QB " + lastName(qb.name) + (qb.stats && qb.stats.passing_yards ? " (" + qb.stats.passing_yards + " YDS)" : "");
-    cx.fillText(line, W / 2, 420);
+    const qb2 = ros.offense.find((pl) => pl.role === "QB");
+    let line = t[0].toUpperCase() + "  ·  OVR " + ros.ovr;
+    if (qb2) line += "  ·  QB " + lastName(qb2.name) + (qb2.stats && qb2.stats.passing_yards ? " (" + qb2.stats.passing_yards + " YDS)" : "");
+    fitText(line, W / 2, 420, 900, 11, 8);
     cx.font = PF(9); cx.fillStyle = "#9db0a4";
+    const rb2 = ros.offense.find((pl) => pl.role === "RB"), wr2 = ros.offense.find((pl) => pl.role === "WR");
     let l2 = "";
-    if (rb) l2 += "RB " + lastName(rb.name) + (rb.stats && rb.stats.rushing_yards != null ? " " + rb.stats.rushing_yards + "yd" : "") + "   ";
-    if (wr) l2 += "WR " + lastName(wr.name) + (wr.stats && wr.stats.receiving_yards != null ? " " + wr.stats.receiving_yards + "yd" : "");
-    cx.fillText(l2, W / 2, 444);
-    cx.fillText("K " + lastName(ros.kicker.name) + " · LEG " + ros.kicker.leg, W / 2, 466);
+    if (rb2) l2 += "RB " + lastName(rb2.name) + (rb2.stats && rb2.stats.rushing_yards != null ? " " + rb2.stats.rushing_yards + "yd" : "") + "   ";
+    if (wr2) l2 += "WR " + lastName(wr2.name) + (wr2.stats && wr2.stats.receiving_yards != null ? " " + wr2.stats.receiving_yards + "yd" : "");
+    fitText(l2, W / 2, 444, 900, 9, 7);
+    cx.fillText(G.selStep === 0 && G.selectFor === "exh" ? "ENTER AGAIN TO PICK THE OPPONENT" : G.selStep === 1 ? "ENTER = KICK OFF" : "ENTER = START", W / 2, 468);
   }
-
   function drawPlaycall() {
     cx.fillStyle = "rgba(5,12,8,.55)"; cx.fillRect(0, 330, W, H - 330);
     cx.textAlign = "center";
@@ -13665,26 +13931,68 @@
     cx.restore();
   }
 
+  // ============================================== 2.0 · THE FINAL CARD
+  // WHAT WAS WEAK: "FINAL / LV 27 — IND 24 / YOUR DAY" in three lines of text
+  // over the frozen field — the payoff screen of a twelve-minute game had no
+  // team colours, no dinosaur and none of the numbers the box score already
+  // held. It is a scoreboard now: both teams in their colours with their
+  // mascots, a verdict, your day, the player of the game, and your top three
+  // stat lines, so the payoff reads without opening the box score (B still
+  // opens it, ENTER still continues — nothing about the flow moved).
   function drawOver() {
-    cx.fillStyle = "rgba(5,12,8,.55)"; cx.fillRect(0, 0, W, H);
-    cx.textAlign = "center";
-    cx.font = PF(30); cx.fillStyle = "#ffd23f";
-    cx.fillText("FINAL", W / 2, 170);
-    cx.font = PF(20); cx.fillStyle = "#f4f6f1";
-    cx.fillText(G.my + " " + G.score.A + "  —  " + G.opp + " " + G.score.B, W / 2, 220);
-    cx.font = PF(10); cx.fillStyle = "#9db0a4";
-    cx.fillText("YOUR DAY: " + Math.round(G.stats.passYds + G.stats.rushYds) + " TOTAL YDS · " + G.stats.tds + " TD", W / 2, 260);
+    cx.fillStyle = "rgba(5,12,8,.74)"; cx.fillRect(0, 0, W, H);
+    if (G.showBox) return;   // the box score owns the screen while it is open
+    const won = G.score.A > G.score.B, tie = G.score.A === G.score.B;
+    const cw = 600, cx0 = W / 2 - cw / 2, cy = 40;
+    cx.fillStyle = "#0d2519"; cx.fillRect(cx0, cy, cw, 176);
+    cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(cx0, cy, cw, 176);
+    cx.textAlign = "center"; cx.font = PF(22); cx.fillStyle = "#ffd23f";
+    cx.fillText(G.ot ? "FINAL · OVERTIME" : "FINAL", W / 2, cy + 34);
+    const side = (ab, x, score, mine) => {
+      cx.fillStyle = TEAMS[ab][1]; cx.fillRect(x - 110, cy + 50, 220, 104);
+      cx.fillStyle = TEAMS[ab][2]; cx.fillRect(x - 110, cy + 148, 220, 6);
+      drawMascot(ab, mine ? x - 104 : x + 44, cy + 62, 60, true, !mine);
+      const tx = mine ? x + 26 : x - 26;
+      cx.textAlign = "center"; cx.font = PF(8); cx.fillStyle = onTeam(ab);
+      fitText(TEAMS[ab][0].toUpperCase(), tx, cy + 78, 140, 8, 7);
+      cx.font = PF(30); cx.fillText(String(score), tx, cy + 126);
+    };
+    side(G.my, W / 2 - 170, G.score.A, true);
+    side(G.opp, W / 2 + 170, G.score.B, false);
+    cx.font = PF(9); cx.fillStyle = tie ? "#f4f6f1" : won ? "#69be28" : "#ff7a6b"; cx.textAlign = "center";
+    cx.fillText(tie ? "TIE" : won ? "YOU WIN" : "THEY WIN", W / 2, cy + 108);
+    if (G.szn && G.mode === "season") {
+      cx.font = PF(7); cx.fillStyle = "#9db0a4";
+      cx.fillText(G.szn.phase === "regular" ? "WEEK " + G.szn.week + " OF 17" : (G.szn.playoffs && G.szn.playoffs.roundNames[G.szn.playoffs.round]) || "PLAYOFFS", W / 2, cy + 124);
+    }
+    let y = 252;
+    cx.font = PF(10); cx.fillStyle = "#f4f6f1";
+    cx.fillText("YOUR DAY: " + Math.round(G.stats.passYds + G.stats.rushYds) + " TOTAL YDS · " + G.stats.tds + " TD", W / 2, y); y += 28;
     if (G.pog) {
       cx.font = PF(11); cx.fillStyle = "#ffd23f";
-      cx.fillText("🏆 PLAYER OF THE GAME: " + G.pog.name, W / 2, 292);
-      cx.font = PF(9); cx.fillStyle = "#f4f6f1";
-      cx.fillText(G.pog.line, W / 2, 312);
+      fitText("🏆 PLAYER OF THE GAME: " + G.pog.name, W / 2, y, 800, 11, 8); y += 20;
+      cx.font = PF(9); cx.fillStyle = "#f4f6f1"; fitText(G.pog.line, W / 2, y, 760, 9, 7); y += 30;
     }
-    cx.font = PF(13); cx.fillStyle = Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6";
-    cx.fillText("ENTER / TAP = CONTINUE  ·  B = BOX SCORE", W / 2, 348);
+    // your top three stat lines, so the box score's payoff is on this screen
+    const tops = Object.values(G.gameStats || {}).filter((s) => s.side === "A")
+      .map((s) => ({ s, v: (s.passYds || 0) + (s.rushYds || 0) + (s.recYds || 0) + (s.tkl || 0) * 4 + (s.sacks || 0) * 10 + (s.defInt || 0) * 15 }))
+      .filter((r) => r.v > 0).sort((a, b) => b.v - a.v).slice(0, 3);
+    if (tops.length) {
+      cx.fillStyle = "#0d2519"; cx.fillRect(W / 2 - 300, y - 14, 600, tops.length * 18 + 12);
+      tops.forEach((r, i) => {
+        const s = r.s, parts = [];
+        if (s.att) parts.push(s.cmp + "/" + s.att + " · " + s.passYds + " YDS · " + s.passTd + " TD" + (s.passInt ? " · " + s.passInt + " INT" : ""));
+        if (s.car) parts.push(s.car + " CAR · " + s.rushYds + " YDS" + (s.rushTd ? " · " + s.rushTd + " TD" : ""));
+        if (s.rec) parts.push(s.rec + " REC · " + s.recYds + " YDS" + (s.recTd ? " · " + s.recTd + " TD" : ""));
+        if (s.tkl || s.sacks || s.defInt) parts.push((s.tkl || 0) + " TKL" + (s.sacks ? " · " + s.sacks + " SCK" : "") + (s.defInt ? " · " + s.defInt + " INT" : ""));
+        cx.font = PF(8); cx.fillStyle = i === 0 ? "#ffd23f" : "#f4f6f1";
+        fitText((s.pos ? s.pos + " " : "") + lastName(s.name).toUpperCase() + "   " + parts.join("   "), W / 2, y + i * 18, 580, 8, 7);
+      });
+      y += tops.length * 18 + 16;
+    }
+    cx.font = PF(12); cx.fillStyle = Math.sin(performance.now() / 300) > 0 ? "#ffd23f" : "#8a6"; cx.textAlign = "center";
+    cx.fillText("ENTER / TAP = CONTINUE  ·  B = BOX SCORE", W / 2, Math.max(y + 20, 470));
   }
-
-  // ------------------------------------------------------------- box score
   function drawBoxScore() {
     cx.fillStyle = "rgba(5,12,8,.94)"; cx.fillRect(40, 40, W - 80, H - 80);
     cx.strokeStyle = "#ffd23f"; cx.strokeRect(40, 40, W - 80, H - 80);

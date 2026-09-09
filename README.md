@@ -102,6 +102,17 @@ Interception-rate ranking requires ≥100 pass attempts to qualify (filters out 
 
 ## Dino Bowl
 
+### Dino Bowl 2.0 (2026-09-09)
+
+A presentation and UX release; gameplay is untouched. New season hub (team colours,
+mascot, next-opponent matchup, staff, form, 17-week schedule, tappable actions),
+rebuilt team select (legible tiles, mascot + OVR panel, matchup panel), a proper FINAL
+scoreboard card, division-panel standings with a playoff line, a season-aware front
+door, a CROWD VOLUME setting, a PERFECT kick payoff, favicon / theme-color / share
+tags, and three long-open product bugs (TD yards on the post-game card, ceremonial
+beats killable on frame 1, crowd above the action). Details in ROADMAP.md → "DINO
+BOWL 2.0".
+
 An 8-bit, canvas-rendered American football game in the spirit of Retro Bowl —
 except the Cretaceous never ended. Every position is its own species:
 

@@ -21,6 +21,34 @@ Two independent methods fed it, and they found different things — keep both:
   corrupt-save boot, sprite-cel pixel metrics). Four of the five defects fixed on
   08-12 were found *only* by probing, not by reading.
 
+## DINO BOWL 2.0 — 2026-09-09 (branch `dinobowl-2.0`, NOT yet shipped)
+
+The 2.0 pass is a **presentation and UX** release. Gameplay, physics, balance,
+tackle timings, the kick meter math, the throw model and every keeper in §7 /
+LESSONS #22 are untouched by design — the owner asked for the same classic feel.
+What changed is the layer *around* the football, plus the open P0s that were
+pure product bugs. Screens were audited live in Chrome (every state, both
+fresh and mid-season) before anything was drawn.
+
+| # | What was weak | What 2.0 does | Where |
+|---|---|---|---|
+| 1 | **Season hub** was six centred text lines — the screen a season player sees most, with no colour, no dinosaur, nothing to read | Team-colour header band with mascot, record, division rank and streak · NEXT UP matchup card (opponent mascot, record, home/away, OVR bar) · coaching staff with stars · last-five form strip · full 17-week schedule strip with W/L colours and the current week framed · tappable action chips (PLAY / STANDINGS / STATS / TRAIN / MENU). All keys unchanged; a tap on empty space no longer starts a game by accident | `drawHub`, `hubChips`, `drawTeamBand`, `mascotSheet` |
+| 2 | **Team select**: abbreviation drawn in the helmet colour was near-invisible on a dozen jerseys; no mascot anywhere on the screen that picks dinosaurs | Two-colour tiles with text legible on any jersey (`onTeam`) · left panel: mascot, division, OVR with bar · right panel: the stars (QB identity, RB/WR OVR, kicker) or, on step two, the head-to-head matchup. Grid geometry unchanged, `teamCellAt` untouched | `drawSelect` |
+| 3 | **FINAL screen** was three lines over the frozen field | Scoreboard card: both teams in their colours with mascots, verdict, week context, YOUR DAY, player of the game, your top three stat lines. B = box score unchanged; the card hides while the box is open | `drawOver` |
+| 4 | **Standings** were 7px columns | Eight division panels: rank, colours, name, record, games back, leader marked, your row framed, conference playoff-line footer | `drawStandings` |
+| 5 | Front door "PLAY SEASON" said "pick up where you left off" | It names the season: `EAGLES · 4-2-1 · WEEK 8 vs BEARS` | `homeOptions` |
+| 6 | **P0-6** TD yardage never reached YOUR DAY (`0 TOTAL YDS · 1 TD`) | `touchdown()` credits `G.stats` for side A | `touchdown` |
+| 7 | **P0-11** END OF Q / HALFTIME / OVERTIME / opening kickoff killable on frame 1 (timer belonged to the state) | `deadBeat(secs)` arms a fresh lockout clock for ceremonial beats | `deadBeat`, `endQuarter` |
+| 8 | **P0-24** crowd bus pinned at 1.1 above the action, no slider | CROWD VOLUME setting (default 70%), ceiling 0.85 × volume — the bed sits under the SFX layer (owner mix law) | `setVol`, `SETTINGS_ROWS` |
+| 9 | Kick meter's centre stripe promised a payoff for a year | PERFECT! banner + sparks + cheer on a dead-centre lock. Cosmetic only — `kickLocked` math unchanged | `kickLocked` |
+| 10 | No favicon / theme-color / share card on either shell | SVG 🦖 favicon, theme-color, description and OG tags on both shells; `const BUILD = "2.0"` shown on the title | `index.html`, `game.html` |
+
+Not touched, deliberately: run-game yardage band, scoring targets, snapshotFrame cost,
+pooled particles, dead-code deletion, direction swap, franchise economy (all still open
+below). Verification: the twelve headless suites plus `text_overflow_sweep` (448 scenes,
+0 hits) pass; every new screen screenshotted in Chrome fresh and mid-season.
+
+
 ## Status — what is already fixed and deployed
 
 Shipped and live as `aa-plus-v36-20260812`, all verified by curl against the
