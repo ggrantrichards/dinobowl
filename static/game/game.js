@@ -224,7 +224,14 @@
   // ------------------------------------------------------------------- audio
   // Master SFX trim (owner: match Retro Bowl's restraint — quiet accents)
   const SFX_MASTER = 0.85;   // grunts/pads up a notch (owner mix 2026-08-07)
-  let AC = null, muted = false;
+  // MUTE IS A SETTING, NOT A KEYPRESS. It survives a reload, it can be set
+  // from the page that embeds the game (the Gridiron panel's corner button —
+  // the game keeps playing when that panel is collapsed, so the button has to
+  // reach in from outside), and it is read here, before lsGet exists, so the
+  // very first sound of the session already obeys it.
+  const MUTE_KEY = "dinobowl_muted";
+  let AC = null;
+  let muted = (() => { try { return localStorage.getItem(MUTE_KEY) === "1"; } catch (_) { return false; } })();
   // Mixer buses: music / sfx / crowd → master (+ gentle limiter). Volumes
   // persist in localStorage. OWNER MIX LAW (play-test 2026-08-06, Pixel
   // Gridiron): the crowd is a bed UNDER the action, never over it — its bus
@@ -258,7 +265,7 @@
       } catch (_) { }
     }
     if (!masterBus) {
-      masterBus = AC.createGain(); masterBus.gain.value = 1;
+      masterBus = AC.createGain(); masterBus.gain.value = muted ? 0 : 1;
       const comp = AC.createDynamicsCompressor();
       comp.threshold.value = -14; comp.knee.value = 20; comp.ratio.value = 7;
       masterBus.connect(comp); comp.connect(AC.destination);
@@ -270,6 +277,18 @@
       musicBus.connect(masterBus); sfxBus.connect(masterBus); crowdBus.connect(masterBus);
     }
     return AC;
+  }
+  // The one way mute changes. Every emitter already checks `muted`, but a
+  // sound scheduled a moment ago is already in the graph, so the master bus
+  // goes to zero as well — that is what makes the button feel instant.
+  function setMuted(on) {
+    muted = !!on;
+    try { localStorage.setItem(MUTE_KEY, muted ? "1" : "0"); } catch (_) { }
+    if (masterBus) masterBus.gain.value = muted ? 0 : 1;
+    if (muted) { try { stopMusic(); } catch (_) { } }
+    // let the embedding page repaint its own control
+    try { if (window.parent && window.parent !== window) window.parent.postMessage({ dinobowl: "muted", muted }, "*"); } catch (_) { }
+    return muted;
   }
   function setVol(kind, v) {
     v = Math.max(0, Math.min(1, v));
@@ -1018,6 +1037,15 @@
     saveCpuMemory();
   }
   window.__game = G; // for debugging / automated tests
+  // The Gridiron panel's mute button talks to the game through this. Same
+  // origin only, and the only thing it can do is turn this tab's audio on or
+  // off — it cannot touch the game state.
+  window.addEventListener("message", (e) => {
+    if (e.origin !== location.origin) return;
+    const d = e.data;
+    if (!d || d.dinobowl !== "setMuted") return;
+    setMuted(!!d.muted);
+  });
   window.addEventListener("error", (e) => { G.lastErr = e.message + " @ " + e.lineno; notify(G.lastErr); });
 
   const keys = {};
@@ -6677,7 +6705,7 @@
   }
 
   function onKey(k) {
-    if (k === "m") { muted = !muted; return; }
+    if (k === "m") { setMuted(!muted); return; }
     if (k === "h") { G.help = !G.help; return; }
     // PAUSE — a 12-minute game you can't pause or quit isn't a product.
     // ESC toggles; Q from the pause card abandons to the menu (season saves).
@@ -14213,6 +14241,9 @@
     const r2 = clamp((n >> 16) + amt, 0, 255), g = clamp(((n >> 8) & 255) + amt, 0, 255), bl = clamp((n & 255) + amt, 0, 255);
     return "rgb(" + r2 + "," + g + "," + bl + ")";
   }
+
+  // audio control for the embedding page (see the message listener above)
+  G.audio = { isMuted: () => muted, setMuted, toggleMuted: () => setMuted(!muted) };
 
   // debug/test hooks (used by automated game tests)
   G.debug = {

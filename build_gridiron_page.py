@@ -60,8 +60,13 @@ BODY = r"""
     </details>
   </div>
 
-  <!-- DINO BOWL: play while your queries run -->
-  <button class="dino-btn" id="dinoBtn" title="8-bit football. With dinosaurs.">🦖 DINO BOWL</button>
+  <!-- DINO BOWL: play while your queries run. The mute chip lives beside the
+       launcher, not inside the panel, because the game keeps playing when the
+       panel is collapsed and that is exactly when you need to silence it. -->
+  <div class="dino-dock">
+    <button class="dino-mute" id="dinoMute" type="button" aria-pressed="false" title="Mute Dino Bowl">🔊</button>
+    <button class="dino-btn" id="dinoBtn" title="8-bit football. With dinosaurs.">🦖 DINO BOWL</button>
+  </div>
   <div class="dino-panel" id="dinoPanel">
     <div class="dino-head">
       <span>DINO BOWL — retro football, but Cretaceous</span>
@@ -303,6 +308,32 @@ BODY = r"""
       if (open && !dinoFrame.src) dinoFrame.src = '/game/';
       dinoBtn.textContent = open ? '🦖 HIDE DINO BOWL' : '🦖 DINO BOWL';
     });
+
+    // MUTE. The state lives in localStorage, which the game reads at boot and
+    // writes when you press M inside it, so the two always agree — and a mute
+    // set before the game is ever opened still lands. While the game is up we
+    // also post to it, so the click is instant rather than reload-shaped.
+    const MUTE_KEY = 'dinobowl_muted', dinoMute = document.getElementById('dinoMute');
+    const isMuted = () => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch (_) { return false; } };
+    function paintMute(on) {
+      dinoMute.textContent = on ? '🔇' : '🔊';
+      dinoMute.classList.toggle('is-muted', on);
+      dinoMute.setAttribute('aria-pressed', on ? 'true' : 'false');
+      dinoMute.title = on ? 'Dino Bowl is muted — click for sound' : 'Mute Dino Bowl';
+    }
+    function setMuted(on) {
+      try { localStorage.setItem(MUTE_KEY, on ? '1' : '0'); } catch (_) { }
+      paintMute(on);
+      try { if (dinoFrame.contentWindow) dinoFrame.contentWindow.postMessage({ dinobowl: 'setMuted', muted: on }, location.origin); } catch (_) { }
+    }
+    dinoMute.addEventListener('click', () => setMuted(!isMuted()));
+    // the game reports back when M is pressed inside it
+    window.addEventListener('message', (e) => {
+      if (e.origin !== location.origin) return;
+      const d = e.data;
+      if (d && d.dinobowl === 'muted') paintMute(!!d.muted);
+    });
+    paintMute(isMuted());
   </script>
 </body>
 
@@ -320,6 +351,20 @@ EXTRA_CSS = """
     .results.career { margin-top: 14px; max-height: 320px; overflow: auto; }
     .results.career table { font-size: 12px; }
     .modal-header p { margin: 4px 0; color: var(--chalk-dim); font-size: 13px; }
+
+    /* 2.2: the launcher and the mute chip share one dock in the corner, so the
+       mute stays put (and stays clickable) whether the panel is open or not */
+    .dino-dock { position: fixed; right: 22px; bottom: 22px; z-index: 1200; display: flex; align-items: stretch; gap: 8px; }
+    .dino-dock .dino-btn { position: static; right: auto; bottom: auto; }
+    .dino-mute {
+      width: 42px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+      font-size: 18px; line-height: 1; cursor: pointer; padding: 0;
+      background: #10231a; color: var(--chalk); border: 1px solid var(--accent); border-radius: var(--radius);
+      box-shadow: 0 6px 24px rgba(0, 0, 0, .45); transition: transform .1s, filter .15s;
+    }
+    .dino-mute:hover { filter: brightness(1.3); transform: translateY(-1px) }
+    .dino-mute:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+    .dino-mute.is-muted { background: var(--accent); color: #1a1200 }
 """
 
 def main():
