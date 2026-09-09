@@ -1942,6 +1942,20 @@
     return out;
   }
 
+  // ONE species, standing pack only — no action packs, no idle pack, no
+  // rampager. WHAT WAS BROKEN: the MEET THE QBS gallery needs two walk cels of
+  // one species for each of 32 teams, and it asked buildTeamSprites for them.
+  // That paints every species, every action pack and the double-scale
+  // rampager: measured 1,590 canvases and ~820ms PER TEAM, so the gallery's
+  // first frame held the main thread for ~26 SECONDS. Chrome drops the canvas
+  // (grey screen), the Web Audio scheduler starves (music stutters in and
+  // out) and every input queues behind it. This builds ~1/60th of that.
+  function buildSpeciesSprites(key, jersey, helmet, scale) {
+    const spec = SPECIES[key];
+    if (!spec) return null;
+    return buildSpecies(spec, jersey, helmet, scale || 2, false);
+  }
+
   function buildBall(scale) {
     scale = scale || 2;
     const map = [
@@ -1968,7 +1982,7 @@
   }
 
   window.DinoSprites = {
-    buildTeamSprites, buildFanSprites, buildBall, buildSnowball, drawMap, makeCanvas,
+    buildTeamSprites, buildSpeciesSprites, buildFanSprites, buildBall, buildSnowball, drawMap, makeCanvas,
     SPECIES_KEYS, FAN_SPECIES_KEYS, COMPACT_ACTION_KEYS,
   };
 })();

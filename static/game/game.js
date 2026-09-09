@@ -6159,7 +6159,11 @@
       const pose = spriteFrame.pose;
       const poseProgress = spriteFrame.progress;
       const artPack = spriteFrame.pack;
-      const img = (e.dir >= 0 ? artPack.R : artPack.L)[spriteFrame.fi];
+      // A cel index that misses its pack (an action pack shorter than its
+      // declared n, a timer driven off its range) used to hand drawImage an
+      // undefined and throw out of render on EVERY frame — a frozen field under
+      // an error notice. The standing cel is always there; draw that instead.
+      const img = (e.dir >= 0 ? artPack.R : artPack.L)[spriteFrame.fi] || (e.dir >= 0 ? spr.R : spr.L)[0];
       const drawW = artPack.w, drawH = artPack.h;
       const jumpAmp = 5 + Math.max(0, (e.jr || 60) - 55) * 0.2;
       const jump = e.jmp > 0 ? Math.sin((1 - e.jmp / 0.4) * Math.PI) * jumpAmp : 0;
@@ -6697,9 +6701,14 @@
         // defense: SPACE is ALWAYS a jump (tackling lives on click / E)
         else if (!offenseIsUser() && G.controlled) timedJump(G.controlled);
       }
-      if (k === "x" && G.phase === "drop" && offenseIsUser()) { // throwaway
-        G.ball = { mode: "air", kind: "lob", away: true, from: { x: G.ball.holder.x, y: G.ball.holder.y }, to: { x: G.ball.holder.x + 160, y: TOP - 40 }, t: 0, T: 0.8, x: G.ball.holder.x, y: G.ball.holder.y, z: 12, holder: null };
-        G.phase = "air"; G.aim = null; sfx.throw();
+      if (k === "x" && G.phase === "drop" && offenseIsUser() && G.ball.mode === "held" && G.ball.holder) { // throwaway
+        // guarded on the holder: this was the only throw that read
+        // G.ball.holder.x without checking it, and it left the sling armed
+        const qb = G.ball.holder;
+        G.ball = { mode: "air", kind: "lob", away: true, from: { x: qb.x, y: qb.y }, to: { x: qb.x + 160, y: TOP - 40 }, t: 0, T: 0.8, x: qb.x, y: qb.y, z: 12, holder: null };
+        G.phase = "air"; G.aim = null; G.slingAnchor = null; G.slingPull = null;
+        qb.throwT = 0.3; playPose(qb, "throw", 0.32);
+        sfx.throw();
       }
       if (k === "r") tryRampage(G.humanB ? G.drive : "A");
       if (k === "v") throwSnowball();
@@ -6913,6 +6922,7 @@
       clearCareer(); clearSeason(); G.szn = null;
       startCareerFlow();
     } else if (pick === "MEET THE QBS") {
+      G.qbCards = null;   // re-read the starters on every visit (season dev, franchise adds)
       G.state = "qbs";
     } else if (pick === "TUTORIAL") {
       G.tut = 0; G.state = "tutorial";
@@ -7139,6 +7149,7 @@
     if (scalable && G.freezeT > 0) { G.freezeT = Math.max(0, G.freezeT - dt); sdt = 0; }
     else if (scalable && G.slowT > 0) { G.slowT = Math.max(0, G.slowT - dt); sdt = dt * (G.slowScale || 0.45); }
     else if (!scalable) { G.freezeT = 0; G.slowT = 0; }
+    let threw = false;
     try {
       if (!G.qaStill) update(sdt);
       // 12 fps state replication is smooth for this pixel-art game while
@@ -7149,7 +7160,37 @@
       }
       render();
     }
-    catch (err) { G.lastErr = String(err); notify(G.lastErr); }
+    catch (err) {
+      threw = true;
+      G.lastErr = String(err);
+      // Keep the stack. String(err) throws it away, so the on-screen one-liner
+      // named the symptom and nothing else — a report of "some throws show an
+      // error" had no line to go to. The console gets the full stack once,
+      // and the notice carries the game.js line of the top frame.
+      G.lastStack = err && err.stack ? String(err.stack) : null;
+      if (G.lastStack && G.lastStack !== loop.lastLogged) { loop.lastLogged = G.lastStack; try { console.error(err); } catch (_) { } }
+      const at = G.lastStack ? /game\.js[^:\n]*:(\d+)/.exec(G.lastStack) : null;
+      notify(G.lastErr + (at ? " @ " + at[1] : ""));
+      // A per-frame error during a play used to FREEZE the game: update() threw
+      // at the same spot every frame, render() never ran, and the last frame
+      // sat there under the notice with no input able to reach the sim. The
+      // dead-beat continuation already has a "RECOVERED FROM AN ERROR" reset
+      // (S3); this is the same contract for the live tick. After ~0.2s of
+      // consecutive failures the play is whistled dead and the next call is
+      // put up — a lost down beats a lost game.
+      loop.errRun = (loop.errRun || 0) + 1;
+      if (loop.errRun >= 12 && (G.state === "live" || G.state === "dead")) {
+        loop.errRun = 0;
+        try {
+          G.state = "dead"; G.phase = "dead"; G.deadT = 0; G.deadNext = null;
+          G.freezeT = 0; G.slowT = 0; G.aim = null; G.slingAnchor = null; G.soarAim = null;
+          G.replay = null; G.celebrate = null;
+          notify("RECOVERED FROM AN ERROR — RESETTING THE PLAY");
+          enterPlaycall();
+        } catch (_) { /* the next frame retries the reset */ }
+      }
+    }
+    if (!threw) loop.errRun = 0;
     requestAnimationFrame(loop);
   }
 
@@ -11417,7 +11458,11 @@
   // is the single biggest difference between hand-made 8-bit art and a
   // generated gradient. This game already dithers — the crowd is a field of
   // hashed pixel blocks — so it is the house idiom, not an import.
-  const SKY_RAMP = ["#0d1828", "#142334", "#1b2f3d", "#263c3e", "#3d4e37", "#67602c", "#a37c28", "#d59f3a"];
+  // Owner note (2026-09-09): "a little brighter out before the football goes
+  // in front of the sun". The ramp was a night sky with a dusk horizon; it is
+  // now a late-dusk sky — every step lifted, the horizon warmer — and the
+  // gloom overlay below drains it all the same, so the dark half is unchanged.
+  const SKY_RAMP = ["#17293f", "#1f3652", "#2a465c", "#3c5a5e", "#5e6f4a", "#8c803a", "#c6983c", "#eab858"];
   const BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   function bootBake() {
     if (G.bootSky) return;
@@ -11529,7 +11574,9 @@
     const ease = (a, b) => clamp((t - a) / Math.max(0.0001, b - a), 0, 1);
     const smooth = (v) => v * v * (3 - 2 * v);
     // the light drains as the thing comes down — the reason he looks up
-    const gloom = smooth(ease(BOOT.dim, BOOT.fall)) * 0.80;
+    const gloom = smooth(ease(BOOT.dim, BOOT.fall)) * 0.84;
+    // the daylight still on the distance before the thing blots it out
+    const day = 1 - smooth(ease(BOOT.dim, BOOT.fall));
     const look = smooth(ease(BOOT.dim + 0.3, BOOT.look));
     // ---- CAMERA. A slow drift the whole time, and a tilt up on the look, so
     // the shot is never still. Everything below is drawn through this.
@@ -11547,6 +11594,10 @@
     // ---- 2. ATMOSPHERE. ONE overlay dims everything in the distance as the
     // light goes. Drawn here so the foreground (fronds, the animal) stays
     // near-black on its own terms rather than being washed twice.
+    if (day > 0.01) {
+      cx.fillStyle = "rgba(255,214,150," + (0.09 * day).toFixed(3) + ")";
+      cx.fillRect(-40, -40, W + 80, H + 80);
+    }
     if (gloom > 0.01) {
       cx.fillStyle = "rgba(3,7,10," + gloom.toFixed(3) + ")";
       cx.fillRect(-40, -40, W + 80, H + 80);
@@ -11763,25 +11814,22 @@
     }
     cx.restore();
 
-    // ---- WHAT HE THINKS IT IS. The joke, stated: a meteor in the bubble,
-    // which becomes a football at the reveal.
+    // ---- WHAT HE MAKES OF IT. A big red "!?" popping over his head: alarm
+    // and confusion in two glyphs, in the game's own pixel font. (Replaced the
+    // thought bubble on the owner's call, 2026-09-09: a white blob that read
+    // as nothing and pulled the eye off the ball.) It pops in with an
+    // overshoot, breathes while he stares, and rattles at the reveal.
     if (t > BOOT.look + 0.25 && t < BOOT.land + 0.2) {
-      const bx = Math.round(W * 0.30), by = Math.round(150);
-      const grow = smooth(ease(BOOT.look + 0.25, BOOT.look + 0.55));
-      const R = Math.round(38 * grow);
-      if (R > 4) {
-        pxDisc(bx - 40, by + 62, Math.round(5 * grow), "rgba(240,244,235,.9)");
-        pxDisc(bx - 26, by + 42, Math.round(9 * grow), "rgba(240,244,235,.9)");
-        pxDisc(bx, by, R, "rgba(240,244,235,.94)");
-        pxDisc(bx - R * 0.5, by - R * 0.42, Math.round(R * 0.5), "rgba(240,244,235,.94)");
-        pxDisc(bx + R * 0.52, by - R * 0.3, Math.round(R * 0.46), "rgba(240,244,235,.94)");
-        if (t < BOOT.reveal) {
-          pxDisc(bx + 2, by + 2, 12, "#120d08");
-          cx.fillStyle = "#e2622b";
-          cx.fillRect(bx - 24, by - 12, 13, 3); cx.fillRect(bx - 28, by - 2, 15, 3);
-        } else if (G.ballSpr) {
-          cx.drawImage(G.ballSpr, bx - 18, by - 11, 36, 22);
-        }
+      const grow = smooth(ease(BOOT.look + 0.25, BOOT.look + 0.5));
+      const pop = 1 + 0.35 * Math.sin(ease(BOOT.look + 0.25, BOOT.look + 0.62) * Math.PI);
+      const breathe = 1 + 0.05 * Math.sin(t * 9);
+      const rattle = t >= BOOT.reveal ? Math.round(Math.sin(t * 46) * 3) : 0;
+      const size = Math.round(52 * grow * pop * breathe);
+      if (size >= 8) {
+        const mx = Math.round(W * 0.30) + rattle, my = Math.round(184 + (1 - grow) * 22);
+        cx.textAlign = "center"; cx.font = PF(size);
+        cx.fillStyle = "#3a0a0a"; cx.fillText("!?", mx + 4, my + 4);   // drop shadow
+        cx.fillStyle = "#ff3b2f"; cx.fillText("!?", mx, my);
       }
     }
 
@@ -12148,9 +12196,25 @@
     PHI: "bigarm", PIT: "headband", SEA: "chain", SF: "visor", TB: "headband",
     TEN: "speed", WAS: "visor",
   };
+  // WHAT WAS BROKEN: this built a FULL team sheet (every species, every action
+  // pack, the rampager) for each of the 32 teams, all inside the gallery's
+  // first render. Measured in Chrome: ~820ms and 1,590 canvases per team, a
+  // 26-second stall on one frame. The canvas went grey, the music cut in and
+  // out as the audio scheduler starved, and taps piled up behind it — the
+  // app looked dead. The gallery draws exactly one thing per team: the
+  // troodon's two standing cels. So build only that, and build at most a few
+  // teams per frame so even the first frame never hitches.
+  const QB_SHEETS_PER_FRAME = 3;
   function qbSheet(abbr) {
     G.qbSheets = G.qbSheets || {};
-    if (!G.qbSheets[abbr]) G.qbSheets[abbr] = DinoSprites.buildTeamSprites(TEAMS[abbr][1], TEAMS[abbr][2]);
+    if (!G.qbSheets[abbr]) {
+      if ((G.qbSheetBudget || 0) <= 0) return null;          // this frame's builds are spent
+      G.qbSheetBudget--;
+      const t = TEAMS[abbr];
+      G.qbSheets[abbr] = DinoSprites.buildSpeciesSprites
+        ? { troodon: DinoSprites.buildSpeciesSprites("troodon", t[1], t[2]) }
+        : DinoSprites.buildTeamSprites(t[1], t[2]);
+    }
     return G.qbSheets[abbr];
   }
   function drawQBs() {
@@ -12158,18 +12222,24 @@
     cx.textAlign = "center"; cx.font = PF(14); cx.fillStyle = "#ffd23f";
     cx.fillText("MEET THE QBS — 32 TROODONS OF THE LEAGUE", W / 2, 32);
     const t = performance.now() / 220 | 0;
+    G.qbSheetBudget = QB_SHEETS_PER_FRAME;
+    // the 32 starters are resolved ONCE per visit, not 32 roster() calls (each
+    // a localStorage read + JSON parse) on every one of 60 frames a second
+    if (!G.qbCards) G.qbCards = ABBRS.map((ab) => roster(ab).offense.find((p) => p.role === "QB") || { name: "Dino", arm: 75, acc: 75, spd: 75 });
     for (let i = 0; i < 32; i++) {
       const ab = ABBRS[i];
-      const ros = roster(ab);
-      const qb = ros.offense.find((p) => p.role === "QB") || { name: "Dino", arm: 75, acc: 75, spd: 75 };
+      const qb = G.qbCards[i];
       const [tag, feat] = QB_ID[ab] || ["THE STARTER", "headband"];
       const gx = 22 + (i % 8) * 118, gy = 52 + ((i / 8) | 0) * 118;
       cx.fillStyle = "rgba(255,255,255,.03)"; cx.fillRect(gx, gy, 108, 108);
-      const spr = qbSheet(ab).troodon;
+      const sheet = qbSheet(ab);
+      const spr = sheet && sheet.troodon;
       const size = feat === "small" ? 36 : 44;                    // Bryce-sized
       const sx2 = gx + 32 + (44 - size) / 2, sy2 = gy + 8 + (44 - size);
-      cx.drawImage(spr.R[t % 2], sx2, sy2, size, size);
-      if (feat !== "small") drawQBFeature(feat, gx + 32, gy + 8, 44);
+      if (spr) {
+        cx.drawImage(spr.R[t % 2], sx2, sy2, size, size);
+        if (feat !== "small") drawQBFeature(feat, gx + 32, gy + 8, 44);
+      }
       cx.font = PF(7); cx.fillStyle = hudColor(ab); cx.textAlign = "center";
       // TEXT BOX: a 108px card with 4px of pad. "FASTEST QB ALIVE" is 112px
       // at PF(7) and hung 2px past the card on both sides; the 9-character cut
