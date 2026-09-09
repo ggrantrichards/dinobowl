@@ -6,19 +6,34 @@
           ".read": "auth != null",
           ".write": "auth != null",
           ".validate": "!newData.exists() || (newData.hasChildren(['uid','room','ts']) && newData.child('uid').val() === auth.uid && newData.child('room').isString() && newData.child('room').val().length <= 20)"
+        },
+        "queue": {
+          ".read": "auth != null",
+          "$uid": {
+            ".write": "auth != null && (!newData.exists() || newData.child('uid').val() === auth.uid)",
+            ".validate": "!newData.exists() || (newData.hasChildren(['uid','room','ts']) && newData.child('uid').val() === auth.uid && newData.child('room').isString() && newData.child('room').val().length <= 20)"
+          }
         }
       },
       "rooms": {
         "$room": {
           ".read": "auth != null",
           ".write": "!data.exists() ? auth != null : false",
-          "meta": { ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid)" },
-          "frame": { ".write": "auth != null && data.parent().child('meta/hostUid').val() === auth.uid" },
+          "meta": {
+            ".write": "auth != null && (!data.exists() || data.child('hostUid').val() === auth.uid)"
+          },
+          "frame": {
+            ".write": "auth != null && data.parent().child('meta/hostUid').val() === auth.uid"
+          },
           "guestJoined": {
             ".write": "auth != null && data.parent().child('meta/hostUid').val() !== auth.uid",
             ".validate": "newData.hasChildren(['uid','ts']) && newData.child('uid').val() === auth.uid"
           },
-          "inputs": { "$input": { ".write": "auth != null" } }
+          "inputs": {
+            "$input": {
+              ".write": "auth != null"
+            }
+          }
         }
       }
     }

@@ -1099,6 +1099,10 @@
     // "matched — waiting for host" screen
     if (f.state === "online_wait" || f.state === "loading" || f.state === "title" || f.state === "menu") return;
     const teamChanged = f.my && (G.my !== f.my || G.opp !== f.opp);
+    if (f.state === "over" && f.mode === "online" && Net.role === "guest" && f.score && G._ratedRoom !== Net.room) {
+      G._ratedRoom = Net.room;                        // the guest is team B
+      adjustRating(f.score.B > f.score.A, f.score.A > f.score.B);
+    }
     Object.assign(G, f);
     // THE TRAP: with `parts` stripped, nothing on the guest re-creates this
     // array, and drawWeatherFX iterates it on EVERY rendered frame. G.parts is
@@ -1154,6 +1158,7 @@
   function resetNet() {
     Net.role = null; Net.remoteView = false; Net.room = null;
     Net.inputRef = null; Net.frameRef = null; Net.guestRef = null; Net.waitRef = null; Net.cancelled = false;
+    if (Net.scanTimer) { clearInterval(Net.scanTimer); Net.scanTimer = null; }
   }
   async function ensureFirebase() {
     if (!netReady()) return false;
@@ -1162,78 +1167,152 @@
     Net.db = firebase.database();
     return true;
   }
+  // ============================================== 2.0 · QUICK MATCH, MATCHED
+  // WHAT WAS WEAK: matchmaking was ONE slot. Whoever was waiting got the next
+  // searcher, full stop — a 2,000-rated veteran in Tokyo against a first-timer
+  // in Ohio, and a third searcher while two were already paired had nobody to
+  // find. It is a QUEUE now, one entry per player, carrying a rating (won and
+  // lost online games), a UTC offset and a region (from the browser's own
+  // time zone — no permission prompt, nothing precise enough to be private).
+  // A searcher reads the queue, ranks every fresh entry by rating distance,
+  // time-zone distance and region, and CLAIMS the best one with a transaction
+  // (so two searchers can never claim the same player). Nobody found: park an
+  // entry and host. Two players parking at the same instant used to be a
+  // deadlock in the old design too; here the host re-scans every few seconds
+  // and the one with the larger uid yields and joins — deterministic, no
+  // coin flip, no two hosts waiting on each other forever.
+  const RATING_KEY = "dinobowl_rating";
+  const myRating = () => { const r = Number(lsGet(RATING_KEY)); return r >= 100 ? r : 1000; };
+  function adjustRating(won, lost) {
+    const r = clamp(myRating() + (won ? 20 : lost ? -20 : 0), 400, 3000);
+    lsSet(RATING_KEY, String(r));
+    return r;
+  }
+  const TZ_NAME = (() => { try { return (Intl.DateTimeFormat().resolvedOptions().timeZone || ""); } catch (_) { return ""; } })();
+  const myRegion = () => (TZ_NAME.split("/")[0] || "UNKNOWN").toUpperCase();
+  const myTzOff = () => -new Date().getTimezoneOffset();      // minutes east of UTC
+  // lower is closer: 25 rating points = 1, one hour of time zone = 2, a
+  // different region (continent) = 4
+  function matchScore(e) {
+    const rd = Math.abs((typeof e.rating === "number" ? e.rating : 1000) - myRating()) / 25;
+    const td = Math.abs((typeof e.tz === "number" ? e.tz : myTzOff()) - myTzOff()) / 60 * 2;
+    const reg = ((e.region || "UNKNOWN") === myRegion()) ? 0 : 4;
+    return rd + td + reg;
+  }
+  const QUEUE_FRESH_MS = 60000;
+  // read the queue, rank it, and try to claim the best fit; mustBeat restricts
+  // the claim to entries whose uid sorts below ours (the deadlock tie-break)
+  async function claimBestWaiting(queue, myUid, mustBeat) {
+    const snap = await queue.once("value");
+    const all = snap.val() || {};
+    const now = Date.now();
+    const cands = Object.values(all).filter((e) => e && e.uid && e.uid !== myUid && e.room &&
+      typeof e.ts === "number" && (now - e.ts) < QUEUE_FRESH_MS && (!mustBeat || e.uid < myUid))
+      .sort((a, b) => matchScore(a) - matchScore(b));
+    for (const e of cands) {
+      // FIREBASE GOTCHA (found live, two hosts waiting on each other): a
+      // transaction runs FIRST against the local cache, which is empty for
+      // somebody else's entry, so the callback saw null, returned undefined
+      // and ABORTED without ever seeing the server. On a cache miss we propose
+      // the delete; if the server disagrees it re-runs us with the truth, and
+      // only a run that saw the real entry counts as a claim.
+      let claimed = false;
+      const res = await queue.child(e.uid).transaction((cur) => {
+        if (cur === null) return null;
+        if (cur.room === e.room && cur.uid === e.uid) { claimed = true; return null; }
+        return undefined;
+      });
+      if (res && res.committed && claimed) return e;
+    }
+    return null;
+  }
+  function stopScan() { if (Net.scanTimer) { clearInterval(Net.scanTimer); Net.scanTimer = null; } }
   async function startQuickMatch() {
     resetNet();
-    G.online = { phase: "searching", since: performance.now(), role: null };
+    G.online = { phase: "searching", since: performance.now(), role: null, rating: myRating(), region: myRegion() };
     G.state = "online_wait";
     try {
       if (!(await ensureFirebase())) { netNote(netBlurb(), netReason()); G.state = "menu"; return; }
     } catch (err) { console.error(err); netNote("Could not sign in for matchmaking: " + err.message, "SIGN-IN FAILED"); G.state = "menu"; return; }
     if (Net.cancelled) return;
     const myUid = firebase.auth().currentUser.uid;
-    const waitRef = Net.db.ref("dinobowl/matchmaking/waiting");
-    Net.waitRef = waitRef;
-    let asGuestRoom = null, asHostRoom = null;
+    const queue = Net.db.ref("dinobowl/matchmaking/queue");
+    Net.waitRef = queue.child(myUid);
     try {
-      await waitRef.transaction((cur) => {
-        const fresh = cur && typeof cur.ts === "number" && (Date.now() - cur.ts) < 45000;
-        if (fresh && cur.uid && cur.uid !== myUid) {
-          asGuestRoom = cur.room; asHostRoom = null;
-          return null;                 // claim this waiting player → pop the slot
-        }
-        asGuestRoom = null; asHostRoom = roomId();
-        return { uid: myUid, room: asHostRoom, ts: firebase.database.ServerValue.TIMESTAMP };
-      });
+      const found = await claimBestWaiting(queue, myUid, false);
+      if (Net.cancelled) { if (found) queue.child(found.uid).set(found).catch(() => { }); return; }
+      if (found) { G.online.oppRating = found.rating; await joinMatchedRoom(found.room, myUid); return; }
+      const room = roomId();
+      await Net.waitRef.set({ uid: myUid, room, ts: firebase.database.ServerValue.TIMESTAMP,
+        rating: myRating(), tz: myTzOff(), region: myRegion(), ver: 2 });
+      if (Net.cancelled) { Net.waitRef.remove(); return; }
+      await hostMatchedRoom(room, myUid);
     } catch (err) {
       console.error(err);
-      netNote("Matchmaking is unavailable (the database rules may need deploying). Try ONLINE (LINK) instead.", "MATCH FAILED");
-      G.online = null; G.state = "menu"; return;
+      G.lastMatchErr = String(err && err.stack || err);   // diagnostic for the harness
+      netNote("Matchmaking is unavailable (" + (err && err.message ? err.message : "the database rules may need deploying") + "). Try ONLINE (LINK) instead.", "MATCH FAILED");
+      G.online = null; G.state = "menu";
     }
-    if (Net.cancelled) { if (asHostRoom) waitRef.transaction((c) => (c && c.uid === myUid ? null : c)); return; }
-    if (asGuestRoom) { await joinMatchedRoom(asGuestRoom, myUid); }
-    else { await hostMatchedRoom(asHostRoom, myUid); }
   }
   async function hostMatchedRoom(room, myUid) {
     Net.role = "host"; Net.room = room;
     G.online.role = "host";
     netStatus("HOSTING · WAITING FOR A PLAYER");
     const ref = Net.db.ref("dinobowl/rooms/" + room);
-    await ref.set({ meta: { createdAt: firebase.database.ServerValue.TIMESTAMP, version: 1, hostUid: myUid }, frame: netFrame() });
+    await ref.set({ meta: { createdAt: firebase.database.ServerValue.TIMESTAMP, version: 2, hostUid: myUid }, frame: netFrame() });
     Net.inputRef = ref.child("inputs");
     Net.inputRef.on("child_added", (snap) => { const input = snap.val(); snap.ref.remove(); if (input) applyRemoteInput(input); });
-    // if we drop while still waiting, clear our queue slot so nobody joins a dead room
     Net.waitRef.onDisconnect().remove();
     Net.guestRef = ref.child("guestJoined");
     Net.guestRef.on("value", (snap) => {
       const g = snap.val();
       if (!g || !g.uid || !G.online || G.online.phase !== "searching") return;
       G.online.phase = "found";
+      G.online.oppRating = g.rating;
+      stopScan();
       netStatus("MATCHED · YOU HOST");
       Net.waitRef.onDisconnect().cancel();
-      Net.waitRef.transaction((cur) => (cur && cur.uid === myUid ? null : cur));   // tidy the slot
-      // host picks the teams; the game streams to the guest from there
+      Net.waitRef.remove();   // out of the queue: we are taken
       setTimeout(() => {
         if (Net.cancelled) return;
         G.mode = "online"; G.humanB = true; G.career = null; G.szn = null; G.selectFor = "exh";
         G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0; G.selB = (Math.random() * 32) | 0;
       }, 1100);
     });
+    // the deadlock breaker: while we wait, look for another host who parked at
+    // the same moment; the larger uid yields and joins the smaller one
+    const queue = Net.db.ref("dinobowl/matchmaking/queue");
+    stopScan();
+    if (typeof setInterval !== "function") return;   // headless harness has no timers; browsers always do
+    Net.scanTimer = setInterval(async () => {
+      if (Net.cancelled || !G.online || G.online.phase !== "searching" || Net.role !== "host") { stopScan(); return; }
+      try {
+        const found = await claimBestWaiting(queue, myUid, true);
+        if (!found || Net.cancelled || !G.online || G.online.phase !== "searching") { if (found) queue.child(found.uid).set(found).catch(() => { }); return; }
+        stopScan();
+        Net.waitRef.onDisconnect().cancel(); Net.waitRef.remove();
+        Net.guestRef.off(); Net.inputRef.off(); ref.remove();
+        Net.guestRef = null;
+        G.online.oppRating = found.rating;
+        await joinMatchedRoom(found.room, myUid);
+      } catch (_) { /* next tick retries */ }
+    }, 5000);
   }
   async function joinMatchedRoom(room, myUid) {
     Net.role = "guest"; Net.room = room; Net.remoteView = true;
-    G.online = { phase: "found", role: "guest", since: performance.now() };
+    G.online = Object.assign(G.online || {}, { phase: "found", role: "guest", since: performance.now() });
     const ref = Net.db.ref("dinobowl/rooms/" + room);
     Net.frameRef = ref.child("frame");
-    await ref.child("guestJoined").set({ uid: myUid, ts: firebase.database.ServerValue.TIMESTAMP });
+    await ref.child("guestJoined").set({ uid: myUid, ts: firebase.database.ServerValue.TIMESTAMP, rating: myRating() });
     Net.frameRef.on("value", (snap) => applyNetFrame(snap.val()));
     Net.inputRef = ref.child("inputs");
     netStatus("MATCHED · TEAM B");
   }
   function cancelMatch() {
     Net.cancelled = true;
+    stopScan();
     try {
-      const uid = firebase.auth().currentUser && firebase.auth().currentUser.uid;
-      if (Net.waitRef) { Net.waitRef.onDisconnect().cancel(); Net.waitRef.transaction((c) => (c && c.uid === uid ? null : c)); }
+      if (Net.waitRef) { Net.waitRef.onDisconnect().cancel(); Net.waitRef.remove(); }
       if (Net.frameRef) Net.frameRef.off();
       if (Net.guestRef) Net.guestRef.off();
       if (Net.inputRef) Net.inputRef.off();
@@ -1243,8 +1322,6 @@
     netStatus("READY");
   }
 
-  // The states in which the GUEST is the one actually playing: team B's own
-  // snap, from the call sheet through the whistle.
   const GUEST_PLAY_STATES = ["playcall", "presnap", "live", "kick", "ptchoice"];
   function canControlHere() {
     if (!Net.role) return true;
@@ -2456,7 +2533,10 @@
       G.lastOffSide = G.drive;
       const who = G.drive === "A" ? "PLAYER 1" : "PLAYER 2";
       const tm = TEAMS[teamAbbrOf(G.drive)][0].toUpperCase();
-      banner(who + " — " + tm + " BALL", "Pass the device · you're on offense", 1.9);
+      // online, this card is replicated to BOTH screens, so it is written from
+      // nobody's seat: the teams, not "you" — and nobody is passing a device
+      if (G.mode === "online") banner(tm + " BALL", tm + " on offense · " + TEAMS[teamAbbrOf(other(G.drive))][0].toUpperCase() + " call the defense", 1.9);
+      else banner(who + " — " + tm + " BALL", "Pass the device · you're on offense", 1.9);
       G.state = "dead"; G.deadT = 2.0; G.deadNext = askOffense; return;
     }
     askOffense();
@@ -5277,6 +5357,9 @@
     }
     recordCpuGameResult();
     const iWon = win === G.my, iLost = win === G.opp;
+    // online rating (drives QUICK MATCH pairing): +20 a win, -20 a loss. The
+    // host is team A; the guest rates itself when the OVER frame lands.
+    if (G.mode === "online" && Net.role === "host" && G._ratedRoom !== Net.room) { G._ratedRoom = Net.room; adjustRating(iWon, iLost); }
     banner(win ? TEAMS[win][0].toUpperCase() + " WIN!" : "TIE GAME", "", 99,
       iWon ? { tier: "mega" } : undefined);
     // WHAT WAS BROKEN: every final whistle played sfx.td() — the SCORING
@@ -11879,7 +11962,8 @@
     // thought bubble on the owner's call, 2026-09-09: a white blob that read
     // as nothing and pulled the eye off the ball.) It pops in with an
     // overshoot, breathes while he stares, and rattles at the reveal.
-    if (t > BOOT.look + 0.25 && t < BOOT.land + 0.2) {
+    // owner (2026-09-09): 0.4s shorter — it is gone by the time the ball lands
+    if (t > BOOT.look + 0.25 && t < BOOT.land - 0.2) {
       const grow = smooth(ease(BOOT.look + 0.25, BOOT.look + 0.5));
       const pop = 1 + 0.35 * Math.sin(ease(BOOT.look + 0.25, BOOT.look + 0.62) * Math.PI);
       const breathe = 1 + 0.05 * Math.sin(t * 9);
@@ -12674,6 +12758,10 @@
     const sub = searching ? "Queuing you into the next player online" + dots
       : (o.role === "host" ? "You're the host — pick the teams…" : "Matched! Waiting for the host to pick teams" + dots);
     cx.fillText(sub, W / 2, 232);
+    cx.font = PF(8); cx.fillStyle = "#9db0a4";
+    const secs = Math.max(0, Math.round((performance.now() - (o.since || performance.now())) / 1000));
+    if (searching) fitText("NEAREST RATING TO " + (o.rating || myRating()) + "  ·  REGION " + (o.region || myRegion()) + "  ·  " + secs + "S" + (secs >= 20 ? "  ·  ANYONE ONLINE WILL DO NOW" : ""), W / 2, 258, 880, 8, 7);
+    else if (o.oppRating) cx.fillText("OPPONENT RATING " + o.oppRating + "  ·  YOURS " + (o.rating || myRating()), W / 2, 258);
     // a little spinning dino to show it's alive
     if (G.sheets.A && G.sheets.A.quetz) {
       const spr = G.sheets.A.quetz, t = performance.now() / 160 | 0;

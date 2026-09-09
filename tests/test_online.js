@@ -71,6 +71,8 @@ function makeSharedDb() {
         for (let i = childL.length - 1; i >= 0; i--) if (childL[i].path === pathStr) childL.splice(i, 1);
       },
       remove() { write(pathStr, null); fireValue(pathStr); },
+      // 2.0 matchmaking reads the whole queue once before it claims an entry
+      async once(event) { return snap(pathStr); },
       onDisconnect() { return { remove() { }, cancel() { } }; },
     };
     return self;
@@ -191,11 +193,16 @@ function makeInstance(label, sharedDb) {
   for (let i = 0; i < 20 && A.G.state !== "online_wait"; i++) { A.step(); await sleep(20); }
   await sleep(60); A.step();
   check("A is queued and waiting", A.G.state === "online_wait", A.G.state);
-  check("A parked a slot in matchmaking/waiting",
-    !!(db.read("dinobowl/matchmaking/waiting") && db.read("dinobowl/matchmaking/waiting").uid === A.uid()),
-    JSON.stringify(db.read("dinobowl/matchmaking/waiting")));
+  // 2.0 (deliberate design move): matchmaking is a QUEUE keyed by uid, matched
+  // by rating / time zone / region, not a single "waiting" slot. The contract
+  // under test is unchanged — the first searcher parks and hosts, the second
+  // claims that entry and joins the same room — only the path moved.
+  const qA = () => db.read("dinobowl/matchmaking/queue/" + A.uid());
+  check("A parked an entry in matchmaking/queue",
+    !!(qA() && qA().uid === A.uid() && typeof qA().rating === "number" && typeof qA().tz === "number"),
+    JSON.stringify(qA()));
   check("A became HOST (status)", /HOST/.test(A.status()), A.status());
-  const roomA = db.read("dinobowl/matchmaking/waiting") && db.read("dinobowl/matchmaking/waiting").room;
+  const roomA = qA() && qA().room;
 
   // ---- Player B taps QUICK MATCH and should CLAIM A's slot ----
   B.key("Enter");
@@ -205,8 +212,8 @@ function makeInstance(label, sharedDb) {
   for (let i = 0; i < 90; i++) { A.step(); B.step(); await sleep(20); if (A.G.state === "select") break; }
 
   check("B matched as GUEST (status)", /TEAM B/.test(B.status()), B.status());
-  check("matchmaking slot was consumed (queue empty)", db.read("dinobowl/matchmaking/waiting") == null,
-    JSON.stringify(db.read("dinobowl/matchmaking/waiting")));
+  check("matchmaking entry was consumed (queue empty)", qA() == null && db.read("dinobowl/matchmaking/queue/" + B.uid()) == null,
+    JSON.stringify(db.read("dinobowl/matchmaking/queue")));
   check("both landed in the SAME room", !!roomA && !!db.read("dinobowl/rooms/" + roomA),
     roomA);
   check("guest announced itself via guestJoined",
@@ -270,12 +277,12 @@ function makeInstance(label, sharedDb) {
   C.key("Enter"); C.key("d"); C.key("d"); C.key("Enter"); C.key("d"); C.key("d"); C.key("Enter");
   for (let i = 0; i < 20 && C.G.state !== "online_wait"; i++) { C.step(); await sleep(20); }
   await sleep(40); C.step();
-  const parked = !!db.read("dinobowl/matchmaking/waiting");
+  const parked = !!db.read("dinobowl/matchmaking/queue/" + C.uid());
   C.key("Escape");           // cancel
   await sleep(20); C.step();
   check("a searcher can cancel back to the menu", C.G.state === "menu", C.G.state);
-  check("cancel cleared its matchmaking slot",
-    parked && db.read("dinobowl/matchmaking/waiting") == null);
+  check("cancel cleared its matchmaking entry",
+    parked && db.read("dinobowl/matchmaking/queue/" + C.uid()) == null, "parked=" + parked);
 
   // ---- S5: the status bar tells the truth about WHICH half of online is
   // missing, and no native modal is thrown over the canvas any more.
