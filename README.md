@@ -100,6 +100,28 @@ Interception-rate ranking requires ≥100 pass attempts to qualify (filters out 
 - `app.py` — Flask server + JSON API (`POST /api/query {"q": "..."}`)
 - `templates/index.html` — the UI
 
+## Gridiron 2.1 — hosted, catch-all stats
+
+Gridiron now runs entirely in the browser, on the same Firebase host as the game:
+https://football-dino.web.app/ (the game stays at /game/). No server, no Python at
+runtime; the Flask app still serves the identical page locally at http://127.0.0.1:5000/.
+
+Pipeline (run in order after any data refresh):
+
+```bash
+python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+, Next Gen Stats 2016+
+python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
+python build_gridiron_page.py g2   # -> static/index.html (bump the version token so browsers refetch)
+python tests/test_gridiron_parity.py   # the browser engine must answer 25 questions exactly like the Python engine
+firebase deploy --only hosting --project football-dino
+```
+
+Every stat is either a nflverse/PFR/NGS/ESPN field as published or a derived rate whose
+formula is listed in `fetch_data.DERIVED` and on the page under "Every stat I know".
+ESPN's Pass Rush Win Rate / Run Stop Win Rate and per-lineman sacks allowed are not
+public data; the page says so and answers with the nearest real stat (pressure rate,
+tackles for loss, the QB's sacks taken).
+
 ## Dino Bowl
 
 ### Dino Bowl 2.0 (2026-09-09)

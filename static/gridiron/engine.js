@@ -81,8 +81,40 @@
       return null;
     }
 
+    // comparison words that carry their own stat when none is named nearby
+    const COMPARE_GT = new Set(["over", "more than", "above", "taller than", "heavier than", "older than", "longer than",
+      "greater than", "higher than", "bigger than", "faster than"]);
+    const COMPARE_LT = new Set(["under", "less than", "fewer than", "below", "shorter than", "lighter than", "younger than",
+      "lower than", "smaller than", "slower than"]);
+    const COMPARE_COL = { "taller than": "height", "shorter than": "height", "heavier than": "weight", "lighter than": "weight",
+      "older than": "age", "younger than": "age" };
+    const COMPARE_RE = [...COMPARE_GT, ...COMPARE_LT, "at least", "at most"].sort((a, b) => b.length - a.length).map(esc).join("|");
+    const CLAUSE_BREAK = /\b(and|with|who|that|or|while)\b|,/;
+    // the stat mentioned LAST in text (the one nearest a number that follows it)
+    function findStatLast(text) {
+      let last = null, pos = 0;
+      for (;;) { const st = findStat(text, pos); if (!st) return last; last = st; pos = st[2]; }
+    }
+    // a stat found FORWARD of a number that sits past a conjunction belongs to
+    // the NEXT clause ("QBR over 70 and EPA per play above 0.2"): prefer the
+    // stat behind the number in that case
+    function statForNumber(q, start, end, fwdLen) {
+      const fwd = q.slice(end, end + fwdLen);
+      const st = findStat(fwd, 0);
+      if (st && CLAUSE_BREAK.test(fwd.slice(0, st[1]))) {
+        const back = findStatLast(q.slice(Math.max(0, start - 40), start));
+        if (back) return back;
+      }
+      if (st) return st;
+      return findStatLast(q.slice(Math.max(0, start - 40), start));
+    }
+    // a percent stat typed as "5%" or "5" means 0.05; typed as "0.05" stays
+    const pctValue = (col, value, marked) => (PCT.has(col) && (marked || value >= 1)) ? value / 100 : value;
+
     function parse(query) {
-      const q = " " + String(query).toLowerCase().trim() + " ";
+      let q = " " + String(query).toLowerCase().trim() + " ";
+      // 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
+      q = q.replace(/(\d)['’-](\d{1,2})(?:"|''|”| in\b|\b)/g, (m, f, i) => String(parseInt(f, 10) * 12 + parseInt(i, 10)));
       const conds = [], notes = [];
       for (const [word, re] of posRegex) {
         if (re.test(q)) {
@@ -145,23 +177,28 @@
         }
       }
 
-      const threshPat = /(over|more than|at least|above|under|less than|fewer than|below|at most)\s+([\d,\.]+)/g;
+      const threshPat = new RegExp("(" + COMPARE_RE + ")\\s+([\\d,\\.]+)\\s*(%|percent)?", "g");
       for (const mm of q.matchAll(threshPat)) {
-        const opWord = mm[1], value = parseFloat(mm[2].replace(/,/g, ""));
+        const opWord = mm[1], pctMark = !!mm[3];
+        let value = parseFloat(mm[2].replace(/,/g, ""));
         if (!Number.isFinite(value)) continue;
         const end = mm.index + mm[0].length;
-        let st = findStat(q.slice(end, end + 40), 0);
-        if (!st) st = findStat(q.slice(Math.max(0, mm.index - 40), mm.index), 0);
+        let st = null;
+        if (!(opWord in COMPARE_COL)) st = statForNumber(q, mm.index, end, 40);
         let col;
-        if (!st) { if (value >= 18 && value <= 50) col = "age"; else continue; }
-        else col = st[0];
+        if (st) col = st[0];
+        else if (opWord in COMPARE_COL) col = COMPARE_COL[opWord];
+        else if (value >= 18 && value <= 50) col = "age";
+        else continue;
         let op;
-        if (["over", "more than", "above"].includes(opWord)) op = ">";
+        if (COMPARE_GT.has(opWord)) op = ">";
         else if (opWord === "at least") op = ">=";
-        else if (["under", "less than", "fewer than", "below"].includes(opWord)) op = "<";
+        else if (COMPARE_LT.has(opWord)) op = "<";
         else op = "<=";
+        value = pctValue(col, value, pctMark);
         conds.push({ kind: "threshold", col, op, value });
-        notes.push(disp(col) + " " + op + " " + g(value));
+        const shown = PCT.has(col) ? g(value * 100) + "%" : g(value);
+        notes.push(disp(col) + " " + op + " " + shown);
       }
 
       const postPat = /([\d,\.]+)\s*(\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(%|percent|years old)?/g;
@@ -175,11 +212,11 @@
         const cut = fwd.match(/\b(and|over|more than|at least|above|under|less than|fewer than|below|at most|who|top|bottom|since|before|between|led|for|on)\b/);
         const statWin = cut ? fwd.slice(0, cut.index) : fwd;
         let st = findStat(statWin, 0);
-        if (!st) st = findStat(q.slice(Math.max(0, mm.index - 40), mm.index), 0);
+        if (!st) st = findStatLast(q.slice(Math.max(0, mm.index - 40), mm.index));
         let col;
         if (!st) { if (value >= 18 && value <= 50) col = "age"; else continue; }
         else col = st[0];
-        if (isPct || PCT.has(col)) value = value > 1 ? value / 100 : value;
+        value = pctValue(col, value, isPct);
         conds.push({ kind: "threshold", col, op: gte ? ">=" : "<=", value });
         const shown = PCT.has(col) ? g(value * 100) + "%" : g(value);
         notes.push(disp(col) + " " + (gte ? "≥" : "≤") + " " + shown);

@@ -1,487 +1,21 @@
-<!doctype html>
-<html lang="en">
+"""
+Gridiron — page builder.
 
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Gridiron — NFL stat engine</title>
-  <meta name="description" content="Gridiron: ask for NFL player-seasons in plain English — box score, EPA, CPOE, QBR, pressures, blitzes, coverage, Next Gen Stats — 2000 to now.">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%230a1f14'/><text x='32' y='47' font-size='40' text-anchor='middle'>🏈</text></svg>">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link
-    href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap"
-    rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <style>
-    :root {
-      --field: #0a1f14;
-      --field-2: #0e2a1b;
-      --chalk: #f4f6f1;
-      --chalk-dim: #9db0a4;
-      --line: #1d4030;
-      --accent: #ffd23f;
-      --accent-2: #e8622c;
-      --card: #0d2519;
-      --danger: #ff7a6b;
-      --radius: 3px;
-    }
+Takes the <head> (fonts + all CSS) of templates/index.html and writes
+static/index.html: the same look, but a static page whose queries run in the
+browser on static/gridiron/data.json via static/gridiron/engine.js. Flask
+serves the same file at /, so local and hosted are one page.
 
-    * {
-      box-sizing: border-box
-    }
+    python build_gridiron_page.py
+"""
+import os, re, sys
 
-    html {
-      scroll-behavior: smooth
-    }
+HERE = os.path.dirname(os.path.abspath(__file__))
+SRC = os.path.join(HERE, "templates", "index.html")
+OUT = os.path.join(HERE, "static", "index.html")
+VERSION = sys.argv[1] if len(sys.argv) > 1 else "g1"
 
-    body {
-      margin: 0;
-      background: repeating-linear-gradient(90deg, transparent 0 119px, rgba(255, 255, 255, .025) 119px 120px), radial-gradient(120% 90% at 50% -10%, var(--field-2), var(--field) 60%);
-      color: var(--chalk);
-      font-family: Inter, system-ui, sans-serif;
-      min-height: 100vh;
-    }
-
-    .wrap {
-      max-width: 1180px;
-      margin: 0 auto;
-      padding: 0 24px 80px
-    }
-
-    header {
-      padding: 52px 0 26px;
-      border-bottom: 1px solid var(--line)
-    }
-
-    .eyebrow {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 12px;
-      letter-spacing: .32em;
-      text-transform: uppercase;
-      color: var(--accent);
-      margin: 0 0 10px
-    }
-
-    h1 {
-      font-family: Oswald, sans-serif;
-      font-weight: 700;
-      font-size: clamp(40px, 7vw, 78px);
-      line-height: .92;
-      letter-spacing: -.01em;
-      margin: 0;
-      text-transform: uppercase
-    }
-
-    h1 span {
-      color: var(--accent)
-    }
-
-    .sub {
-      color: var(--chalk-dim);
-      margin: 14px 0 0;
-      max-width: 60ch;
-      font-size: 15px;
-      line-height: 1.5
-    }
-
-    .meta {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 12px;
-      color: var(--chalk-dim);
-      margin-top: 16px;
-      display: flex;
-      gap: 22px;
-      flex-wrap: wrap
-    }
-
-    .meta b {
-      color: var(--chalk);
-      font-weight: 600
-    }
-
-    .search {
-      margin-top: 34px;
-      position: relative
-    }
-
-    .search textarea {
-      width: 100%;
-      min-height: 78px;
-      resize: vertical;
-      background: var(--card);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      color: var(--chalk);
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 15px;
-      line-height: 1.55;
-      padding: 18px 20px;
-      outline: none;
-      transition: border-color .15s
-    }
-
-    .search textarea:focus {
-      border-color: var(--accent)
-    }
-
-    .search textarea::placeholder {
-      color: var(--chalk-dim)
-    }
-
-    .bar {
-      display: flex;
-      gap: 12px;
-      align-items: center;
-      margin-top: 12px;
-      flex-wrap: wrap
-    }
-
-    button.run {
-      font-family: Oswald, sans-serif;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: .08em;
-      font-size: 15px;
-      background: var(--accent);
-      color: #1a1200;
-      border: none;
-      border-radius: var(--radius);
-      padding: 12px 26px;
-      cursor: pointer;
-      transition: transform .08s, filter .15s
-    }
-
-    button.run:hover {
-      filter: brightness(1.08)
-    }
-
-    button.run:active {
-      transform: translateY(1px)
-    }
-
-    button.run:disabled {
-      opacity: .5;
-      cursor: progress
-    }
-
-    .examples {
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-      margin-top: 6px
-    }
-
-    .chip {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 12px;
-      color: var(--chalk-dim);
-      background: transparent;
-      border: 1px dashed var(--line);
-      border-radius: var(--radius);
-      padding: 6px 11px;
-      cursor: pointer;
-      transition: .15s;
-      text-align: left
-    }
-
-    .chip:hover {
-      border-color: var(--accent);
-      color: var(--chalk)
-    }
-
-    .read {
-      margin-top: 26px;
-      display: none
-    }
-
-    .read.show {
-      display: block
-    }
-
-    .read h3 {
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 11px;
-      letter-spacing: .28em;
-      text-transform: uppercase;
-      color: var(--chalk-dim);
-      margin: 0 0 12px
-    }
-
-    .conds {
-      display: flex;
-      flex-direction: column;
-      gap: 0;
-      border-left: 2px solid var(--accent)
-    }
-
-    .cond {
-      font-family: Oswald, sans-serif;
-      font-size: 17px;
-      letter-spacing: .01em;
-      padding: 7px 0 7px 16px;
-      position: relative;
-      color: var(--chalk)
-    }
-
-    .cond::before {
-      content: "▸";
-      color: var(--accent);
-      position: absolute;
-      left: -2px;
-      transform: translateX(-50%)
-    }
-
-    .cond .and {
-      color: var(--accent-2);
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 11px;
-      letter-spacing: .2em;
-      margin-right: 8px;
-      text-transform: uppercase
-    }
-
-    .status {
-      margin-top: 22px;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 13px;
-      color: var(--chalk-dim)
-    }
-
-    .status .count {
-      color: var(--accent);
-      font-weight: 600
-    }
-
-    .error {
-      color: var(--danger)
-    }
-
-    .results {
-      margin-top: 18px;
-      overflow-x: auto;
-      border: 1px solid var(--line);
-      border-radius: var(--radius)
-    }
-
-    table {
-      border-collapse: collapse;
-      width: 100%;
-      font-size: 13px
-    }
-
-    thead th {
-      position: sticky;
-      top: 0;
-      background: #0b2016;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 10px;
-      letter-spacing: .12em;
-      text-transform: uppercase;
-      color: var(--accent);
-      text-align: right;
-      padding: 11px 13px;
-      border-bottom: 1px solid var(--line);
-      white-space: nowrap
-    }
-
-    thead th.txt {
-      text-align: left
-    }
-
-    tbody td {
-      padding: 9px 13px;
-      text-align: right;
-      border-bottom: 1px solid rgba(29, 64, 48, .5);
-      font-variant-numeric: tabular-nums;
-      white-space: nowrap
-    }
-
-    tbody td.txt {
-      text-align: left
-    }
-
-    tbody td.name {
-      font-weight: 600;
-      font-family: Oswald, sans-serif;
-      font-size: 15px;
-      letter-spacing: .01em
-    }
-
-    tbody tr:hover {
-      background: rgba(255, 210, 63, .05)
-    }
-
-    .yes {
-      color: var(--accent)
-    }
-
-    .no {
-      color: var(--chalk-dim)
-    }
-
-    .season-badge {
-      font-family: 'IBM Plex Mono', monospace;
-      color: var(--chalk-dim)
-    }
-
-    .setup {
-      background: var(--card);
-      border: 1px solid var(--accent-2);
-      border-radius: var(--radius);
-      padding: 22px 24px;
-      margin-top: 30px;
-      font-size: 14px;
-      line-height: 1.6
-    }
-
-    .setup code {
-      font-family: 'IBM Plex Mono', monospace;
-      background: #08160e;
-      padding: 2px 7px;
-      border-radius: 2px;
-      color: var(--accent)
-    }
-
-    /* MODAL STYLES */
-    .modal {
-      display: none;
-      position: fixed;
-      z-index: 1000;
-      left: 0;
-      top: 0;
-      width: 100%;
-      height: 100%;
-      background-color: rgba(10, 31, 20, 0.85);
-      backdrop-filter: blur(4px);
-    }
-
-    .modal-content {
-      background: var(--field-2);
-      margin: 5% auto;
-      padding: 24px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      width: 80%;
-      max-width: 700px;
-      position: relative;
-      color: var(--chalk);
-    }
-
-    .close {
-      color: var(--chalk-dim);
-      float: right;
-      font-size: 28px;
-      font-weight: bold;
-      cursor: pointer;
-    }
-
-    .close:hover {
-      color: var(--accent);
-    }
-
-    .modal-header {
-      display: flex;
-      gap: 20px;
-      align-items: center;
-      border-bottom: 1px solid var(--line);
-      padding-bottom: 16px;
-      margin-bottom: 20px;
-    }
-
-    .modal-header img {
-      width: 80px;
-      height: 80px;
-      border-radius: 50%;
-      border: 2px solid var(--accent);
-      background: var(--field);
-      object-fit: cover;
-    }
-
-    .modal-header h2 {
-      margin: 0;
-      font-family: Oswald, sans-serif;
-      color: var(--accent);
-      font-size: 32px;
-    }
-
-    .modal-header p {
-      margin: 4px 0 0;
-      color: var(--chalk-dim);
-      font-size: 14px;
-    }
-
-    /* DINO BOWL widget */
-    .dino-btn {
-      position: fixed;
-      right: 22px;
-      bottom: 22px;
-      z-index: 1200;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 13px;
-      font-weight: 600;
-      background: var(--accent);
-      color: #1a1200;
-      border: none;
-      border-radius: var(--radius);
-      padding: 12px 18px;
-      cursor: pointer;
-      box-shadow: 0 6px 24px rgba(0, 0, 0, .45);
-      transition: transform .1s, filter .15s;
-    }
-
-    .dino-btn:hover { filter: brightness(1.1); transform: translateY(-1px) }
-
-    .dino-panel {
-      display: none;
-      position: fixed;
-      right: 22px;
-      bottom: 74px;
-      z-index: 1199;
-      width: min(560px, calc(100vw - 44px));
-      background: #050c08;
-      border: 1px solid var(--accent);
-      border-radius: 6px;
-      overflow: hidden;
-      box-shadow: 0 18px 60px rgba(0, 0, 0, .6);
-    }
-
-    .dino-panel.open { display: block }
-
-    .dino-panel .dino-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 8px 12px;
-      font-family: 'IBM Plex Mono', monospace;
-      font-size: 11px;
-      color: var(--chalk-dim);
-      border-bottom: 1px solid var(--line);
-    }
-
-    .dino-panel .dino-head a { color: var(--accent); text-decoration: none }
-
-    .dino-panel iframe {
-      display: block;
-      width: 100%;
-      aspect-ratio: 16/9.6;
-      border: 0;
-      background: #000;
-    }
-  
-    /* 2.1: definitions + career table */
-    .glossary { margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); padding: 10px 16px; }
-    .glossary summary { cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--accent); padding: 6px 0; }
-    .glossary .gloss-note { font-size: 13px; color: var(--chalk-dim); line-height: 1.5; }
-    .glossary table.gloss { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .glossary table.gloss th, .glossary table.gloss td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-    .glossary table.gloss th { color: var(--chalk-dim); font-weight: 600; }
-    .results.career { margin-top: 14px; max-height: 320px; overflow: auto; }
-    .results.career table { font-size: 12px; }
-    .modal-header p { margin: 4px 0; color: var(--chalk-dim); font-size: 13px; }
-  </style>
-</head>
-
+BODY = r"""
 <body>
   <div class="wrap">
     <header>
@@ -544,9 +78,9 @@
     </div>
   </div>
 
-  <script src="/gridiron/engine.js?v=g1"></script>
+  <script src="/gridiron/engine.js?v=__V__"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g1';
+    const DATA_URL = '/gridiron/data.json?v=__V__';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -773,3 +307,34 @@
 </body>
 
 </html>
+"""
+
+EXTRA_CSS = """
+    /* 2.1: definitions + career table */
+    .glossary { margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); padding: 10px 16px; }
+    .glossary summary { cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--accent); padding: 6px 0; }
+    .glossary .gloss-note { font-size: 13px; color: var(--chalk-dim); line-height: 1.5; }
+    .glossary table.gloss { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .glossary table.gloss th, .glossary table.gloss td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    .glossary table.gloss th { color: var(--chalk-dim); font-weight: 600; }
+    .results.career { margin-top: 14px; max-height: 320px; overflow: auto; }
+    .results.career table { font-size: 12px; }
+    .modal-header p { margin: 4px 0; color: var(--chalk-dim); font-size: 13px; }
+"""
+
+def main():
+    src = open(SRC, encoding="utf-8").read()
+    head_end = src.index("<body>")
+    head = src[:head_end]
+    # the page title says what it is now
+    head = re.sub(r"<title>.*?</title>", "<title>Gridiron — NFL stat engine</title>", head, count=1, flags=re.S)
+    head = head.replace("</style>", EXTRA_CSS + "  </style>", 1)
+    if 'rel="icon"' not in head:
+        head = head.replace("</title>", "</title>\n  <meta name=\"description\" content=\"Gridiron: ask for NFL player-seasons in plain English — box score, EPA, CPOE, QBR, pressures, blitzes, coverage, Next Gen Stats — 2000 to now.\">\n  <link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%230a1f14'/><text x='32' y='47' font-size='40' text-anchor='middle'>🏈</text></svg>\">", 1)
+    out = head + BODY.replace("__V__", VERSION).lstrip("\n")
+    with open(OUT, "w", encoding="utf-8", newline="\n") as f:
+        f.write(out)
+    print(f"wrote {OUT} ({len(out):,} bytes, version {VERSION})")
+
+if __name__ == "__main__":
+    main()

@@ -5,7 +5,7 @@ import os
 import math
 import json
 import pandas as pd
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, send_from_directory
 
 import query_engine as qe
 
@@ -35,16 +35,17 @@ def _clean(v):
 
 @app.route("/")
 def index():
-    try:
-        df = get_df()
-        meta = {
-            "rows": len(df),
-            "seasons": f"{int(df['season'].min())}–{int(df['season'].max())}",
-            "ready": True,
-        }
-    except FileNotFoundError:
-        meta = {"ready": False}
-    return render_template("index.html", meta=meta)
+    # One page for local and hosted: the browser engine over static/gridiron/.
+    # Build it with `python build_gridiron_page.py` (after export_gridiron.py).
+    page = os.path.join(app.static_folder, "index.html")
+    if not os.path.exists(page):
+        return ("Gridiron page not built yet. Run: python fetch_data.py && python export_gridiron.py && python build_gridiron_page.py", 503)
+    return send_from_directory(app.static_folder, "index.html")
+
+# the static host serves the game at /game/ ; keep both spellings working here
+@app.route("/gridiron/<path:name>")
+def gridiron_asset(name):
+    return send_from_directory(os.path.join(app.static_folder, "gridiron"), name)
 
 @app.route("/api/query", methods=["POST"])
 def api_query():
@@ -120,6 +121,7 @@ def api_player():
         return jsonify({"error": str(e)}), 500
 
 @app.route("/game")
+@app.route("/game/")
 def game():
     # Firebase web configuration is intentionally public; access is protected by
     # Firebase Authentication and the Realtime Database rules in firebase.json.

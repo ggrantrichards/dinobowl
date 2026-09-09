@@ -692,14 +692,27 @@ _COMPARE_RE = "|".join(sorted(COMPARE_GT | COMPARE_LT | {"at least", "at most"},
 # behind the number in that case
 _CLAUSE_BREAK = re.compile(r"\b(and|with|who|that|or|while)\b|,")
 
+def _find_stat_last(text):
+    """The stat mentioned LAST in text (the one nearest a number that follows it)."""
+    last, pos = None, 0
+    while True:
+        st = _find_stat(text, pos)
+        if not st: return last
+        last, pos = st, st[2]
+
 def _stat_for_number(q, start, end, fwd_len):
     fwd = q[end:end + fwd_len]
     st = _find_stat(fwd, 0)
     if st and _CLAUSE_BREAK.search(fwd[:st[1]]):
-        back = _find_stat(q[max(0, start - 40):start], 0)
+        back = _find_stat_last(q[max(0, start - 40):start])
         if back: return back
     if st: return st
-    return _find_stat(q[max(0, start - 40):start], 0)
+    return _find_stat_last(q[max(0, start - 40):start])
+
+def _pct_value(col, num, marked):
+    """A percent stat typed as '5%' or '5' means 0.05; typed as '0.05' stays."""
+    if col in PCT_STATS and (marked or num >= 1): return num / 100.0
+    return num
 
 def parse(query):
     q = " " + query.lower().strip() + " "
@@ -790,8 +803,7 @@ def parse(query):
         elif op_word == "at least": op = ">="
         elif op_word in COMPARE_LT: op = "<"
         else: op = "<="
-        if pct_mark or col in PCT_STATS:
-            num = num / 100.0 if num > 1 else num
+        num = _pct_value(col, num, pct_mark)
         conds.append({"kind": "threshold", "col": col, "op": op, "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
         notes.append(f"{DISPLAY.get(col, col)} {op} {shown}")
@@ -808,8 +820,7 @@ def parse(query):
         stat_window = window_fwd[:cut.start()] if cut else window_fwd
         st = _find_stat(stat_window, 0)
         if not st:
-            window_bwd = q[max(0, mm.start()-40):mm.start()]
-            st = _find_stat(window_bwd, 0)
+            st = _find_stat_last(q[max(0, mm.start()-40):mm.start()])
 
         if not st:
             if 18 <= num <= 50: col = "age"
@@ -817,8 +828,7 @@ def parse(query):
         else:
             col = st[0]
 
-        if is_pct or col in PCT_STATS:
-            num = num / 100.0 if num > 1 else num
+        num = _pct_value(col, num, is_pct)
         conds.append({"kind": "threshold", "col": col, "op": ">=" if gte else "<=", "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
         notes.append(f"{DISPLAY.get(col, col)} {'≥' if gte else '≤'} {shown}")

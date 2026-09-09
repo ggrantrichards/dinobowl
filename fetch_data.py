@@ -197,6 +197,15 @@ RATE_RANKS = [
     ("racr", False, "targets", 2.5, True),
     ("target_share", False, "targets", 2.5, True),
     ("wopr", False, "targets", 2.5, True),
+    # lowest-is-best counting stats need a qualifier too, or a backup with one
+    # attempt "leads the league" in fewest interceptions
+    ("interceptions", True, "pass_attempts", 14, True),
+    ("sacks_taken", True, "pass_attempts", 14, True),
+    ("fumbles_lost", True, "touches", 6.25, True),
+    ("fumbles", True, "touches", 6.25, True),
+    ("turnovers", True, "touches", 6.25, True),
+    ("drops", True, "targets", 2.5, True),
+    ("missed_tackles", True, "pfr_comb_tackles", 30, False),
 ]
 
 # Formulas, for the glossary and for anyone checking the numbers.
@@ -545,7 +554,8 @@ def main():
 
     # nflverse divides by zero in a few share columns; an infinite share is NA
     import numpy as np
-    df = df.replace([np.inf, -np.inf], pd.NA)
+    fcols = df.select_dtypes(include="float").columns
+    df[fcols] = df[fcols].replace([np.inf, -np.inf], np.nan)
     df = add_ranks(df)
     df.to_parquet(OUT_FILE, index=False)
     seasons = sorted(df["season"].unique())
