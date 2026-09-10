@@ -27,6 +27,11 @@ BODY = r"""
       <div class="meta" id="meta"><span>loading the stat table…</span></div>
     </header>
 
+    <section id="player" class="player" hidden>
+      <a href="#" class="back" id="playerBack">← back to results</a>
+      <div id="player-body"></div>
+    </section>
+
     <div class="search">
       <textarea id="q" placeholder="e.g. edge rushers with 50+ pressures and a pressure rate over 7% since 2020"></textarea>
       <div class="bar">
@@ -48,7 +53,6 @@ BODY = r"""
       <canvas id="scatterChart" height="80"></canvas>
     </div>
 
-    <div class="totals" id="totals" style="display:none"></div>
 
     <div class="scroll-top" id="scrollTop" style="display:none"><div id="scrollTopInner"></div></div>
     <div class="results" id="results" style="display:none">
@@ -84,13 +88,6 @@ BODY = r"""
     <iframe id="dinoFrame" title="Dino Bowl"></iframe>
   </div>
 
-  <!-- Modal -->
-  <div id="playerModal" class="modal">
-    <div class="modal-content">
-      <span class="close" onclick="closeModal()">&times;</span>
-      <div id="modal-body"></div>
-    </div>
-  </div>
 
   <script src="/gridiron/engine.js?v=__V__"></script>
   <script>
@@ -245,39 +242,66 @@ BODY = r"""
       K: ["games", "fg_made", "fg_att", "fg_pct", "fg_long", "pat_made", "pat_att"], P: ["games", "punts", "punt_yards", "punts_inside_20"],
     };
     function groupOf(pos) { if (META.def_codes.includes(pos)) return "DEF"; if (pos === "TE") return "WR"; if (pos === "FB") return "RB"; return CAREER_COLS[pos] ? pos : "WR"; }
-    async function openModal(tr) {
-      const pid = tr.getAttribute('data-id'); if (!pid) return;
-      const modal = document.getElementById('playerModal'), body = document.getElementById('modal-body');
-      body.innerHTML = 'Loading career…'; modal.style.display = 'block';
+    // PLAYER PAGES. Every name is a link to #player/<id>: the player's header,
+    // a career line, and every season he has played as one grid with a career
+    // row at the bottom. The rest of the page hides while it is open; the
+    // browser's back button (or the link) returns to the results as they were.
+    const HOME = ['.search', '#read', '#status', '#chart-container', '#scrollTop', '#results', '.glossary'];
+    function showHome() {
+      document.getElementById('player').hidden = true;
+      for (const sel of HOME) { const el = document.querySelector(sel); if (el) el.style.visibility = ''; el && el.classList.remove('offpage'); }
+    }
+    async function showPlayer(pid) {
+      for (const sel of HOME) { const el = document.querySelector(sel); if (el) el.classList.add('offpage'); }
+      const page = document.getElementById('player'), body = document.getElementById('player-body');
+      page.hidden = false; body.innerHTML = '<p class="status">Loading…</p>'; window.scrollTo(0, 0);
       try {
         const rows = (await loadTable()).career(pid);
-        if (!rows.length) { body.innerHTML = 'No seasons found.'; return; }
-        const last = rows[rows.length - 1], pos = last.position || '';
-        const g = groupOf(pos);
+        if (!rows.length) { body.innerHTML = '<p class="status error">No seasons found for this player.</p>'; return; }
+        const last = rows[rows.length - 1], pos = last.position || '', g = groupOf(pos);
         const statKey = g === 'QB' ? 'passing_yards' : g === 'RB' ? 'rushing_yards' : g === 'DEF' ? 'tackles' : g === 'K' ? 'fg_made' : g === 'P' ? 'punts' : 'receiving_yards';
-        const valid = rows.filter(r => r[statKey] != null);
-        const best = valid.length ? valid.reduce((a, b) => (b[statKey] || 0) > (a[statKey] || 0) ? b : a) : rows[0];
-        const cols = CAREER_COLS[g].filter(c => rows.some(r => r[c] != null));
-        const bio = [pos, last.recent_team, last.height != null ? fmt('height', last.height) : null, last.weight != null ? last.weight + ' lbs' : null,
+        const cols = [...new Set(['games', 'made_playoffs', 'age', ...CAREER_COLS[g]])].filter(c => rows.some(r => r[c] != null));
+        const teams = [...new Set(rows.map(r => r.recent_team).filter(Boolean))];
+        const bio = [pos, teams.join(', '), last.height != null ? fmt('height', last.height) : null, last.weight != null ? last.weight + ' lbs' : null,
           last.age != null ? 'Age ' + last.age : null, last.college || null,
           last.draft_year ? `Drafted ${last.draft_year} · Rd ${last.draft_round || '–'} · Pick ${last.draft_pick || '–'}` : (last.rookie_season ? 'Undrafted · rookie ' + last.rookie_season : null)].filter(Boolean).join(' · ');
+        // career row: counting stats add up; a rate whose formula is "a / b" is recomputed from the sums
+        const counting = new Set([...META.rank_desc, 'games', 'playoff_wins', 'super_bowl_wins'].filter(c => !META.pct_stats.includes(c) && !(META.pp_stats || []).includes(c)));
+        const sum = {}; for (const c of cols) if (counting.has(c) && rows.some(r => typeof r[c] === 'number')) sum[c] = rows.reduce((t, r) => t + (r[c] || 0), 0);
+        const career = {};
+        for (const c of cols) {
+          if (c in sum) { career[c] = sum[c]; continue; }
+          const m = /^(\w+) \/ (\w+)$/.exec(META.derived[c] || '');
+          if (m && m[1] in sum && m[2] in sum && sum[m[2]] > 0) career[c] = sum[m[1]] / sum[m[2]];
+          else if (c === 'made_playoffs') career[c] = null;
+        }
+        const seasons = rows.filter(r => r.made_playoffs).length;
+        const cell = (c, v, r) => c === 'made_playoffs' && r === career ? `${seasons} of ${rows.length}` : fmt(c, v);
         body.innerHTML = `
-          <div class="modal-header">
-            <img src="${last.headshot_url || ''}" onerror="this.style.display='none'">
+          <div class="player-head">
+            <img src="${last.headshot_url || ''}" onerror="this.style.display='none'" alt="">
             <div><h2>${last.player_display_name}</h2><p>${bio}</p>
-              <p>Best season (${head(statKey)}): <b>${fmt(statKey, best[statKey])}</b> in ${best.season}</p></div>
+              <p>${rows.length} season${rows.length === 1 ? '' : 's'} · ${META.seasons[0] <= rows[0].season ? rows[0].season : '?'}–${last.season}</p></div>
           </div>
-          <canvas id="lineChart" height="90"></canvas>
-          <div class="results career"><table><thead><tr><th>Yr</th><th>Tm</th>${cols.map(c => `<th>${head(c)}</th>`).join('')}</tr></thead>
-          <tbody>${rows.map(r => `<tr><td><span class="season-badge">${r.season}</span></td><td>${r.recent_team || ''}</td>${cols.map(c => `<td>${fmt(c, r[c])}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;
+          <div class="player-chart"><canvas id="lineChart" height="80"></canvas></div>
+          <h3 class="player-h3">Seasons</h3>
+          <div class="results career-grid"><table>
+            <thead><tr><th class="txt">Yr</th><th class="txt">Tm</th><th class="txt">Pos</th>${cols.map(c => `<th title="${(META.display[c] || c).replace(/"/g, '')}">${head(c)}</th>`).join('')}</tr></thead>
+            <tbody>${rows.map(r => `<tr><td class="txt"><span class="season-badge">${r.season}</span></td><td class="txt">${r.recent_team || ''}</td><td class="txt">${r.position || ''}</td>${cols.map(c => `<td>${cell(c, r[c], r)}</td>`).join('')}</tr>`).join('')}
+            <tr class="career-row"><td class="txt">Career</td><td class="txt"></td><td class="txt"></td>${cols.map(c => `<td>${c in career ? cell(c, career[c], career) : (c === 'made_playoffs' ? cell(c, null, career) : '')}</td>`).join('')}</tr></tbody>
+          </table></div>`;
         const ctx = document.getElementById('lineChart').getContext('2d');
         if (lineChart) lineChart.destroy();
         lineChart = new Chart(ctx, { type: 'line', data: { labels: rows.map(r => r.season), datasets: [{ label: head(statKey), data: rows.map(r => r[statKey] || 0), borderColor: chartColors().accent, backgroundColor: chartColors().accent + '33', fill: true, tension: 0.3 }] },
           options: { scales: { x: { grid: { color: chartColors().line }, ticks: { color: chartColors().dim } }, y: { grid: { color: chartColors().line }, ticks: { color: chartColors().dim }, beginAtZero: true } } } });
-      } catch (e) { body.innerHTML = 'Failed to load details: ' + e.message; }
+      } catch (e) { body.innerHTML = '<p class="status error">Failed to load this player: ' + e.message + '</p>'; }
     }
-    function closeModal() { document.getElementById('playerModal').style.display = 'none'; }
-    window.onclick = function (e) { const m = document.getElementById('playerModal'); if (e.target == m) m.style.display = 'none'; };
+    function route() {
+      const m = /^#player\/(.+)$/.exec(location.hash);
+      if (m) showPlayer(decodeURIComponent(m[1])); else showHome();
+    }
+    window.addEventListener('hashchange', route);
+    document.getElementById('playerBack').addEventListener('click', (e) => { e.preventDefault(); if (history.length > 1) history.back(); else location.hash = ''; });
 
     async function run() {
       const text = q.value.trim(); if (!text) return;
@@ -301,24 +325,9 @@ BODY = r"""
             ? `<div class="cond ignored">couldn't read ${d.ignored.map(x => '“' + esc(x) + '”').join(', ')} — not used as a filter</div>` : '');
         read.classList.add('show');
         status.innerHTML = `<span class="count">${d.count.toLocaleString()}</span> player-season${d.count === 1 ? '' : 's'} matched` + (d.truncated ? ' · showing first 2000' : '');
-        lastD = d; renderTotals(d); renderTable(d); renderScatter(d.rows, d.columns);
+        lastD = d; renderTable(d); renderScatter(d.rows, d.columns);
       } catch (e) { status.className = 'status error'; status.textContent = 'Something broke: ' + e.message; }
       finally { runBtn.disabled = false; runBtn.textContent = 'Run query'; }
-    }
-
-    // "who has the most X since 2021" is about a SPAN, but every row below is
-    // one season. This adds the per-player totals over the matched seasons, so
-    // the question has its actual answer on screen.
-    function renderTotals(d) {
-      const box = document.getElementById('totals');
-      if (!d.totals) { box.style.display = 'none'; return; }
-      const t = d.totals, name = head(t.col);
-      box.innerHTML = `<h3>${name}: totals over the ${t.spanned} matched seasons</h3>` +
-        t.rows.map((r, i) => `<div class="tot-row"><span class="tot-rank">${i + 1}</span>` +
-          `<span class="tot-name">${r.name || '—'}</span><span class="tot-team">${r.team || ''}</span>` +
-          `<span class="tot-val">${fmt(t.col, r.total)}</span>` +
-          `<span class="tot-sub">${r.seasons} season${r.seasons === 1 ? '' : 's'}</span></div>`).join('');
-      box.style.display = 'block';
     }
 
     // a second horizontal scrollbar above the table, kept in step with the real one
@@ -356,11 +365,12 @@ BODY = r"""
       tbody.innerHTML = rows.map(row => {
         const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
         const tds = `<td style="padding:4px 10px;text-align:center;">${imgStr}</td>` + LAST.cols.map(c => {
-          const val = c === 'season' ? `<span class="season-badge">${row[c]}</span>` : c === 'recent_team' ? `<span class="team">${row[c] || '—'}</span>` : c === 'position' ? `<span class="pos">${row[c] || '—'}</span>` : fmt(c, row[c]);
+          const val = c === 'season' ? `<span class="season-badge">${row[c]}</span>` : c === 'recent_team' ? `<span class="team">${row[c] || '—'}</span>` : c === 'position' ? `<span class="pos">${row[c] || '—'}</span>`
+            : c === 'player_display_name' ? `<a class="plink" href="#player/${encodeURIComponent(row.player_id)}" title="Open ${row[c]}'s page">${row[c]}</a>` : fmt(c, row[c]);
           const cls = (c === 'player_display_name' ? 'name txt' : TXT.has(c) ? 'txt' : '') + (c === sc ? ' sorted' : '');
           return `<td class="${cls}">${val}</td>`;
         }).join('');
-        return `<tr data-id="${row.player_id}" onclick="openModal(this)" style="cursor:pointer" title="Click for career history">${tds}</tr>`;
+        return `<tr data-id="${row.player_id}">${tds}</tr>`;
       }).join('');
     }
     // first click sorts high-to-low (A-Z for text), the next click flips it; blanks always sink to the bottom
@@ -383,8 +393,9 @@ BODY = r"""
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
     runBtn.addEventListener('click', run);
     renderExamples();
-    // warm the table in the background so the first question answers fast
-    loadTable().catch(e => { status.className = 'status error'; status.textContent = 'Could not load the stat table: ' + e.message; });
+    // warm the table in the background so the first question answers fast,
+    // then honour a direct link to a player's page
+    loadTable().then(route).catch(e => { status.className = 'status error'; status.textContent = 'Could not load the stat table: ' + e.message; });
 
     // DINO BOWL background-play widget
     const dinoBtn = document.getElementById('dinoBtn'), dinoPanel = document.getElementById('dinoPanel'), dinoFrame = document.getElementById('dinoFrame');
@@ -502,7 +513,7 @@ EXTRA_CSS = """
     /* ============ light by default, dark on the toggle ============ */
     :root {
       --field: #f4f6f2; --field-2: #e9eee8; --card: #ffffff;
-      --chalk: #152219; --chalk-dim: #55665c;
+      --chalk: #0d1611; --chalk-dim: #3a4a41;
       --line: #d3dbd4; --line-strong: #b9c5bb; --line-soft: rgba(21, 34, 25, .12);
       --accent: #0e7a44; --accent-2: #b5480f; --danger: #b42318; --on-accent: #ffffff;
       --thead: #e6ece6; --hover: rgba(14, 122, 68, .07); --stripe: rgba(0, 0, 0, .028);
@@ -510,13 +521,19 @@ EXTRA_CSS = """
     }
     :root[data-theme="dark"] {
       --field: #0a1f14; --field-2: #0e2a1b; --card: #0d2519;
-      --chalk: #f4f6f1; --chalk-dim: #c0cec4;
+      --chalk: #f8faf5; --chalk-dim: #d6e0d9;
       --line: #1d4030; --line-strong: #35624a; --line-soft: rgba(29, 64, 48, .5);
       --accent: #ffd23f; --accent-2: #f0783f; --danger: #ff7a6b; --on-accent: #1a1200;
       --thead: #0b2016; --hover: rgba(255, 210, 63, .07); --stripe: rgba(255, 255, 255, .025);
       --bg-grad: radial-gradient(120% 90% at 50% -10%, var(--field-2), var(--field) 60%); --modal-bg: rgba(10, 31, 20, .85);
     }
     html { scroll-behavior: auto; background: var(--field) }
+    body, .sub, .status, .meta, #hint { font-weight: 500 }
+    .chip { font-weight: 500 }
+    .cond { font-weight: 500 }
+    tbody td { font-weight: 500 }
+    thead th { font-weight: 600 }
+    .glossary .gloss-note, .glossary table.gloss td { font-weight: 500 }
     body { background: repeating-linear-gradient(90deg, transparent 0 119px, var(--stripe) 119px 120px), var(--bg-grad); color: var(--chalk) }
     header { position: relative }
     .theme { position: absolute; right: 0; top: 50px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--chalk-dim); background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 6px 10px; cursor: pointer }
@@ -543,6 +560,23 @@ EXTRA_CSS = """
     thead th.sort-desc::after { content: " \25BC"; font-size: 8px; color: var(--accent) }
     thead th.sort-asc::after { content: " \25B2"; font-size: 8px; color: var(--accent) }
     tbody td.sorted { background: var(--hover) }
+
+    /* player pages */
+    .offpage { display: none !important }
+    .player { margin-top: 18px }
+    .player .back { display: inline-block; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); text-decoration: none; margin-bottom: 14px }
+    .player .back:hover { text-decoration: underline }
+    .player-head { display: flex; gap: 20px; align-items: center; padding: 18px 20px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius) }
+    .player-head img { width: 88px; height: 88px; border-radius: 50%; object-fit: cover; border: 2px solid var(--accent); background: var(--field) }
+    .player-head h2 { margin: 0; font-family: Oswald, sans-serif; font-size: 34px; color: var(--chalk); letter-spacing: .01em }
+    .player-head p { margin: 4px 0 0; color: var(--chalk-dim); font-size: 14px }
+    .player-chart { margin-top: 14px; padding: 12px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius) }
+    .player-h3 { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--chalk-dim); margin: 22px 0 8px }
+    .career-grid { margin-top: 0; margin-left: 0 !important; width: 100% !important }
+    .career-grid thead th { cursor: default }
+    .career-row td { font-weight: 600; color: var(--chalk); border-top: 2px solid var(--line-strong); background: var(--thead) }
+    a.plink { color: var(--chalk); text-decoration: none; border-bottom: 1px solid var(--line-strong) }
+    a.plink:hover { color: var(--accent); border-bottom-color: var(--accent) }
 """
 
 def main():

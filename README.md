@@ -112,7 +112,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g8   # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g9   # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -142,6 +142,10 @@ tackles for loss, the QB's sacks taken).
 - Click any column header to sort high-to-low, click again to flip; blanks sink to the bottom.
 - Light by default, dark on the header toggle (remembered per browser); dark mode has higher
   text contrast on chips and secondary copy. Charts follow the theme.
+- **Player pages:** every name links to `#player/<id>` — headshot and bio, a career line, every
+  season as one grid with a Career row (counting stats summed, `a / b` rates recomputed from the
+  sums). Back returns to the results untouched; the link works on its own.
+- No per-player totals panel above the chart any more (owner: not helpful).
 - The page scrolls, not the table: no nested vertical scroll; the horizontal scrollbar above the
   table sticks to the top of the viewport so it is reachable anywhere in a long result.
 - The Dino Bowl dock is two small round buttons that hide while the panel is open (the panel head
