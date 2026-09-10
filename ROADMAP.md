@@ -21,7 +21,7 @@ Two independent methods fed it, and they found different things — keep both:
   corrupt-save boot, sprite-cel pixel metrics). Four of the five defects fixed on
   08-12 were found *only* by probing, not by reading.
 
-## GRIDIRON 3.0 — proposal (2026-09-10, not started)
+## GRIDIRON 3.0 — 2026-09-10 (shipped, build g11; #11's data split is the one open half — see GRIDIRON_3.md)
 
 UI/UX only. No new stat families. Each line is a fix to something a user hits today,
 ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = worth it later.

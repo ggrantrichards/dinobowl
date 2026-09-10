@@ -442,8 +442,12 @@
       return out;
     }
     run(query) {
+      const { conds, notes, ignored } = this.engine.parse(query);
+      return { idx: this.apply(conds), conds, notes, ignored };
+    }
+    // the filter half of run(): every row that passes every condition
+    apply(conds) {
       const E = this.engine;
-      const { conds, notes, ignored } = E.parse(query);
       let mask = new Uint8Array(this.n).fill(1);
       for (const c of conds) {
         if (c.kind === "position") {
@@ -485,7 +489,7 @@
       }
       const idx = [];
       for (let i = 0; i < this.n; i++) if (mask[i]) idx.push(i);
-      return { idx, conds, notes, ignored };
+      return idx;
     }
     // query_engine.result_columns
     resultColumns(idx, conds) {
@@ -537,11 +541,18 @@
     }
     query(text, limit) {
       const { idx, conds, notes, ignored } = this.run(text);
+      return this.present(idx, conds, notes, ignored, limit);
+    }
+    // the same answer for conditions the page has edited (a clause removed, a number changed)
+    queryConds(conds, notes, ignored, limit) {
+      return this.present(this.apply(conds), conds, notes, ignored, limit);
+    }
+    present(idx, conds, notes, ignored, limit) {
       const cols = this.resultColumns(idx, conds);
       const sorted = this.sortIdx(idx, conds);
-      const rows = sorted.slice(0, limit || 2000).map((i) => this.row(i, cols));
+      const rows = sorted.slice(0, limit || 2000).map((i) => this.row(i, [...cols, "player_id"]));
       const sort = conds.find((c) => c.kind === "sort" && this.has(c.col)) || null;
-      return { notes, ignored, sort, count: idx.length, columns: cols, rows,
+      return { conds, notes, ignored, sort, count: idx.length, columns: cols, rows, idx,
                truncated: idx.length > (limit || 2000), totals: sort ? this.totals(idx, sort.col) : null };
     }
     // "who has the most X since 2021" is a question about a SPAN, but every row

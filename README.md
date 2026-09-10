@@ -100,6 +100,19 @@ Interception-rate ranking requires ≥100 pass attempts to qualify (filters out 
 - `app.py` — Flask server + JSON API (`POST /api/query {"q": "..."}`)
 - `templates/index.html` — the UI
 
+## Gridiron 3.0 — 2026-09-10
+
+Twenty UI/UX items, all shipped in one page build (g11): windowed grid, the question and
+sort in the URL, zero-row explanations with one-click relax, coverage notes, frozen identity
+columns, autocomplete, an editable read-back (change a number, × a clause), column chooser and
+per-game toggle, player-page tabs with click-to-chart, header hover cards, load progress,
+Copy CSV / Copy link, phone layout, league leaders in bold, sort persistence, scatter axis
+pickers with row↔dot hover, one type scale, light/dark/auto theme, "did you mean", keyboard.
+The engine gained `apply(conds)` / `queryConds()` so edited readings re-run without re-parsing;
+parity with the Python engine is unchanged (58/58). The standard the page is held to, and the
+next measurable steps (split data file, team words, compare view, print), are in
+[GRIDIRON_3.md](GRIDIRON_3.md).
+
 ## Gridiron 2.1 — hosted, catch-all stats
 
 Gridiron now runs entirely in the browser, on the same Firebase host as the game:
@@ -112,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g10  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g11  # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino

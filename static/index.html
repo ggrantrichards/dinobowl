@@ -591,14 +591,114 @@
     .career-row td { font-weight: 600; color: var(--chalk); border-top: 2px solid var(--line-strong); background: var(--thead) }
     a.plink { color: var(--chalk); text-decoration: none; border-bottom: 1px solid var(--line-strong) }
     a.plink:hover { color: var(--accent); border-bottom-color: var(--accent) }
+
+    /* ============ 3.0: the pieces the page grew ============ */
+    /* type & spacing on one scale: 11 / 12 / 13 / 15 / 17 / 22 / 34; controls 32px tall */
+    .toolbar button, .chart-bar select, .tabs button, .theme, .dino-head .tools button, .dino-head .tools a { height: 32px; box-sizing: border-box }
+    .hint { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim); font-weight: 400; letter-spacing: 0; text-transform: none }
+    kbd { font-family: 'IBM Plex Mono', monospace; font-size: 11px; border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 5px }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+
+    /* progress */
+    .progress { height: 3px; background: var(--line); border-radius: 2px; overflow: hidden; margin-top: 10px }
+    .progress > div { height: 100%; width: 0; background: var(--accent); transition: width .2s }
+
+    /* autocomplete */
+    .qwrap { position: relative }
+    .ac { position: absolute; left: 0; right: 0; top: calc(100% - 2px); z-index: 30; background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0, 0, 0, .25); max-height: 300px; overflow: auto }
+    .ac-item { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--chalk); cursor: pointer }
+    .ac-item small { color: var(--chalk-dim); font-size: 11px }
+    .ac-item:hover, .ac-item.on { background: var(--hover) }
+
+    /* read-back: editable values, drop buttons, coverage notes */
+    .read h3 .hint { margin-left: 10px }
+    .cond { position: relative; padding-right: 26px }
+    .cond .val { border-bottom: 1px dashed var(--accent); padding: 0 2px; cursor: text; outline: 0 }
+    .cond .val:focus { background: var(--hover); border-bottom-style: solid }
+    .cond .x { position: absolute; right: 0; top: 50%; transform: translateY(-50%); width: 20px; height: 20px; border: 0; border-radius: 50%; background: transparent; color: var(--chalk-dim); font-size: 15px; line-height: 1; cursor: pointer; padding: 0 }
+    .cond .x:hover { background: var(--danger); color: #fff }
+    .cond .mean { font: inherit; color: var(--accent); background: transparent; border: 0; border-bottom: 1px dashed var(--accent); cursor: pointer; padding: 0 }
+    .rnote { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--chalk-dim); margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--line-strong) }
+
+    /* empty state */
+    .empty { margin-top: 16px; padding: 14px 16px; background: var(--card); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent-2); border-radius: var(--radius); font-size: 14px; line-height: 1.6 }
+    .empty i { font-style: normal; font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 1px 6px; border: 1px solid var(--line-strong); border-radius: 3px }
+    .empty .relax { margin-left: 8px; font: 600 12px Inter, sans-serif; background: var(--accent); color: var(--on-accent); border: 0; border-radius: var(--radius); padding: 6px 10px; cursor: pointer }
+
+    /* toolbar */
+    .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 18px; position: relative }
+    .toolbar .count-line { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--chalk-dim) }
+    .toolbar .count { font-family: Oswald, sans-serif; font-size: 22px; font-weight: 600; color: var(--chalk); margin-right: 4px }
+    .toolbar .tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap }
+    .toolbar button, .toolbar .tog { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--chalk); background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 0 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px }
+    .toolbar button:hover, .toolbar .tog:hover { border-color: var(--accent) }
+    .toolbar .tog { height: 32px }
+    .toolbar .tog input { accent-color: var(--accent) }
+    .phone-only { display: none }
+    .colpick { position: absolute; right: 0; top: 40px; z-index: 20; width: min(440px, 100%); max-height: 60vh; overflow: auto; background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 12px 34px rgba(0, 0, 0, .28); padding: 10px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 14px }
+    .colpick-head, .colpick-foot { grid-column: 1 / -1; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--chalk-dim); padding: 4px 0 8px }
+    .colpick-foot { padding: 8px 0 0; border-top: 1px solid var(--line); margin-top: 6px }
+    .colpick-foot button { font: 12px 'IBM Plex Mono', monospace; color: var(--accent); background: transparent; border: 0; cursor: pointer; padding: 0 }
+    .colpick label { display: flex; align-items: baseline; gap: 6px; font-size: 13px; padding: 3px 0; cursor: pointer }
+    .colpick label small { color: var(--chalk-dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+    .colpick input { accent-color: var(--accent) }
+
+    /* chart bar */
+    #chart-container { margin-top: 16px; background: var(--card); padding: 12px 16px 14px; border: 1px solid var(--line); border-radius: var(--radius) }
+    .chart-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--chalk-dim) }
+    .chart-bar select { font: 12px 'IBM Plex Mono', monospace; color: var(--chalk); background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 0 8px }
+    .chart-bar .hint { margin-left: auto }
+
+    /* grid: frozen columns, leaders, windowing sentinel */
+    .results { position: relative }
+    .results th.fz, .results td.fz { position: sticky; z-index: 2; background: var(--card) }
+    .results thead th.fz { z-index: 4; background: var(--thead) }
+    .results thead th.fz.sort-desc, .results thead th.fz.sort-asc { background: var(--accent) }
+    .results .fz0 { left: var(--fz0, 0) } .results .fz1 { left: var(--fz1, 0) } .results .fz2 { left: var(--fz2, 0) } .results .fz3 { left: var(--fz3, 0); box-shadow: 4px 0 8px -4px rgba(0, 0, 0, .25) }
+    .results tbody tr:nth-child(even) td.fz { background: var(--card) }
+    .results tbody tr:hover td.fz { background: var(--hover-solid) }
+    .results tbody td.fz.sorted { background: var(--sorted-solid) }
+    :root { --hover-solid: #e9f3ec; --sorted-solid: #e1efe6 }
+    :root[data-theme="dark"] { --hover-solid: #163527; --sorted-solid: #1b3b2b }
+    td.lead { font-weight: 700; color: var(--chalk) }
+    td.lead::after { content: "•"; color: var(--accent); font-size: 9px; vertical-align: top; margin-left: 2px }
+    .sentinel { height: 1px }
+    .more { margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--chalk-dim); text-align: center }
+    .more button { font: inherit; color: var(--accent); background: transparent; border: 0; border-bottom: 1px dashed var(--accent); cursor: pointer; padding: 0 }
+
+    /* hover card */
+    .tip { position: fixed; z-index: 50; max-width: 320px; background: var(--card); color: var(--chalk); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: 0 10px 30px rgba(0, 0, 0, .28); padding: 10px 12px; font-size: 13px; line-height: 1.45; pointer-events: none }
+    .tip-f { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); margin-top: 4px }
+    .tip-s, .tip-k { font-size: 11.5px; color: var(--chalk-dim); margin-top: 4px }
+
+    /* player page tabs + bio */
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 22px 0 8px }
+    .tabs button { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--chalk-dim); background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 0 12px; cursor: pointer }
+    .tabs button:hover { color: var(--chalk); border-color: var(--accent) }
+    .tabs button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent) }
+    .player-chart .chart-bar span:first-child { color: var(--chalk); font-weight: 600 }
+    .bio { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin: 0; padding: 14px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius) }
+    .bio dt { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--chalk-dim) }
+    .bio dd { margin: 2px 0 0; font-size: 15px; font-weight: 600; color: var(--chalk) }
+
+    /* phones (#13): the key columns only, unless asked for all */
+    @media (max-width: 640px) {
+      .phone-only { display: inline-flex }
+      .results:not(.all) th:nth-child(n+9), .results:not(.all) td:nth-child(n+9) { display: none }
+      .results .fz3 { box-shadow: none }
+      header { padding-top: 60px } .theme { top: 12px }
+      #meta { display: flex; flex-wrap: wrap }
+      .toolbar .tools { width: 100% }
+      .chart-bar .hint { display: none }
+    }
   </style>
 </head>
 
 <body>
-  <script>(function () { try { if (localStorage.getItem('gridiron_theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) { } })();</script>
+  <script>(function () { try { var t = localStorage.getItem('gridiron_theme'); if (t === 'dark' || (t === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches)) document.documentElement.dataset.theme = 'dark'; } catch (e) { } })();</script>
   <div class="wrap">
     <header>
-      <button class="theme" id="themeToggle" type="button">☾ Dark mode</button>
+      <button class="theme" id="themeToggle" type="button" title="Light → Dark → Auto">☾ Dark</button>
       <p class="eyebrow">NFL stat engine · nflverse · PFR advanced · Next Gen Stats · ESPN QBR</p>
       <h1>Grid<span>iron</span></h1>
       <p class="sub">Ask for player-seasons in plain-ish English. Every number is a real season line, 2000 to now.</p>
@@ -610,27 +710,48 @@
       <div id="player-body"></div>
     </section>
 
-    <div class="search">
-      <textarea id="q" placeholder="e.g. edge rushers with 50+ pressures and a pressure rate over 7% since 2020"></textarea>
+    <div class="search" id="search">
+      <div class="qwrap">
+        <textarea id="q" placeholder="e.g. edge rushers with 50+ pressures and a pressure rate over 7% since 2020" autocomplete="off" spellcheck="false"></textarea>
+        <div class="ac" id="ac" hidden role="listbox"></div>
+      </div>
       <div class="bar">
         <button class="run" id="run">Run query</button>
-        <span class="status" id="hint">Enter to run · Shift+Enter for newline</span>
+        <span class="status" id="hint">Enter to run · Shift+Enter for newline · <kbd>/</kbd> focuses</span>
       </div>
       <div class="examples" id="examples"></div>
     </div>
 
     <div class="read" id="read">
-      <h3>How I read that</h3>
+      <h3>How I read that <span class="hint">click a number to change it · × drops the clause</span></h3>
       <div class="conds" id="conds"></div>
+      <div class="readnotes" id="readnotes"></div>
     </div>
 
     <div class="status" id="status"></div>
+    <div class="progress" id="progress" hidden><div></div></div>
+    <div class="empty" id="empty" hidden></div>
 
-    <div id="chart-container"
-      style="display:none; margin-top: 20px; background: var(--card); padding: 15px; border: 1px solid var(--line); border-radius: var(--radius);">
-      <canvas id="scatterChart" height="80"></canvas>
+    <div class="toolbar" id="toolbar" hidden>
+      <span class="count-line" id="countline"></span>
+      <span class="tools">
+        <label class="tog" title="Counting stats divided by games played"><input type="checkbox" id="perGame"> per game</label>
+        <button id="colsBtn" type="button">Columns ▾</button>
+        <button id="allColsBtn" type="button" class="phone-only">All columns</button>
+        <button id="csvBtn" type="button">Copy CSV</button>
+        <button id="linkBtn" type="button">Copy link</button>
+      </span>
+      <div class="colpick" id="colpick" hidden></div>
     </div>
 
+    <div id="chart-container" hidden>
+      <div class="chart-bar">
+        <label>x <select id="axisX"></select></label>
+        <label>y <select id="axisY"></select></label>
+        <span class="hint">hover a row to light its dot · click a dot to open the player</span>
+      </div>
+      <canvas id="scatterChart" height="80"></canvas>
+    </div>
 
     <div class="scroll-top" id="scrollTop" style="display:none"><div id="scrollTopInner"></div></div>
     <div class="results" id="results" style="display:none">
@@ -638,6 +759,9 @@
         <thead id="thead"></thead>
         <tbody id="tbody"></tbody>
       </table>
+      <div class="sentinel" id="sentinel"></div>
+    </div>
+    <div class="more" id="more" hidden><span id="moreText"></span> <button type="button" id="moreAll">show all</button>
     </div>
 
     <details class="glossary" id="glossary">
@@ -647,9 +771,10 @@
     </details>
   </div>
 
-  <!-- DINO BOWL: play while your queries run. The mute chip lives beside the
-       launcher, not inside the panel, because the game keeps playing when the
-       panel is collapsed and that is exactly when you need to silence it. -->
+  <div class="tip" id="tip" hidden></div>
+
+  <!-- DINO BOWL: the launcher and the mute chip share one small dock; it hides
+       while the panel is open, whose head carries the same controls -->
   <div class="dino-dock">
     <button class="dino-mute" id="dinoMute" type="button" aria-pressed="false" title="Mute Dino Bowl" hidden>🔊</button>
     <button class="dino-btn" id="dinoBtn" type="button" title="Dino Bowl — 8-bit football. With dinosaurs." aria-label="Open Dino Bowl">🦖</button>
@@ -666,10 +791,9 @@
     <iframe id="dinoFrame" title="Dino Bowl"></iframe>
   </div>
 
-
-  <script src="/gridiron/engine.js?v=g10"></script>
+  <script src="/gridiron/engine.js?v=g11"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g10';
+    const DATA_URL = '/gridiron/data.json?v=g11';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -698,7 +822,7 @@
       rushing_yards: "Rush Yds", rushing_tds: "Rush TD", carries: "Car", ypc: "Y/C", rush_ypg: "Rush Y/G", ryoe: "RYOE", ryoe_per_att: "RYOE/att",
       receptions: "Rec", targets: "Tgt", receiving_yards: "Rec Yds", receiving_tds: "Rec TD", catch_pct: "Catch%", ypr: "Y/R", rec_ypg: "Rec Y/G",
       rec_yac: "YAC", drops: "Drops", drop_pct: "Drop%", target_share: "Tgt%", separation: "Sep", cushion: "Cush", adot: "aDOT",
-      total_yards: "Tot Yds", total_ypg: "Y/G", total_tds: "Tot TD", fantasy_ppr: "Fan PPR", fantasy_std: "Fan Std",
+      total_yards: "Tot Yds", total_ypg: "Y/G", total_tds: "TD Scored", fantasy_ppr: "Fan PPR", fantasy_std: "Fan Std",
       tackles: "Tkl", tackles_solo: "Solo", tackles_for_loss: "TFL", tfl_yards: "TFL Yds", sacks: "Sacks", qb_hits: "QB Hits", qb_hit_rate: "QBH%",
       pressures: "Prss", pressure_rate: "Prss%", hurries: "Hrry", qb_knockdowns: "QBKD", blitzes: "Bltz", blitz_pct: "Bltz%", sack_per_blitz: "Sk/Bltz",
       def_interceptions: "Def INT", passes_defended: "PD", int_plus_pd: "INT+PD", forced_fumbles: "FF", fumble_recoveries: "FR",
@@ -718,35 +842,43 @@
     };
     const TXT = new Set(["player_display_name", "position", "recent_team", "college"]);
     const INT_COLS = new Set(["games", "age", "weight", "draft_year", "draft_round", "draft_pick", "rookie_season", "experience", "season"]);
+    const FROZEN = ["season", "player_display_name", "position"];   // stay put when the grid scrolls sideways
+    const CHUNK = 150;                                                 // rows rendered per scroll step
 
     let T = null, META = null, loading = null;
-    const q = document.getElementById('q'), runBtn = document.getElementById('run');
-    const status = document.getElementById('status');
+    const $ = (id) => document.getElementById(id);
+    const q = $('q'), runBtn = $('run'), status = $('status');
+    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+    // ------------------------------------------------------------ data
     async function loadTable() {
       if (T) return T;
       if (loading) return loading;
       loading = (async () => {
-        status.className = 'status'; status.textContent = 'Loading the stat table (one time, ~4 MB)…';
+        const bar = $('progress'), fill = bar.firstElementChild;
+        status.className = 'status'; status.textContent = 'Loading the stat table (one time)…'; bar.hidden = false; fill.style.width = '4%';
         const res = await fetch(DATA_URL);
         if (!res.ok) throw new Error('data.json ' + res.status);
         const reader = res.body && res.body.getReader ? res.body.getReader() : null;
         let json;
         if (reader) {
-          const total = +res.headers.get('content-length') || 0; const chunks = []; let got = 0;
-          for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; if (total) status.textContent = 'Loading the stat table… ' + Math.round(got / total * 100) + '%'; }
+          // gzip hides the byte total; fall back to a soft estimate so the bar still moves
+          const total = +res.headers.get('content-length') || 24500000; const chunks = []; let got = 0;
+          for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; const pct = Math.min(96, Math.round(got / total * 100)); fill.style.width = pct + '%'; status.textContent = 'Loading the stat table… ' + pct + '%'; }
           const buf = new Uint8Array(got); let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
           json = JSON.parse(new TextDecoder().decode(buf));
         } else json = await res.json();
+        fill.style.width = '100%';
         T = new Gridiron.Table(json); META = json.meta;
-        document.getElementById('meta').innerHTML = `<span><b>${META.rows.toLocaleString()}</b> player-seasons</span><span>seasons <b>${META.seasons[0]}–${META.seasons[META.seasons.length - 1]}</b></span><span><b>${META.columns.length}</b> stats per line</span><span>built <b>${META.built.slice(0, 10)}</b></span>`;
-        renderGlossary();
-        status.textContent = '';
+        $('meta').innerHTML = `<span><b>${META.rows.toLocaleString()}</b> player-seasons</span><span>seasons <b>${META.seasons[0]}–${META.seasons[META.seasons.length - 1]}</b></span><span><b>${META.columns.length}</b> stats per line</span><span>built <b>${META.built.slice(0, 10)}</b></span>`;
+        renderGlossary(); buildVocab();
+        status.textContent = ''; setTimeout(() => { bar.hidden = true; fill.style.width = '0'; }, 400);
         return T;
       })();
       return loading;
     }
 
+    // ------------------------------------------------------------ formatting + definitions
     function head(c) { return HEAD[c] || (META && META.display[c] ? META.display[c].replace(/\s*\(.*\)\s*$/, '') : c); }
     function fmt(col, v) {
       if (v === null || v === undefined) return '—';
@@ -760,181 +892,302 @@
       }
       return v;
     }
-    function renderGlossary() {
-      const body = document.getElementById('gloss-body');
+    const PFR_RE = /^(pressures|hurries|qb_knockdowns|blitzes|missed_tackles|missed_tackle_pct|pfr_comb_tackles|cov_|times_|pressured_pct|pocket_time|drops|drop_pct|bad_throw|on_target|throwaways|scrambles|iay_per_att|ybc_per_att|yac_per_att|broken_tackles|adot|rec_yac_per_rec|pressure_rate|blitz_pct|sack_per_blitz|qb_hit_rate|int_plus_pd)/;
+    const NGS_RE = /^(time_to_throw|ngs_|air_yards_diff|aggressiveness|max_completed_air|air_yards_to_sticks|xcomp_pct|cpoe_ngs|rush_efficiency|stacked_box_pct|time_to_los|x_rush_yards|ryoe|rush_pct_oe|cushion|separation|rec_iay|iay_share|yac_oe|x_yac)/;
+    const DEEP_RE = /^(deep_|pass_td_|rush_td_|rec_td_)/;
+    // which source a column comes from, and the first season it exists
+    function sourceOf(c) {
       const cov = META.coverage;
-      const src = (c) => {
-        if (META.derived[c]) return META.derived[c];
-        if (["qbr", "qbr_raw", "qbr_pts_added", "qbr_plays", "qbr_epa_total"].includes(c)) return "ESPN Total QBR season table (" + cov.qbr + "–)";
-        if (/^(pressures|hurries|qb_knockdowns|blitzes|missed_tackles|missed_tackle_pct|pfr_comb_tackles|cov_|times_|pressured_pct|pocket_time|drops|drop_pct|bad_throw|on_target|throwaways|scrambles|iay_per_att|ybc_per_att|yac_per_att|broken_tackles|adot|rec_yac_per_rec)/.test(c)) return "Pro Football Reference advanced stats via nflverse (" + cov.pfr + "–)";
-        if (/^(time_to_throw|ngs_|air_yards_diff|aggressiveness|max_completed_air|air_yards_to_sticks|xcomp_pct|cpoe_ngs|rush_efficiency|stacked_box_pct|time_to_los|x_rush_yards|ryoe|rush_pct_oe|cushion|separation|rec_iay|iay_share|yac_oe|x_yac)/.test(c)) return "NFL Next Gen Stats via nflverse (" + cov.ngs + "–)";
-        if (/snaps$/.test(c)) return "nflverse snap counts, regular season (" + cov.snaps + "–)";
-        if (["height", "weight", "college", "draft_year", "draft_round", "draft_pick", "rookie_season", "age", "headshot_url"].includes(c)) return "nflverse players database";
-        return "nflverse player stats, regular season (" + cov.box_score + "–)";
-      };
+      if (["qbr", "qbr_raw", "qbr_pts_added", "qbr_plays", "qbr_epa_total"].includes(c)) return { text: "ESPN Total QBR season table", from: cov.qbr };
+      if (PFR_RE.test(c)) return { text: "Pro Football Reference advanced stats via nflverse", from: cov.pfr };
+      if (NGS_RE.test(c)) return { text: "NFL Next Gen Stats via nflverse", from: cov.ngs };
+      if (/snaps$/.test(c)) return { text: "nflverse snap counts, regular season", from: cov.snaps };
+      if (DEEP_RE.test(c)) return { text: "counted from nflverse play-by-play, regular season", from: /^deep_/.test(c) ? 2006 : cov.box_score };
+      if (["height", "weight", "college", "draft_year", "draft_round", "draft_pick", "rookie_season", "age", "headshot_url"].includes(c)) return { text: "nflverse players database", from: null };
+      if (["playoff_wins", "super_bowl_wins"].includes(c)) return { text: "postseason results from nflverse play-by-play", from: cov.box_score };
+      return { text: "nflverse player stats, regular season", from: cov.box_score };
+    }
+    function renderGlossary() {
       const skip = new Set(["player_id", "headshot_url", "player_display_name", "position", "position_group", "recent_team", "season", "made_playoffs"]);
       const rows = META.columns.filter((c) => !skip.has(c)).sort((a, b) => head(a).localeCompare(head(b)));
-      body.innerHTML = '<table class="gloss"><thead><tr><th>Column</th><th>Ask for it as</th><th>What it is</th></tr></thead><tbody>' +
+      $('gloss-body').innerHTML = '<table class="gloss"><thead><tr><th>Column</th><th>Ask for it as</th><th>What it is</th></tr></thead><tbody>' +
         rows.map((c) => {
           const names = META.aliases.filter(([, col]) => col === c).map(([p]) => p).slice(0, 4).join(', ');
-          return `<tr><td><b>${head(c)}</b></td><td>${names || (META.display[c] || c)}</td><td>${src(c)}</td></tr>`;
+          const s = sourceOf(c);
+          return `<tr><td><b>${head(c)}</b></td><td>${names || (META.display[c] || c)}</td><td>${META.derived[c] ? META.derived[c] + ' — ' : ''}${s.text}${s.from ? ' (' + s.from + '–)' : ''}</td></tr>`;
         }).join('') + '</tbody></table>';
     }
+    // header hover card: definition, formula, source, coverage
+    const tip = $('tip');
+    document.addEventListener('mouseover', (e) => {
+      const th = e.target.closest('th[data-col]'); if (!th || !META) { if (!e.target.closest('.tip')) tip.hidden = true; return; }
+      const c = th.dataset.col, s = sourceOf(c);
+      tip.innerHTML = `<b>${esc(META.display[c] || c)}</b>${META.derived[c] ? `<div class="tip-f">${esc(META.derived[c])}</div>` : ''}<div class="tip-s">${esc(s.text)}${s.from ? ` · ${s.from}–` : ''}</div><div class="tip-k">click to sort</div>`;
+      tip.hidden = false;
+      const r = th.getBoundingClientRect(), w = tip.offsetWidth;
+      tip.style.left = Math.max(8, Math.min(innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+      tip.style.top = (r.bottom + 6) + 'px';
+    });
+    document.addEventListener('scroll', () => { tip.hidden = true; }, true);
 
+    // ------------------------------------------------------------ examples + autocomplete
     function renderExamples() {
-      const box = document.getElementById('examples');
+      const box = $('examples');
       EXAMPLES.forEach(ex => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = ex; b.onclick = () => { q.value = ex; q.focus(); run(); }; box.appendChild(b); });
     }
+    let VOCAB = [];
+    function buildVocab() {
+      const seen = new Set(), out = [];
+      const add = (t, kind) => { const k = t.toLowerCase(); if (!seen.has(k) && k.length > 1) { seen.add(k); out.push({ t: k, kind }); } };
+      for (const w of Object.keys(META.positions)) if (w.length > 2) add(w, 'position');
+      for (const [phrase] of META.aliases) if (!/plus|twentyplus|fortyplus/.test(phrase)) add(phrase, 'stat');
+      for (const k of ['since 2020', 'since 2015', 'since 2010', 'in 2024', 'in 2023', 'between 2010 and 2020', 'top 10 in', 'top 5 in', 'bottom 5 in', 'at least', 'more than', 'fewer than', 'over', 'under', 'who made the playoffs', 'who won a playoff game', 'who won the super bowl', 'led the league in', 'with the most', 'with the fewest']) add(k, 'phrase');
+      VOCAB = out;
+    }
+    const ac = $('ac'); let acItems = [], acIdx = -1, acFrag = null;
+    function fragmentAtCaret() {
+      const upto = q.value.slice(0, q.selectionStart);
+      const m = /(?:^|\b(?:and|with|who|that|or|while|,)\s+|,\s*)([a-z][a-z0-9 '%+.-]*)$/i.exec(upto);
+      const frag = m ? m[1] : upto.split(/\s+(?=\S*$)/).pop();
+      return { frag: (frag || '').toLowerCase().replace(/^\s+/, ''), start: upto.length - (frag || '').length };
+    }
+    function showAc() {
+      if (!VOCAB.length) return hideAc();
+      let { frag, start } = fragmentAtCaret();
+      // an article or a stray word in front should not hide the match: try shorter tails
+      const words = frag.split(' ');
+      let found = null;
+      for (let k = 0; k < words.length && !found; k++) {
+        const f = words.slice(k).join(' ');
+        if (f.length < 2) break;
+        const starts = VOCAB.filter(v => v.t.startsWith(f) && v.t !== f);
+        const within = VOCAB.filter(v => !v.t.startsWith(f) && v.t.includes(f));
+        const items = [...starts, ...within].slice(0, 8);
+        if (items.length) found = { f, items, start: start + words.slice(0, k).join(' ').length + (k ? 1 : 0) };
+      }
+      if (!found) return hideAc();
+      frag = found.f; start = found.start; acItems = found.items;
+      acFrag = { frag, start }; acIdx = -1;
+      ac.innerHTML = acItems.map((v, i) => `<div class="ac-item" role="option" data-i="${i}"><span>${esc(v.t)}</span><small>${v.kind}</small></div>`).join('');
+      ac.hidden = false;
+    }
+    function hideAc() { ac.hidden = true; acItems = []; acIdx = -1; }
+    function acceptAc(i) {
+      const v = acItems[i]; if (!v || !acFrag) return;
+      const before = q.value.slice(0, acFrag.start), after = q.value.slice(q.selectionStart);
+      q.value = before + v.t + ' ' + after.replace(/^\s+/, '');
+      const pos = before.length + v.t.length + 1; q.setSelectionRange(pos, pos); hideAc(); q.focus();
+    }
+    ac.addEventListener('mousedown', (e) => { const it = e.target.closest('.ac-item'); if (it) { e.preventDefault(); acceptAc(+it.dataset.i); } });
+    q.addEventListener('input', showAc);
+    q.addEventListener('blur', () => setTimeout(hideAc, 120));
+    q.addEventListener('keydown', (e) => {
+      if (!ac.hidden) {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); acIdx = (acIdx + (e.key === 'ArrowDown' ? 1 : -1) + acItems.length) % acItems.length; [...ac.children].forEach((el, i) => el.classList.toggle('on', i === acIdx)); return; }
+        if ((e.key === 'Enter' || e.key === 'Tab') && acIdx >= 0) { e.preventDefault(); acceptAc(acIdx); return; }
+        if (e.key === 'Tab' && acItems.length) { e.preventDefault(); acceptAc(0); return; }
+        if (e.key === 'Escape') { e.preventDefault(); hideAc(); return; }
+      }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); hideAc(); run(); }
+      else if (e.key === 'Escape') { q.blur(); }
+    });
+    document.addEventListener('keydown', (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName) || document.activeElement.isContentEditable;
+      if (e.key === '/' && !typing) { e.preventDefault(); q.focus(); q.select(); }
+      if (e.key === 'Escape') { $('colpick').hidden = true; tip.hidden = true; }
+    });
 
-    let scatterChart = null, lineChart = null, lastD = null;
-    // chart colours follow the theme
+    // ------------------------------------------------------------ the question, its reading, and the URL
+    // S is the whole answer on screen: the text, the conditions the engine read
+    // (editable), the result, the sort, and the view options.
+    const S = { text: '', conds: [], notes: [], ignored: [], d: null, sort: null, perGame: false, hidden: new Set(), group: 'ALL', allCols: false };
     const themeColor = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
     const chartColors = () => ({ accent: themeColor('--accent'), dim: themeColor('--chalk-dim'), line: themeColor('--line') });
-    function renderScatter(rows, columns) {
-      const container = document.getElementById('chart-container');
-      if (!rows.length) { container.style.display = 'none'; return; }
-      let xAxis, yAxis;
-      const pairs = [['passing_yards', 'passing_tds'], ['rushing_yards', 'rushing_tds'], ['receiving_yards', 'receiving_tds'], ['tackles', 'sacks'], ['pressures', 'sacks']];
-      for (const [x, y] of pairs) if (columns.includes(x) && columns.includes(y) && rows.some(r => r[x] > 0)) { xAxis = x; yAxis = y; break; }
-      if (!xAxis) { container.style.display = 'none'; return; }
-      container.style.display = 'block';
-      const data = rows.filter(r => r[xAxis] != null && r[yAxis] != null).map(r => ({ x: r[xAxis], y: r[yAxis], name: r.player_display_name, season: r.season }));
-      const ctx = document.getElementById('scatterChart').getContext('2d');
-      if (scatterChart) scatterChart.destroy();
-      scatterChart = new Chart(ctx, {
-        type: 'scatter',
-        data: { datasets: [{ label: `${head(xAxis)} vs ${head(yAxis)}`, data, backgroundColor: chartColors().accent, pointRadius: 4, pointHoverRadius: 6 }] },
-        options: {
-          plugins: { tooltip: { callbacks: { label: (c) => { const d = c.raw; return `${d.name} (${d.season}): ${d.x}, ${d.y}`; } } } },
-          scales: { x: { title: { display: true, text: head(xAxis), color: chartColors().dim }, grid: { color: chartColors().line }, ticks: { color: chartColors().dim } },
-                    y: { title: { display: true, text: head(yAxis), color: chartColors().dim }, grid: { color: chartColors().line }, ticks: { color: chartColors().dim } } }
-        }
-      });
-    }
 
-    const CAREER_COLS = {
-      QB: ["games", "pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "interceptions", "passer_rating", "qbr", "epa_per_play", "cpoe", "sacks_taken", "sack_pct", "rushing_yards", "rushing_tds"],
-      RB: ["games", "carries", "rushing_yards", "ypc", "rushing_tds", "receptions", "receiving_yards", "receiving_tds", "total_yards", "fumbles_lost", "ryoe_per_att", "fantasy_ppr"],
-      WR: ["games", "targets", "receptions", "receiving_yards", "ypr", "receiving_tds", "catch_pct", "rec_yac", "drops", "target_share", "separation", "fantasy_ppr"],
-      DEF: ["games", "tackles", "tackles_for_loss", "sacks", "qb_hits", "pressures", "pressure_rate", "forced_fumbles", "fumble_recoveries", "def_interceptions", "passes_defended", "def_tds", "missed_tackle_pct", "cov_cmp_pct"],
-      K: ["games", "fg_made", "fg_att", "fg_pct", "fg_long", "pat_made", "pat_att"], P: ["games", "punts", "punt_yards", "punts_inside_20"],
-    };
-    function groupOf(pos) { if (META.def_codes.includes(pos)) return "DEF"; if (pos === "TE") return "WR"; if (pos === "FB") return "RB"; return CAREER_COLS[pos] ? pos : "WR"; }
-    // PLAYER PAGES. Every name is a link to #player/<id>: the player's header,
-    // a career line, and every season he has played as one grid with a career
-    // row at the bottom. The rest of the page hides while it is open; the
-    // browser's back button (or the link) returns to the results as they were.
-    const HOME = ['.search', '#read', '#status', '#chart-container', '#scrollTop', '#results', '.glossary'];
-    function showHome() {
-      document.getElementById('player').hidden = true;
-      for (const sel of HOME) { const el = document.querySelector(sel); if (el) el.style.visibility = ''; el && el.classList.remove('offpage'); }
+    function urlFor() {
+      const p = new URLSearchParams();
+      if (S.text) p.set('q', S.text);
+      if (S.sort) p.set('sort', S.sort.col + ':' + S.sort.dir);
+      const qs = p.toString();
+      return location.pathname + (qs ? '?' + qs : '') + location.hash;
     }
-    async function showPlayer(pid) {
-      for (const sel of HOME) { const el = document.querySelector(sel); if (el) el.classList.add('offpage'); }
-      const page = document.getElementById('player'), body = document.getElementById('player-body');
-      page.hidden = false; body.innerHTML = '<p class="status">Loading…</p>'; window.scrollTo(0, 0);
-      try {
-        const rows = (await loadTable()).career(pid);
-        if (!rows.length) { body.innerHTML = '<p class="status error">No seasons found for this player.</p>'; return; }
-        const last = rows[rows.length - 1], pos = last.position || '', g = groupOf(pos);
-        const statKey = g === 'QB' ? 'passing_yards' : g === 'RB' ? 'rushing_yards' : g === 'DEF' ? 'tackles' : g === 'K' ? 'fg_made' : g === 'P' ? 'punts' : 'receiving_yards';
-        const cols = [...new Set(['games', 'made_playoffs', 'age', ...CAREER_COLS[g]])].filter(c => rows.some(r => r[c] != null));
-        const teams = [...new Set(rows.map(r => r.recent_team).filter(Boolean))];
-        const bio = [pos, teams.join(', '), last.height != null ? fmt('height', last.height) : null, last.weight != null ? last.weight + ' lbs' : null,
-          last.age != null ? 'Age ' + last.age : null, last.college || null,
-          last.draft_year ? `Drafted ${last.draft_year} · Rd ${last.draft_round || '–'} · Pick ${last.draft_pick || '–'}` : (last.rookie_season ? 'Undrafted · rookie ' + last.rookie_season : null)].filter(Boolean).join(' · ');
-        // career row: counting stats add up; a rate whose formula is "a / b" is recomputed from the sums
-        const counting = new Set([...META.rank_desc, 'games', 'playoff_wins', 'super_bowl_wins'].filter(c => !META.pct_stats.includes(c) && !(META.pp_stats || []).includes(c)));
-        const sum = {}; for (const c of cols) if (counting.has(c) && rows.some(r => typeof r[c] === 'number')) sum[c] = rows.reduce((t, r) => t + (r[c] || 0), 0);
-        const career = {};
-        for (const c of cols) {
-          if (c in sum) { career[c] = sum[c]; continue; }
-          const m = /^(\w+) \/ (\w+)$/.exec(META.derived[c] || '');
-          if (m && m[1] in sum && m[2] in sum && sum[m[2]] > 0) career[c] = sum[m[1]] / sum[m[2]];
-          else if (c === 'made_playoffs') career[c] = null;
-        }
-        const seasons = rows.filter(r => r.made_playoffs).length;
-        const cell = (c, v, r) => c === 'made_playoffs' && r === career ? `${seasons} of ${rows.length}` : fmt(c, v);
-        body.innerHTML = `
-          <div class="player-head">
-            <img src="${last.headshot_url || ''}" onerror="this.style.display='none'" alt="">
-            <div><h2>${last.player_display_name}</h2><p>${bio}</p>
-              <p>${rows.length} season${rows.length === 1 ? '' : 's'} · ${META.seasons[0] <= rows[0].season ? rows[0].season : '?'}–${last.season}</p></div>
-          </div>
-          <div class="player-chart"><canvas id="lineChart" height="80"></canvas></div>
-          <h3 class="player-h3">Seasons <span class="player-hint">click a column to sort</span></h3>
-          <div class="results career-grid"><table>
-            <thead id="pthead"><tr><th class="txt" data-col="season">Yr</th><th class="txt" data-col="recent_team">Tm</th><th class="txt" data-col="position">Pos</th>${cols.map(c => `<th data-col="${c}" title="${(META.display[c] || c).replace(/"/g, '')} — click to sort">${head(c)}</th>`).join('')}</tr></thead>
-            <tbody id="ptbody"></tbody>
-          </table></div>`;
-        const P = { rows, sort: null };
-        const paintSeasons = () => {
-          const sc = P.sort && P.sort.col, mark = (c) => c === sc ? ' sorted' : '';
-          document.getElementById('ptbody').innerHTML = sortRows(rows, P.sort).map(r => `<tr><td class="txt${mark('season')}"><span class="season-badge">${r.season}</span></td><td class="txt${mark('recent_team')}">${r.recent_team || ''}</td><td class="txt${mark('position')}">${r.position || ''}</td>${cols.map(c => `<td class="${mark(c).trim()}">${cell(c, r[c], r)}</td>`).join('')}</tr>`).join('')
-            + `<tr class="career-row"><td class="txt">Career</td><td class="txt"></td><td class="txt"></td>${cols.map(c => `<td>${c in career ? cell(c, career[c], career) : (c === 'made_playoffs' ? cell(c, null, career) : '')}</td>`).join('')}</tr>`;
-        };
-        wireSort(document.getElementById('pthead'), P, paintSeasons);
-        paintSeasons();
-        const ctx = document.getElementById('lineChart').getContext('2d');
-        if (lineChart) lineChart.destroy();
-        lineChart = new Chart(ctx, { type: 'line', data: { labels: rows.map(r => r.season), datasets: [{ label: head(statKey), data: rows.map(r => r[statKey] || 0), borderColor: chartColors().accent, backgroundColor: chartColors().accent + '33', fill: true, tension: 0.3 }] },
-          options: { scales: { x: { grid: { color: chartColors().line }, ticks: { color: chartColors().dim } }, y: { grid: { color: chartColors().line }, ticks: { color: chartColors().dim }, beginAtZero: true } } } });
-      } catch (e) { body.innerHTML = '<p class="status error">Failed to load this player: ' + e.message + '</p>'; }
-    }
-    function route() {
-      const m = /^#player\/(.+)$/.exec(location.hash);
-      if (m) showPlayer(decodeURIComponent(m[1])); else showHome();
-    }
-    window.addEventListener('hashchange', route);
-    document.getElementById('playerBack').addEventListener('click', (e) => { e.preventDefault(); if (history.length > 1) history.back(); else location.hash = ''; });
+    function pushUrl(replace) { const u = urlFor(); if (u === location.pathname + location.search + location.hash) return; history[replace ? 'replaceState' : 'pushState']({ q: S.text }, '', u); }
 
-    async function run() {
+    async function run(push = true) {
       const text = q.value.trim(); if (!text) return;
       runBtn.disabled = true; runBtn.textContent = 'Running…';
-      const read = document.getElementById('read'), conds = document.getElementById('conds');
       try {
         const table = await loadTable();
         status.className = 'status'; status.textContent = '';
-        let d;
-        try { d = table.query(text); }
+        let r;
+        try { r = table.run(text); }
         catch (e) {
-          if (e instanceof Gridiron.QueryError || e.name === 'QueryError') { read.classList.remove('show'); status.className = 'status error'; status.textContent = e.message; document.getElementById('results').style.display = 'none'; return; }
+          if (e instanceof Gridiron.QueryError || e.name === 'QueryError') { failed(e.message); return; }
           throw e;
         }
-        const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        const kind = (n) => /^position is/.test(n) ? 'k-pos' : /^season/.test(n) ? 'k-season' : /^sorted by/.test(n) ? 'k-sort'
-          : /^(won |appeared|led the league|top \d|bottom \d)/.test(n) ? 'k-flag' : 'k-filter';
-        const pill = (n) => kind(n) === 'k-filter' ? esc(n).replace(/(\S+)$/, '<b>$1</b>') : esc(n);
-        conds.innerHTML = d.notes.map((n, i) => `<div class="cond">${i > 0 ? '<span class="and">and</span>' : ''}${esc(n)}</div>`).join('')
-          + ((d.ignored && d.ignored.length)
-            ? `<div class="cond ignored">couldn't read ${d.ignored.map(x => '“' + esc(x) + '”').join(', ')} — not used as a filter</div>` : '');
-        read.classList.add('show');
-        status.innerHTML = `<span class="count">${d.count.toLocaleString()}</span> player-season${d.count === 1 ? '' : 's'} matched` + (d.truncated ? ' · showing first 2000' : '');
-        lastD = d; renderTable(d); renderScatter(d.rows, d.columns);
+        S.text = text; S.conds = r.conds; S.notes = r.notes; S.ignored = r.ignored;
+        const keep = S.sort && (r.conds.length) ? S.sort : null;
+        present(table.present(r.idx, r.conds, r.notes, r.ignored), keep);
+        if (push !== false) pushUrl(false);
       } catch (e) { status.className = 'status error'; status.textContent = 'Something broke: ' + e.message; }
       finally { runBtn.disabled = false; runBtn.textContent = 'Run query'; }
     }
-
-    // a second horizontal scrollbar above the table, kept in step with the real one
-    function syncScrollbars() {
-      const res = document.getElementById('results'), top = document.getElementById('scrollTop'), inner = document.getElementById('scrollTopInner');
-      const table = res.querySelector('table');
-      res.style.width = top.style.width = '';
-      document.documentElement.style.setProperty('--table-w', table.scrollWidth + 2 + 'px');
-      const wide = table.scrollWidth > res.clientWidth + 1;
-      top.style.display = wide ? 'block' : 'none';
-      inner.style.width = table.scrollWidth + 'px';
-      if (!top.dataset.wired) {
-        top.dataset.wired = '1';
-        let lock = false;
-        top.addEventListener('scroll', () => { if (lock) return; lock = true; res.scrollLeft = top.scrollLeft; lock = false; });
-        res.addEventListener('scroll', () => { if (lock) return; lock = true; top.scrollLeft = res.scrollLeft; lock = false; });
-        window.addEventListener('resize', () => { if (res.style.display !== 'none') syncScrollbars(); });
-      }
+    // the same question with an edited reading
+    function rerunConds() {
+      try {
+        const d = T.queryConds(S.conds, S.notes, S.ignored);
+        present(d, S.sort);
+        pushUrl(true);
+      } catch (e) { failed(e.message); }
     }
-    // ONE SORTER FOR EVERY GRID. Click a header: high-to-low (A-Z for text,
-    // oldest-first for the year). Click it again: the other way. Blanks always
-    // sink to the bottom. The sorted header is filled, the column is tinted.
+    function failed(msg) {
+      $('read').classList.remove('show'); status.className = 'status error'; status.textContent = msg;
+      for (const id of ['results', 'scrollTop']) $(id).style.display = 'none';
+      for (const id of ['toolbar', 'chart-container', 'empty']) $(id).hidden = true;
+    }
+    function present(d, keepSort) {
+      S.d = d;
+      // keep the sort if that column is still on screen (#15)
+      S.sort = keepSort && d.columns.includes(keepSort.col) ? keepSort : (d.sort ? { col: d.sort.col, dir: d.sort.asc ? 'asc' : 'desc' } : null);
+      renderRead();
+      $('countline').innerHTML = `<span class="count">${d.count.toLocaleString()}</span> player-season${d.count === 1 ? '' : 's'}` + (d.truncated ? ` · first 2,000 shown` : '');
+      status.textContent = '';
+      renderEmpty(d);
+      $('toolbar').hidden = !d.rows.length;
+      renderTable(d); renderScatter(d);
+    }
+
+    // The reading is the filter UI: a number is editable in place, × drops
+    // the clause, and every change re-runs against the same table.
+    function renderRead() {
+      const box = $('conds');
+      const shown = (c) => c.kind === 'threshold' ? (META.pct_stats.includes(c.col) ? (c.value * 100).toString().replace(/\.0+$/, '') : String(c.value)) : c.kind === 'rank' ? String(c.n) : null;
+      box.innerHTML = S.notes.map((n, i) => {
+        const c = S.conds[i]; let html = esc(n);
+        const v = c ? shown(c) : null;
+        if (v != null) {
+          const at = html.lastIndexOf(v);
+          if (at >= 0) html = html.slice(0, at) + `<span class="val" contenteditable="true" spellcheck="false" data-i="${i}" title="click to change">${v}</span>` + html.slice(at + v.length);
+        }
+        return `<div class="cond" data-i="${i}">${i > 0 ? '<span class="and">and</span>' : ''}${html}<button class="x" data-i="${i}" title="drop this clause" aria-label="drop this clause">×</button></div>`;
+      }).join('') + (S.ignored.length ? S.ignored.map(x => {
+        const hint = /\(only /.test(x) ? '' : suggestFor(x);
+        return `<div class="cond ignored">couldn't read “${esc(x)}” — not used as a filter${hint}</div>`;
+      }).join('') : '');
+      // coverage notes (#4): a stat that starts in 2018 cannot match earlier seasons
+      const range = S.conds.find(c => c.kind === 'season_range');
+      const from = range && range.min != null ? range.min : META.seasons[0];
+      const notes = [];
+      for (const c of S.conds) {
+        if (!c.col) continue;
+        const s = sourceOf(c.col);
+        if (s.from && from < s.from) notes.push(`${esc(head(c.col))} is charted from ${s.from} — seasons before that cannot match`);
+      }
+      $('readnotes').innerHTML = [...new Set(notes)].map(n => `<div class="rnote">${n}</div>`).join('');
+      $('read').classList.add('show');
+    }
+    $('conds').addEventListener('click', (e) => {
+      const x = e.target.closest('button.x'); if (!x) return;
+      const i = +x.dataset.i;
+      S.conds.splice(i, 1); S.notes.splice(i, 1);
+      if (!S.conds.length) { failed("Every clause was dropped — ask something new."); return; }
+      rerunConds();
+    });
+    function commitVal(el) {
+      const i = +el.dataset.i, c = S.conds[i]; if (!c) return;
+      const raw = parseFloat(el.textContent.replace(/[^\d.\-]/g, ''));
+      if (!isFinite(raw)) { renderRead(); return; }
+      const old = S.notes[i];
+      if (c.kind === 'threshold') {
+        const pct = META.pct_stats.includes(c.col);
+        const shownOld = pct ? (c.value * 100).toString().replace(/\.0+$/, '') : String(c.value);
+        c.value = pct ? raw / 100 : raw;
+        const at = old.lastIndexOf(shownOld);
+        S.notes[i] = at >= 0 ? old.slice(0, at) + String(raw) + old.slice(at + shownOld.length) : old;
+      } else if (c.kind === 'rank') {
+        const n = Math.max(1, Math.round(raw)), at = old.lastIndexOf(String(c.n));
+        S.notes[i] = at >= 0 ? old.slice(0, at) + String(n) + old.slice(at + String(c.n).length) : old;
+        c.n = n;
+      }
+      rerunConds();
+    }
+    $('conds').addEventListener('keydown', (e) => { const el = e.target.closest('.val'); if (!el) return; if (e.key === 'Enter') { e.preventDefault(); el.blur(); } if (e.key === 'Escape') { renderRead(); } });
+    $('conds').addEventListener('focusout', (e) => { const el = e.target.closest && e.target.closest('.val'); if (el) commitVal(el); });
+
+    // "did you mean" for a clause the parser could not read (#19)
+    function bigrams(s) { const out = new Set(); for (let i = 0; i < s.length - 1; i++) out.add(s.slice(i, i + 2)); return out; }
+    function suggestFor(fragment) {
+      const words = fragment.toLowerCase().replace(/[\d%+.,]+/g, ' ').replace(/\s+/g, ' ').trim();
+      if (words.length < 3) return '';
+      const a = bigrams(words); let best = null, bs = 0;
+      for (const [phrase] of META.aliases) {
+        if (/plus|twentyplus|fortyplus/.test(phrase)) continue;
+        const b = bigrams(phrase); let hit = 0; for (const g of a) if (b.has(g)) hit++;
+        const score = 2 * hit / (a.size + b.size);
+        if (score > bs) { bs = score; best = phrase; }
+      }
+      if (!best || bs < 0.45) return '';
+      return ` — did you mean <button class="mean" data-from="${esc(words)}" data-to="${esc(best)}">${esc(best)}</button>?`;
+    }
+    $('conds').addEventListener('click', (e) => {
+      const b = e.target.closest('button.mean'); if (!b) return;
+      const re = new RegExp(b.dataset.from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      q.value = re.test(q.value) ? q.value.replace(re, b.dataset.to) : q.value + ' ' + b.dataset.to;
+      run();
+    });
+
+    // zero rows (#3): name the clause that empties it, show how far off it is, offer to drop it
+    function renderEmpty(d) {
+      const box = $('empty');
+      if (d.count > 0) { box.hidden = true; return; }
+      const filters = S.conds.map((c, i) => ({ c, i })).filter(({ c }) => c.kind !== 'sort');
+      let best = null;
+      if (filters.length > 1) {
+        for (const f of filters) {
+          const rest = S.conds.filter((_, j) => j !== f.i);
+          const idx = T.apply(rest);
+          if (!best || idx.length > best.n) best = { ...f, n: idx.length, idx };
+        }
+      }
+      let html = `<b>Nothing matches.</b>`;
+      if (best && best.n > 0) {
+        html += ` Without <i>${esc(S.notes[best.i])}</i>, <b>${best.n.toLocaleString()}</b> season${best.n === 1 ? '' : 's'} match.`;
+        const c = best.c;
+        if (c.kind === 'threshold' && T.has(c.col)) {
+          const v = T.cols[c.col]; let ext = null;
+          const hi = c.op.includes('>');
+          for (const i of best.idx) { const x = v[i]; if (typeof x !== 'number') continue; if (ext == null || (hi ? x > ext : x < ext)) ext = x; }
+          if (ext != null) html += ` The ${hi ? 'highest' : 'lowest'} ${esc(head(c.col))} among them is <b>${fmt(c.col, ext)}</b>.`;
+        }
+        html += ` <button class="relax" data-i="${best.i}">Drop that clause</button>`;
+      } else if (S.conds.length === 1) {
+        html += ' Loosen the one condition or ask something else.';
+      } else {
+        html += ' Every clause alone still leaves nothing — the combination is impossible in this data.';
+      }
+      box.innerHTML = html; box.hidden = false;
+    }
+    $('empty').addEventListener('click', (e) => { const b = e.target.closest('button.relax'); if (!b) return; const i = +b.dataset.i; S.conds.splice(i, 1); S.notes.splice(i, 1); rerunConds(); });
+
+    // ------------------------------------------------------------ the grid
+    // League leader per column and season (#14), computed once per column.
+    const LEAD = new Map();
+    function leaderMap(col) {
+      if (LEAD.has(col)) return LEAD.get(col);
+      const asc = META.ascending_good.includes(col), v = T.cols[col], s = T.cols.season, m = new Map();
+      const rateQual = (META.rate_ranks || []).find(r => r[0] === col);
+      const qualCol = rateQual ? T.cols[rateQual[2]] : null, qualMin = rateQual ? rateQual[3] : 0;
+      for (let i = 0; i < T.n; i++) {
+        const x = v[i]; if (typeof x !== 'number') continue;
+        if (qualCol && !(qualCol[i] >= qualMin * (T.cols.games[i] || 0))) continue;
+        const cur = m.get(s[i]);
+        if (cur === undefined || (asc ? x < cur : x > cur)) m.set(s[i], x);
+      }
+      LEAD.set(col, m); return m;
+    }
+    const leadable = (c) => META.rank_desc.includes(c) || (META.rate_ranks || []).some(r => r[0] === c) || META.ascending_good.includes(c);
+    const counting = (c) => (META.rank_desc.includes(c) || ['playoff_wins', 'super_bowl_wins'].includes(c)) && !META.pct_stats.includes(c) && !(META.pp_stats || []).includes(c) && !['games', 'age'].includes(c);
+
     function sortRows(rows, sort) {
       if (!sort) return rows;
       const dir = sort.dir === 'desc' ? -1 : 1, col = sort.col;
@@ -947,59 +1200,277 @@
         return c * dir;
       });
     }
+    function markSort(thead, sort) {
+      thead.querySelectorAll('th').forEach(t => {
+        t.classList.remove('sort-desc', 'sort-asc'); t.removeAttribute('aria-sort');
+        if (sort && t.dataset.col === sort.col) { t.classList.add('sort-' + sort.dir); t.setAttribute('aria-sort', sort.dir === 'desc' ? 'descending' : 'ascending'); }
+      });
+    }
     function wireSort(thead, state, rerender) {
       thead.onclick = (e) => {
         const th = e.target.closest('th[data-col]'); if (!th) return;
-        const col = th.dataset.col;
-        const flip = state.sort && state.sort.col === col;
+        const col = th.dataset.col, flip = state.sort && state.sort.col === col;
         state.sort = { col, dir: flip ? (state.sort.dir === 'desc' ? 'asc' : 'desc') : ((TXT.has(col) || col === 'season') ? 'asc' : 'desc') };
-        thead.querySelectorAll('th').forEach(t => {
-          t.classList.remove('sort-desc', 'sort-asc'); t.removeAttribute('aria-sort');
-          if (t.dataset.col === col) { t.classList.add('sort-' + state.sort.dir); t.setAttribute('aria-sort', state.sort.dir === 'desc' ? 'descending' : 'ascending'); }
-        });
+        markSort(thead, state.sort);
         rerender();
       };
     }
 
-    let LAST = null;   // the result rows on screen, their columns, and how they are sorted
+    let observer = null, pending = [], visibleCols = [];
+    function groupKey(rows) { const p = rows.find(r => r.position); if (!p) return 'ALL'; const pos = p.position; return META.def_codes.includes(pos) ? 'DEF' : pos === 'TE' ? 'WR' : pos === 'FB' ? 'RB' : pos; }
+    function loadHidden(g) { try { return new Set(JSON.parse(localStorage.getItem('gridiron_hidden_' + g) || '[]')); } catch (_) { return new Set(); } }
     function renderTable(d) {
-      const res = document.getElementById('results');
-      if (!d.rows.length) { res.style.display = 'none'; document.getElementById('scrollTop').style.display = 'none'; return; }
-      LAST = { rows: d.rows, cols: d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url'), sort: null };
-      const thead = document.getElementById('thead');
-      thead.innerHTML = '<tr><th></th>' + LAST.cols.map(c => `<th data-col="${c}" class="${TXT.has(c) ? 'txt' : ''}" title="${(META.display[c] || c).replace(/"/g, '')} — click to sort">${head(c)}</th>`).join('') + '</tr>';
-      wireSort(thead, LAST, () => renderBody(sortRows(LAST.rows, LAST.sort)));
-      renderBody(d.rows);
+      const res = $('results');
+      if (!d.rows.length) { res.style.display = 'none'; $('scrollTop').style.display = 'none'; $('more').hidden = true; return; }
+      S.group = groupKey(d.rows); S.hidden = loadHidden(S.group);
+      const all = d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url');
+      visibleCols = all.filter(c => !S.hidden.has(c) || FROZEN.includes(c));
+      const thead = $('thead');
+      thead.innerHTML = '<tr><th class="fz fz0"></th>' + visibleCols.map((c, i) => `<th data-col="${c}" class="${TXT.has(c) ? 'txt' : ''}${i < 3 ? ' fz fz' + (i + 1) : ''}" title="${(META.display[c] || c).replace(/"/g, '')}">${head(c)}</th>`).join('') + '</tr>';
+      wireSort(thead, S, () => { renderBody(sortRows(d.rows, S.sort)); pushUrl(true); });
+      markSort(thead, S.sort);
+      renderBody(sortRows(d.rows, S.sort));
       res.style.display = 'block';
-      syncScrollbars();
+      res.classList.toggle('all', S.allCols);
+      syncScrollbars(); freeze();
+      renderColPick(all);
     }
+    // windowed body (#1): CHUNK rows now, the rest as the sentinel comes into view
+    let loadMore = null;
     function renderBody(rows) {
-      const tbody = document.getElementById('tbody'), sc = LAST.sort && LAST.sort.col;
-      tbody.innerHTML = rows.map(row => {
-        const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
-        const tds = `<td style="padding:4px 10px;text-align:center;">${imgStr}</td>` + LAST.cols.map(c => {
-          const val = c === 'season' ? `<span class="season-badge">${row[c]}</span>` : c === 'recent_team' ? `<span class="team">${row[c] || '—'}</span>` : c === 'position' ? `<span class="pos">${row[c] || '—'}</span>`
-            : c === 'player_display_name' ? `<a class="plink" href="#player/${encodeURIComponent(row.player_id)}" title="Open ${row[c]}'s page">${row[c]}</a>` : fmt(c, row[c]);
-          const cls = (c === 'player_display_name' ? 'name txt' : TXT.has(c) ? 'txt' : '') + (c === sc ? ' sorted' : '');
-          return `<td class="${cls}">${val}</td>`;
-        }).join('');
-        return `<tr data-id="${row.player_id}">${tds}</tr>`;
-      }).join('');
+      const tbody = $('tbody');
+      tbody.innerHTML = '';
+      pending = rows.slice();
+      if (observer) observer.disconnect();
+      const total = rows.length;
+      const paintMore = () => { const shown = total - pending.length; $('more').hidden = !pending.length; $('moreText').textContent = `${shown.toLocaleString()} of ${total.toLocaleString()} rows shown — more load as you scroll`; };
+      loadMore = (all) => { const part = pending.splice(0, all ? pending.length : CHUNK); if (part.length) tbody.insertAdjacentHTML('beforeend', part.map(rowHTML).join('')); if (!pending.length && observer) observer.disconnect(); paintMore(); };
+      loadMore(false);
+      observer = new IntersectionObserver((es) => { if (es.some(e => e.isIntersecting)) loadMore(false); }, { rootMargin: '600px 0px' });
+      observer.observe($('sentinel'));
+    }
+    // belt and braces for the observer: a plain scroll check
+    window.addEventListener('scroll', () => { if (pending.length && loadMore && $('sentinel').getBoundingClientRect().top < innerHeight + 600) loadMore(false); }, { passive: true });
+    $('moreAll').addEventListener('click', () => loadMore && loadMore(true));
+    function rowHTML(row) {
+      const sc = S.sort && S.sort.col, g = row.games || 0;
+      const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
+      return `<tr data-id="${row.player_id}" data-yr="${row.season}"><td class="fz fz0" style="padding:4px 10px;text-align:center;">${imgStr}</td>` + visibleCols.map((c, i) => {
+        let v = row[c], val;
+        if (c === 'season') val = `<span class="season-badge">${v}</span>`;
+        else if (c === 'recent_team') val = `<span class="team">${v || '—'}</span>`;
+        else if (c === 'position') val = `<span class="pos">${v || '—'}</span>`;
+        else if (c === 'player_display_name') val = `<a class="plink" href="#player/${encodeURIComponent(row.player_id)}" title="Open ${esc(v)}'s page">${esc(v)}</a>`;
+        else if (S.perGame && counting(c) && typeof v === 'number' && g > 0) val = (v / g).toFixed(1);
+        else val = fmt(c, v);
+        let cls = (c === 'player_display_name' ? 'name txt' : TXT.has(c) ? 'txt' : '') + (i < 3 ? ' fz fz' + (i + 1) : '') + (c === sc ? ' sorted' : '');
+        if (!S.perGame && typeof v === 'number' && leadable(c) && leaderMap(c).get(row.season) === v) cls += ' lead';
+        return `<td class="${cls.trim()}">${val}</td>`;
+      }).join('') + '</tr>';
+    }
+    // frozen columns (#5): the first four cells stick; their offsets come from the measured header
+    function freeze() {
+      const res = $('results'), ths = res.querySelectorAll('thead th.fz');
+      let left = 0;
+      ths.forEach((th, i) => { res.style.setProperty('--fz' + i, left + 'px'); left += th.getBoundingClientRect().width; });
+    }
+    // row hover lights the matching dot in the chart (#16)
+    $('tbody').addEventListener('mouseover', (e) => { const tr = e.target.closest('tr'); if (tr) lightDot(tr.dataset.id, +tr.dataset.yr); });
+    $('tbody').addEventListener('mouseleave', () => lightDot(null));
+
+    // column chooser (#8) + per game
+    function renderColPick(all) {
+      $('colpick').innerHTML = `<div class="colpick-head">Columns for ${S.group === 'ALL' ? 'this result' : S.group + 's'} <small>remembered on this browser</small></div>` +
+        all.map(c => `<label><input type="checkbox" data-col="${c}" ${S.hidden.has(c) ? '' : 'checked'} ${FROZEN.includes(c) ? 'disabled' : ''}> ${esc(head(c))} <small>${esc(META.display[c] || '')}</small></label>`).join('') +
+        `<div class="colpick-foot"><button type="button" id="colsAll">Show all</button></div>`;
+    }
+    $('colsBtn').addEventListener('click', () => { $('colpick').hidden = !$('colpick').hidden; });
+    $('colpick').addEventListener('change', (e) => {
+      const cb = e.target.closest('input[data-col]'); if (!cb) return;
+      if (cb.checked) S.hidden.delete(cb.dataset.col); else S.hidden.add(cb.dataset.col);
+      try { localStorage.setItem('gridiron_hidden_' + S.group, JSON.stringify([...S.hidden])); } catch (_) { }
+      renderTable(S.d); $('colpick').hidden = false;
+    });
+    $('colpick').addEventListener('click', (e) => { if (e.target.id === 'colsAll') { S.hidden.clear(); try { localStorage.removeItem('gridiron_hidden_' + S.group); } catch (_) { } renderTable(S.d); $('colpick').hidden = false; } });
+    document.addEventListener('click', (e) => { if (!e.target.closest('#colpick') && !e.target.closest('#colsBtn')) $('colpick').hidden = true; });
+    $('perGame').addEventListener('change', (e) => { S.perGame = e.target.checked; if (S.d) renderBody(sortRows(S.d.rows, S.sort)); });
+    $('allColsBtn').addEventListener('click', () => { S.allCols = !S.allCols; $('results').classList.toggle('all', S.allCols); $('allColsBtn').textContent = S.allCols ? 'Key columns' : 'All columns'; syncScrollbars(); });
+
+    // copy CSV / copy link (#12)
+    function flash(btn, text) { const old = btn.textContent; btn.textContent = text; setTimeout(() => { btn.textContent = old; }, 1300); }
+    $('csvBtn').addEventListener('click', async () => {
+      if (!S.d) return;
+      const cols = visibleCols, rows = sortRows(S.d.rows, S.sort);
+      const cell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+      const csv = [cols.map(c => cell(META.display[c] || c)).join(','), ...rows.map(r => cols.map(c => cell(c === 'made_playoffs' ? (r[c] ? 'yes' : 'no') : r[c])).join(','))].join('\n');
+      try { await navigator.clipboard.writeText(csv); flash($('csvBtn'), `Copied ${rows.length} rows ✓`); } catch (_) { flash($('csvBtn'), 'Clipboard blocked'); }
+    });
+    $('linkBtn').addEventListener('click', async () => { try { await navigator.clipboard.writeText(location.href); flash($('linkBtn'), 'Link copied ✓'); } catch (_) { flash($('linkBtn'), 'Clipboard blocked'); } });
+
+    // a second horizontal scrollbar above the table, kept in step with the real one
+    function syncScrollbars() {
+      const res = $('results'), top = $('scrollTop'), inner = $('scrollTopInner');
+      const table = res.querySelector('table');
+      res.style.width = top.style.width = '';
+      document.documentElement.style.setProperty('--table-w', table.scrollWidth + 2 + 'px');
+      const wide = table.scrollWidth > res.clientWidth + 1;
+      top.style.display = wide ? 'block' : 'none';
+      inner.style.width = table.scrollWidth + 'px';
+      if (!top.dataset.wired) {
+        top.dataset.wired = '1';
+        let lock = false;
+        top.addEventListener('scroll', () => { if (lock) return; lock = true; res.scrollLeft = top.scrollLeft; lock = false; });
+        res.addEventListener('scroll', () => { if (lock) return; lock = true; top.scrollLeft = res.scrollLeft; lock = false; });
+        window.addEventListener('resize', () => { if (res.style.display !== 'none') { syncScrollbars(); freeze(); } });
+      }
     }
 
-    q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
-    runBtn.addEventListener('click', run);
-    renderExamples();
-    // warm the table in the background so the first question answers fast,
-    // then honour a direct link to a player's page
-    loadTable().then(route).catch(e => { status.className = 'status error'; status.textContent = 'Could not load the stat table: ' + e.message; });
+    // ------------------------------------------------------------ scatter (#16): pick the axes, hover ↔ row, click → player
+    let scatterChart = null, lineChart = null, scatterData = [];
+    function numericCols(cols, rows) { return cols.filter(c => !TXT.has(c) && !['season', 'made_playoffs', 'age', 'games'].includes(c) && rows.some(r => typeof r[c] === 'number')); }
+    function renderScatter(d) {
+      const box = $('chart-container'), rows = d.rows, cols = numericCols(d.columns, rows);
+      if (rows.length < 2 || cols.length < 2) { box.hidden = true; return; }
+      const pairs = [['passing_yards', 'passing_tds'], ['rushing_yards', 'rushing_tds'], ['receiving_yards', 'receiving_tds'], ['tackles', 'sacks'], ['pressures', 'sacks'], ['fg_att', 'fg_pct'], ['punts', 'punt_yards']];
+      let x = $('axisX').value, y = $('axisY').value;
+      if (!cols.includes(x) || !cols.includes(y)) { const p = pairs.find(([a, b]) => cols.includes(a) && cols.includes(b)) || [cols[0], cols[1]]; x = p[0]; y = p[1]; }
+      for (const [sel, cur] of [[$('axisX'), x], [$('axisY'), y]]) sel.innerHTML = cols.map(c => `<option value="${c}" ${c === cur ? 'selected' : ''}>${esc(head(c))}</option>`).join('');
+      box.hidden = false;
+      scatterData = rows.filter(r => typeof r[x] === 'number' && typeof r[y] === 'number').map(r => ({ x: r[x], y: r[y], name: r.player_display_name, season: r.season, id: r.player_id }));
+      const C = chartColors();
+      if (scatterChart) scatterChart.destroy();
+      scatterChart = new Chart($('scatterChart').getContext('2d'), {
+        type: 'scatter',
+        data: { datasets: [{ label: `${head(x)} vs ${head(y)}`, data: scatterData, backgroundColor: C.accent, pointRadius: scatterData.map(() => 4), pointHoverRadius: 7 }] },
+        options: {
+          animation: false,
+          onClick: (evt, els) => { if (els.length) { const p = scatterData[els[0].index]; if (p && p.id) location.hash = '#player/' + encodeURIComponent(p.id); } },
+          onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? 'pointer' : 'default'; },
+          plugins: { legend: { labels: { color: C.dim } }, tooltip: { callbacks: { label: (c) => { const d = c.raw; return `${d.name} (${d.season}): ${fmt(x, d.x)}, ${fmt(y, d.y)}`; } } } },
+          scales: { x: { title: { display: true, text: head(x), color: C.dim }, grid: { color: C.line }, ticks: { color: C.dim } },
+                    y: { title: { display: true, text: head(y), color: C.dim }, grid: { color: C.line }, ticks: { color: C.dim } } }
+        }
+      });
+    }
+    function lightDot(id, yr) {
+      if (!scatterChart) return;
+      const ds = scatterChart.data.datasets[0];
+      ds.pointRadius = scatterData.map(p => (id && p.id === id && p.season === yr) ? 9 : 4);
+      ds.pointBackgroundColor = scatterData.map(p => (id && p.id === id && p.season === yr) ? chartColors().dim : chartColors().accent);
+      scatterChart.update('none');
+    }
+    $('axisX').addEventListener('change', () => S.d && renderScatter(S.d));
+    $('axisY').addEventListener('change', () => S.d && renderScatter(S.d));
 
-    // DINO BOWL background-play widget
-    const dinoBtn = document.getElementById('dinoBtn'), dinoPanel = document.getElementById('dinoPanel'), dinoFrame = document.getElementById('dinoFrame');
-    const dinoDock = document.querySelector('.dino-dock');
-    // the corner dock disappears while the panel is open (the panel head has
-    // the same controls), and the mute chip only appears once there is a game
-    // that could make a sound
+    // ------------------------------------------------------------ player pages (#9): tabs, click a header to chart it
+    const TABS = [
+      ['Passing', /^(pass_attempts|completions|completion_pct|passing_|passing|interceptions|int_rate|td_pct|ypa|passer_rating|qbr|cpoe|sacks_taken|sack_pct|sack_yards_lost|sack_fumbles|pass_td_|pass_20|pass_40|deep_att|deep_cmp|deep_yards|deep_td|deep_int|pass_ypg|pass_first_downs|pass_epa|pass_air|air_yards_share$|pass_)/],
+      ['Rushing & receiving', /^(carries|touches|rushing|ypc|rush_|rush_td_|receptions|targets|receiving|ypr|catch_pct|rec_|drop|target_share|adot|deep_rec|deep_targets|deep_recs|total_yards|total_ypg|total_tds|fumbles|fumbles_lost|turnover|fantasy|broken_tackles|ryoe)/],
+      ['Defense', /^(tackles|tackles_|tfl_|sacks$|sack_yards$|qb_hit|pressures|pressure_rate|hurries|qb_knockdowns|blitz|sack_per_blitz|def_|passes_defended|int_plus_pd|forced_fumbles|fumble_rec|missed_tackle|cov_|int_tds|safeties|pfr_comb)/],
+      ['Advanced', /^(epa|rush_epa|rec_epa|pacr|wopr|racr|ngs_|time_to|aggressiveness|air_yards|xcomp|rush_efficiency|stacked|x_|yac_oe|pocket|bad_throw|on_target|throwaways|scrambles|iay|ybc|yac_per|max_completed|cushion|separation|cpoe_ngs|rush_pct_oe|times_|pressured_pct)/],
+      ['Kicking', /^(fg_|pat_|punt)/],
+    ];
+    const BIO = ['height', 'weight', 'age', 'college', 'draft_year', 'draft_round', 'draft_pick', 'rookie_season', 'experience', 'off_snaps', 'def_snaps', 'st_snaps'];
+    const HOME = ['#search', '#read', '#status', '#empty', '#toolbar', '#chart-container', '#scrollTop', '#results', '#more', '#glossary'];
+    function showHome() { $('player').hidden = true; for (const sel of HOME) document.querySelector(sel).classList.remove('offpage'); }
+    async function showPlayer(pid) {
+      for (const sel of HOME) document.querySelector(sel).classList.add('offpage');
+      const page = $('player'), body = $('player-body');
+      page.hidden = false; body.innerHTML = '<p class="status">Loading…</p>'; window.scrollTo(0, 0);
+      try {
+        const rows = (await loadTable()).career(pid);
+        if (!rows.length) { body.innerHTML = '<p class="status error">No seasons found for this player.</p>'; return; }
+        const last = rows[rows.length - 1], pos = last.position || '';
+        const present = (c) => rows.some(r => r[c] != null && !(typeof r[c] === 'number' && r[c] === 0 && rows.every(x => !x[c])));
+        const skip = new Set(['player_id', 'headshot_url', 'player_display_name', 'position', 'position_group', 'recent_team', 'season', 'made_playoffs', 'games', 'playoff_wins', 'super_bowl_wins', ...BIO]);
+        const sum = (c) => rows.reduce((t, r) => t + (typeof r[c] === 'number' ? r[c] : 0), 0);
+        const gate = { 'Passing': sum('pass_attempts') >= 20, 'Rushing & receiving': sum('carries') + sum('targets') >= 20, 'Defense': sum('tackles') >= 15, 'Kicking': sum('fg_att') + sum('punts') >= 5 };
+        const tabs = TABS.map(([name, re]) => [name, META.columns.filter(c => !skip.has(c) && re.test(c) && present(c))]).filter(([n, cs]) => cs.length >= 2 && (gate[n] !== false));
+        const other = META.columns.filter(c => !skip.has(c) && present(c) && !TABS.some(([, re]) => re.test(c)));
+        if (other.length >= 2) tabs.push(['More', other]);
+        const homeTab = META.def_codes.includes(pos) ? 'Defense' : pos === 'QB' ? 'Passing' : ['K', 'P'].includes(pos) ? 'Kicking' : 'Rushing & receiving';
+        const teams = [...new Set(rows.map(r => r.recent_team).filter(Boolean))];
+        const bio = [pos, teams.join(', '), last.height != null ? fmt('height', last.height) : null, last.weight != null ? last.weight + ' lbs' : null,
+          last.age != null ? 'Age ' + last.age : null, last.college || null,
+          last.draft_year ? `Drafted ${last.draft_year} · Rd ${last.draft_round || '–'} · Pick ${last.draft_pick || '–'}` : (last.rookie_season ? 'Undrafted · rookie ' + last.rookie_season : null)].filter(Boolean).join(' · ');
+        const P = { rows, sort: null, tab: tabs.some(([n]) => n === homeTab) ? homeTab : (tabs[0] || ['Bio'])[0], chart: null };
+        body.innerHTML = `
+          <div class="player-head">
+            <img src="${last.headshot_url || ''}" onerror="this.style.display='none'" alt="">
+            <div><h2>${esc(last.player_display_name)}</h2><p>${esc(bio)}</p>
+              <p>${rows.length} season${rows.length === 1 ? '' : 's'} · ${rows[0].season}–${last.season}</p></div>
+          </div>
+          <div class="player-chart"><div class="chart-bar"><span id="chartTitle"></span><span class="hint">click a column header below to chart it</span></div><canvas id="lineChart" height="80"></canvas></div>
+          <div class="tabs" id="ptabs">${tabs.map(([n]) => `<button type="button" data-tab="${esc(n)}">${esc(n)}</button>`).join('')}<button type="button" data-tab="Bio">Bio</button></div>
+          <div id="pgrid"></div>`;
+        const paint = () => {
+          const grid = $('pgrid');
+          $('ptabs').querySelectorAll('button').forEach(b => b.classList.toggle('on', b.dataset.tab === P.tab));
+          if (P.tab === 'Bio') {
+            const items = [['Height', last.height != null ? fmt('height', last.height) : null], ['Weight', last.weight != null ? last.weight + ' lbs' : null], ['Age', last.age], ['College', last.college], ['Draft', last.draft_year ? `${last.draft_year} · round ${last.draft_round || '–'} · pick ${last.draft_pick || '–'}` : (last.rookie_season ? 'Undrafted · rookie ' + last.rookie_season : null)], ['Teams', teams.join(', ')], ['Seasons', `${rows.length} (${rows[0].season}–${last.season})`], ['Playoff seasons', rows.filter(r => r.made_playoffs).length], ['Playoff wins', rows.reduce((t, r) => t + (r.playoff_wins || 0), 0)], ['Super Bowl wins', rows.reduce((t, r) => t + (r.super_bowl_wins || 0), 0)]].filter(([, v]) => v != null && v !== '');
+            grid.innerHTML = `<dl class="bio">${items.map(([k, v]) => `<div><dt>${k}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
+            return;
+          }
+          const cols = ['games', 'made_playoffs', ...(tabs.find(([n]) => n === P.tab) || [null, []])[1]];
+          const sums = {}; for (const c of cols) if (counting(c) || c === 'games') if (rows.some(r => typeof r[c] === 'number')) sums[c] = rows.reduce((t, r) => t + (r[c] || 0), 0);
+          const career = {};
+          for (const c of cols) {
+            if (c in sums) { career[c] = sums[c]; continue; }
+            const m = /^(\w+) \/ (\w+)$/.exec(META.derived[c] || '');
+            if (m && m[1] in sums && m[2] in sums && sums[m[2]] > 0) career[c] = sums[m[1]] / sums[m[2]];
+          }
+          const po = rows.filter(r => r.made_playoffs).length;
+          const cell = (c, r) => c === 'made_playoffs' ? (r === career ? `${po} of ${rows.length}` : fmt(c, r[c])) : (r === career ? (c in career ? fmt(c, career[c]) : '') : fmt(c, r[c]));
+          const sc = P.sort && P.sort.col, mark = (c) => c === sc ? ' sorted' : '';
+          grid.innerHTML = `<div class="results career-grid"><table><thead id="pthead"><tr><th class="txt" data-col="season">Yr</th><th class="txt" data-col="recent_team">Tm</th><th class="txt" data-col="position">Pos</th>${cols.map(c => `<th data-col="${c}" title="${(META.display[c] || c).replace(/"/g, '')}">${head(c)}</th>`).join('')}</tr></thead><tbody>` +
+            sortRows(rows, P.sort).map(r => `<tr><td class="txt${mark('season')}"><span class="season-badge">${r.season}</span></td><td class="txt${mark('recent_team')}">${r.recent_team || ''}</td><td class="txt${mark('position')}">${r.position || ''}</td>${cols.map(c => `<td class="${mark(c).trim()}${(typeof r[c] === 'number' && leadable(c) && leaderMap(c).get(r.season) === r[c]) ? ' lead' : ''}">${cell(c, r)}</td>`).join('')}</tr>`).join('') +
+            `<tr class="career-row"><td class="txt">Career</td><td class="txt"></td><td class="txt"></td>${cols.map(c => `<td>${cell(c, career)}</td>`).join('')}</tr></tbody></table></div>`;
+          const th = $('pthead');
+          markSort(th, P.sort);
+          wireSort(th, P, () => { paint(); if (P.sort && typeof rows.find(r => r[P.sort.col] != null)?.[P.sort.col] === 'number') drawLine(P.sort.col); });
+        };
+        const drawLine = (col) => {
+          P.chart = col; $('chartTitle').textContent = head(col) + ' by season';
+          const C = chartColors();
+          if (lineChart) lineChart.destroy();
+          lineChart = new Chart($('lineChart').getContext('2d'), { type: 'line', data: { labels: rows.map(r => r.season), datasets: [{ label: head(col), data: rows.map(r => typeof r[col] === 'number' ? r[col] : null), borderColor: C.accent, backgroundColor: C.accent + '33', fill: true, tension: 0.3, spanGaps: true }] },
+            options: { animation: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmt(col, c.raw) } } }, scales: { x: { grid: { color: C.line }, ticks: { color: C.dim } }, y: { grid: { color: C.line }, ticks: { color: C.dim, callback: (v) => fmt(col, v) }, beginAtZero: !META.pp_stats.includes(col) } } } });
+        };
+        $('ptabs').addEventListener('click', (e) => { const b = e.target.closest('button[data-tab]'); if (!b) return; P.tab = b.dataset.tab; P.sort = null; paint(); });
+        paint();
+        const g = META.def_codes.includes(pos) ? 'DEF' : pos;
+        drawLine({ QB: 'passing_yards', RB: 'rushing_yards', FB: 'rushing_yards', WR: 'receiving_yards', TE: 'receiving_yards', DEF: 'tackles', K: 'fg_made', P: 'punts' }[g] || (tabs[0] && tabs[0][1][0]) || 'games');
+      } catch (e) { body.innerHTML = '<p class="status error">Failed to load this player: ' + esc(e.message) + '</p>'; }
+    }
+
+    // ------------------------------------------------------------ routing (#2): the question lives in the URL
+    function route() {
+      const m = /^#player\/(.+)$/.exec(location.hash);
+      if (m) showPlayer(decodeURIComponent(m[1])); else showHome();
+    }
+    window.addEventListener('hashchange', route);
+    window.addEventListener('popstate', () => {
+      const p = new URLSearchParams(location.search), text = p.get('q') || '';
+      const sort = /^(\w+):(asc|desc)$/.exec(p.get('sort') || '');
+      S.sort = sort ? { col: sort[1], dir: sort[2] } : null;
+      if (text && text !== S.text) { q.value = text; run(false); }
+      route();
+    });
+    $('playerBack').addEventListener('click', (e) => { e.preventDefault(); if (history.length > 1 && /#player/.test(location.hash)) history.back(); else location.hash = ''; });
+
+    runBtn.addEventListener('click', () => run());
+    renderExamples();
+    // warm the table, then honour the URL: a question, a sort, a player page
+    loadTable().then(() => {
+      const p = new URLSearchParams(location.search), text = p.get('q');
+      const sort = /^(\w+):(asc|desc)$/.exec(p.get('sort') || '');
+      if (sort) S.sort = { col: sort[1], dir: sort[2] };
+      if (text) { q.value = text; run(false); }
+      route();
+    }).catch(e => { status.className = 'status error'; status.textContent = 'Could not load the stat table: ' + e.message; });
+
+    // ------------------------------------------------------------ Dino Bowl dock
+    const dinoBtn = $('dinoBtn'), dinoPanel = $('dinoPanel'), dinoFrame = $('dinoFrame'), dinoDock = document.querySelector('.dino-dock');
     function openPanel(open) {
       dinoPanel.classList.toggle('open', open);
       if (open && !dinoFrame.src) dinoFrame.src = '/game/';
@@ -1007,32 +1478,13 @@
       if (dinoFrame.src) dinoMute.hidden = false;
     }
     dinoBtn.addEventListener('click', () => openPanel(!dinoPanel.classList.contains('open')));
-    document.getElementById('dinoMin').addEventListener('click', () => openPanel(false));
-
-    const themeBtn = document.getElementById('themeToggle');
-    function paintTheme() { themeBtn.textContent = document.documentElement.dataset.theme === 'dark' ? '☀ Light mode' : '☾ Dark mode'; }
-    themeBtn.addEventListener('click', () => {
-      const dark = document.documentElement.dataset.theme === 'dark';
-      if (dark) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = 'dark';
-      try { localStorage.setItem('gridiron_theme', dark ? 'light' : 'dark'); } catch (_) { }
-      paintTheme();
-      if (lastD) renderScatter(lastD.rows, lastD.columns);
-    });
-    paintTheme();
-
+    $('dinoMin').addEventListener('click', () => openPanel(false));
     // MUTE. The state lives in localStorage, which the game reads at boot and
-    // writes when you press M inside it, so the two always agree — and a mute
-    // set before the game is ever opened still lands. While the game is up we
-    // also post to it, so the click is instant rather than reload-shaped.
-    const MUTE_KEY = 'dinobowl_muted', dinoMute = document.getElementById('dinoMute'), muteBtns = [dinoMute, document.getElementById('dinoMute2')];
+    // writes when you press M inside it, so the two always agree.
+    const MUTE_KEY = 'dinobowl_muted', dinoMute = $('dinoMute'), muteBtns = [dinoMute, $('dinoMute2')];
     const isMuted = () => { try { return localStorage.getItem(MUTE_KEY) === '1'; } catch (_) { return false; } };
     function paintMute(on) {
-      for (const btn of muteBtns) {
-        btn.textContent = on ? '🔇' : '🔊';
-        btn.classList.toggle('is-muted', on);
-        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        btn.title = on ? 'Dino Bowl is muted — click for sound' : 'Mute Dino Bowl';
-      }
+      for (const btn of muteBtns) { btn.textContent = on ? '🔇' : '🔊'; btn.classList.toggle('is-muted', on); btn.setAttribute('aria-pressed', on ? 'true' : 'false'); btn.title = on ? 'Dino Bowl is muted — click for sound' : 'Mute Dino Bowl'; }
     }
     function setMuted(on) {
       try { localStorage.setItem(MUTE_KEY, on ? '1' : '0'); } catch (_) { }
@@ -1040,14 +1492,22 @@
       try { if (dinoFrame.contentWindow) dinoFrame.contentWindow.postMessage({ dinobowl: 'setMuted', muted: on }, location.origin); } catch (_) { }
     }
     muteBtns.forEach(btn => btn.addEventListener('click', () => setMuted(!isMuted())));
-    // the game reports back when M is pressed inside it
-    window.addEventListener('message', (e) => {
-      if (e.origin !== location.origin) return;
-      const d = e.data;
-      if (d && d.dinobowl === 'muted') paintMute(!!d.muted);
-    });
+    window.addEventListener('message', (e) => { if (e.origin !== location.origin) return; const d = e.data; if (d && d.dinobowl === 'muted') paintMute(!!d.muted); });
     paintMute(isMuted());
+
+    // ------------------------------------------------------------ theme (#18): light → dark → auto
+    const themeBtn = $('themeToggle'), mq = matchMedia('(prefers-color-scheme: dark)');
+    const themeMode = () => { try { return localStorage.getItem('gridiron_theme') || 'light'; } catch (_) { return 'light'; } };
+    function applyTheme() {
+      const mode = themeMode(), dark = mode === 'dark' || (mode === 'auto' && mq.matches);
+      if (dark) document.documentElement.dataset.theme = 'dark'; else delete document.documentElement.dataset.theme;
+      themeBtn.textContent = mode === 'dark' ? '☀ Light' : mode === 'auto' ? '◐ Auto' : '☾ Dark';
+      themeBtn.title = 'Theme: ' + mode + ' — click to switch';
+      if (S.d && !$('chart-container').hidden) renderScatter(S.d);
+    }
+    themeBtn.addEventListener('click', () => { const next = { light: 'dark', dark: 'auto', auto: 'light' }[themeMode()]; try { localStorage.setItem('gridiron_theme', next); } catch (_) { } applyTheme(); });
+    mq.addEventListener('change', () => { if (themeMode() === 'auto') applyTheme(); });
+    applyTheme();
   </script>
 </body>
-
 </html>
