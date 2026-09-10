@@ -21,6 +21,37 @@ Two independent methods fed it, and they found different things — keep both:
   corrupt-save boot, sprite-cel pixel metrics). Four of the five defects fixed on
   08-12 were found *only* by probing, not by reading.
 
+## GRIDIRON 3.0 — proposal (2026-09-10, not started)
+
+UI/UX only. No new stat families. Each line is a fix to something a user hits today,
+ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = worth it later.
+
+| # | P | Today | 3.0 |
+|---|---|---|---|
+| 1 | P0 | A 2,000-row result is 2,000 DOM rows x 25 cells; scrolling stutters | Render ~150 rows and stream the rest as you scroll (windowed table). Same look, instant |
+| 2 | P0 | The URL never changes; refresh loses the question, a result cannot be sent to anyone | Question, sort and theme in the URL (`?q=...&sort=passing_tds:desc`); back/forward move between questions |
+| 3 | P0 | Zero rows says "0 player-seasons matched" and nothing else | Say which clause emptied it ("pressure rate ≥ 12% leaves 0 of 114 — the max at 300+ snaps is 8.2%") with one-click relax |
+| 4 | P0 | A stat that exists from 2018 silently returns nothing for 2010-2017 | Coverage note in the read-back ("pressure rate is charted from 2018; earlier seasons cannot match") |
+| 5 | P0 | Wide tables lose Yr / Player when scrolled sideways | Freeze the first three columns (Yr, Player, Pos) |
+| 6 | P0 | Typing a stat name is guesswork | Autocomplete from the alias table as you type (positions, stats, "since", "top N"), keyboard-driven; `/` focuses the box |
+| 7 | P1 | The read-back is display only | Each clause is editable: click the value to change it, x to drop it, re-runs instantly. The read-back IS the filter UI |
+| 8 | P1 | 25 columns whether you asked for them or not | Column chooser (per position group, remembered) + "per game" toggle like PFR |
+| 9 | P1 | Player page is one 30-column grid | Tabs on the grid: Passing / Rushing & Receiving / Advanced / Bio; click a header to chart that stat instead of the fixed one |
+| 10 | P1 | Header tooltip is the raw display name | Proper hover card: definition, formula, source, coverage years (from the glossary data already on the page) |
+| 11 | P1 | First load pulls 24 MB with a spinner | Byte progress bar; split data.json into a hot core (always) + advanced/NGS shard (on demand) so first answer is ~3x sooner |
+| 12 | P1 | Export is copy-paste from the screen | "Copy as CSV" and "Copy link" on the results toolbar |
+| 13 | P1 | Below 640px the table is unusable | Card rows on phones (Yr · Player · Tm and the 4 headline stats), sticky Run button |
+| 14 | P1 | League leaders are not visible in a result | Bold the league-leading value in each column for that season (rank data already exists) |
+| 15 | P1 | Sort resets on every new question | Keep the sort when the column still exists; show it in the URL (#2) |
+| 16 | P2 | Scatter chart axes are fixed | Axis pickers; hover a row to light its dot; click a dot to open the player |
+| 17 | P2 | One type scale drifted across three passes | Spacing/type audit on an 8px grid: 12/13/15/17/22/34, buttons 36px, one radius, one border colour per theme |
+| 18 | P2 | Theme is light or dark | Add "auto" (follow the OS) as a third state; keep light as the first-visit default |
+| 19 | P2 | A could-not-read clause just says so | Suggest the nearest alias ("did you mean pressure rate?") using the fuzzy matcher already in the engine |
+| 20 | P2 | Keyboard use is partial | Esc clears, arrows move through autocomplete, Enter on a row opens the player, focus rings everywhere |
+
+Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
+projections, predictions. They are features, not upgrades, and each would need its own data.
+
 ## DINO BOWL 2.3 — 2026-09-10 (shipped): YAC fade + safety chase flight
 
 Owner play-test: receivers never slowed after the catch, and the CPU quetzalcoatlus

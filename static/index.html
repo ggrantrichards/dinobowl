@@ -528,7 +528,7 @@
       --chalk: #0d1611; --chalk-dim: #3a4a41;
       --line: #d3dbd4; --line-strong: #b9c5bb; --line-soft: rgba(21, 34, 25, .12);
       --accent: #0e7a44; --accent-2: #b5480f; --danger: #b42318; --on-accent: #ffffff;
-      --thead: #e6ece6; --hover: rgba(14, 122, 68, .07); --stripe: rgba(0, 0, 0, .028);
+      --thead: #e6ece6; --hover: rgba(14, 122, 68, .07); --sorted: rgba(14, 122, 68, .12); --stripe: rgba(0, 0, 0, .028);
       --bg-grad: linear-gradient(180deg, #f7f9f5, #f2f5f0); --modal-bg: rgba(21, 34, 25, .55);
     }
     :root[data-theme="dark"] {
@@ -536,7 +536,7 @@
       --chalk: #f8faf5; --chalk-dim: #d6e0d9;
       --line: #1d4030; --line-strong: #35624a; --line-soft: rgba(29, 64, 48, .5);
       --accent: #ffd23f; --accent-2: #f0783f; --danger: #ff7a6b; --on-accent: #1a1200;
-      --thead: #0b2016; --hover: rgba(255, 210, 63, .07); --stripe: rgba(255, 255, 255, .025);
+      --thead: #0b2016; --hover: rgba(255, 210, 63, .07); --sorted: rgba(255, 210, 63, .14); --stripe: rgba(255, 255, 255, .025);
       --bg-grad: radial-gradient(120% 90% at 50% -10%, var(--field-2), var(--field) 60%); --modal-bg: rgba(10, 31, 20, .85);
     }
     html { scroll-behavior: auto; background: var(--field) }
@@ -568,10 +568,13 @@
     thead th { cursor: pointer; user-select: none }
     thead th:first-child { cursor: default }
     thead th:hover { color: var(--chalk) }
-    thead th.sort-desc, thead th.sort-asc { color: var(--chalk); box-shadow: inset 0 -2px 0 var(--accent) }
-    thead th.sort-desc::after { content: " BC"; font-size: 8px; color: var(--accent) }
-    thead th.sort-asc::after { content: " B2"; font-size: 8px; color: var(--accent) }
-    tbody td.sorted { background: var(--hover) }
+    thead th[data-col]:not(.sort-desc):not(.sort-asc):hover::after { content: " \21C5"; opacity: .7 }
+    thead th.sort-desc, thead th.sort-asc { background: var(--accent); color: var(--on-accent); box-shadow: none }
+    thead th.sort-desc::after { content: " \25BC"; font-size: 8px }
+    thead th.sort-asc::after { content: " \25B2"; font-size: 8px }
+    tbody td.sorted { background: var(--sorted); font-weight: 600 }
+    .career-grid thead th { cursor: pointer }
+    .player-hint { font-weight: 400; letter-spacing: 0; text-transform: none; margin-left: 10px; opacity: .8 }
 
     /* player pages */
     .offpage { display: none !important }
@@ -585,7 +588,6 @@
     .player-chart { margin-top: 14px; padding: 12px 16px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius) }
     .player-h3 { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: .18em; text-transform: uppercase; color: var(--chalk-dim); margin: 22px 0 8px }
     .career-grid { margin-top: 0; margin-left: 0 !important; width: 100% !important }
-    .career-grid thead th { cursor: default }
     .career-row td { font-weight: 600; color: var(--chalk); border-top: 2px solid var(--line-strong); background: var(--thead) }
     a.plink { color: var(--chalk); text-decoration: none; border-bottom: 1px solid var(--line-strong) }
     a.plink:hover { color: var(--accent); border-bottom-color: var(--accent) }
@@ -665,9 +667,9 @@
   </div>
 
 
-  <script src="/gridiron/engine.js?v=g9"></script>
+  <script src="/gridiron/engine.js?v=g10"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g9';
+    const DATA_URL = '/gridiron/data.json?v=g10';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -860,12 +862,19 @@
               <p>${rows.length} season${rows.length === 1 ? '' : 's'} · ${META.seasons[0] <= rows[0].season ? rows[0].season : '?'}–${last.season}</p></div>
           </div>
           <div class="player-chart"><canvas id="lineChart" height="80"></canvas></div>
-          <h3 class="player-h3">Seasons</h3>
+          <h3 class="player-h3">Seasons <span class="player-hint">click a column to sort</span></h3>
           <div class="results career-grid"><table>
-            <thead><tr><th class="txt">Yr</th><th class="txt">Tm</th><th class="txt">Pos</th>${cols.map(c => `<th title="${(META.display[c] || c).replace(/"/g, '')}">${head(c)}</th>`).join('')}</tr></thead>
-            <tbody>${rows.map(r => `<tr><td class="txt"><span class="season-badge">${r.season}</span></td><td class="txt">${r.recent_team || ''}</td><td class="txt">${r.position || ''}</td>${cols.map(c => `<td>${cell(c, r[c], r)}</td>`).join('')}</tr>`).join('')}
-            <tr class="career-row"><td class="txt">Career</td><td class="txt"></td><td class="txt"></td>${cols.map(c => `<td>${c in career ? cell(c, career[c], career) : (c === 'made_playoffs' ? cell(c, null, career) : '')}</td>`).join('')}</tr></tbody>
+            <thead id="pthead"><tr><th class="txt" data-col="season">Yr</th><th class="txt" data-col="recent_team">Tm</th><th class="txt" data-col="position">Pos</th>${cols.map(c => `<th data-col="${c}" title="${(META.display[c] || c).replace(/"/g, '')} — click to sort">${head(c)}</th>`).join('')}</tr></thead>
+            <tbody id="ptbody"></tbody>
           </table></div>`;
+        const P = { rows, sort: null };
+        const paintSeasons = () => {
+          const sc = P.sort && P.sort.col, mark = (c) => c === sc ? ' sorted' : '';
+          document.getElementById('ptbody').innerHTML = sortRows(rows, P.sort).map(r => `<tr><td class="txt${mark('season')}"><span class="season-badge">${r.season}</span></td><td class="txt${mark('recent_team')}">${r.recent_team || ''}</td><td class="txt${mark('position')}">${r.position || ''}</td>${cols.map(c => `<td class="${mark(c).trim()}">${cell(c, r[c], r)}</td>`).join('')}</tr>`).join('')
+            + `<tr class="career-row"><td class="txt">Career</td><td class="txt"></td><td class="txt"></td>${cols.map(c => `<td>${c in career ? cell(c, career[c], career) : (c === 'made_playoffs' ? cell(c, null, career) : '')}</td>`).join('')}</tr>`;
+        };
+        wireSort(document.getElementById('pthead'), P, paintSeasons);
+        paintSeasons();
         const ctx = document.getElementById('lineChart').getContext('2d');
         if (lineChart) lineChart.destroy();
         lineChart = new Chart(ctx, { type: 'line', data: { labels: rows.map(r => r.season), datasets: [{ label: head(statKey), data: rows.map(r => r[statKey] || 0), borderColor: chartColors().accent, backgroundColor: chartColors().accent + '33', fill: true, tension: 0.3 }] },
@@ -923,21 +932,49 @@
         window.addEventListener('resize', () => { if (res.style.display !== 'none') syncScrollbars(); });
       }
     }
-    let LAST = null, SORT = null;   // the rows on screen and how they are sorted
+    // ONE SORTER FOR EVERY GRID. Click a header: high-to-low (A-Z for text,
+    // oldest-first for the year). Click it again: the other way. Blanks always
+    // sink to the bottom. The sorted header is filled, the column is tinted.
+    function sortRows(rows, sort) {
+      if (!sort) return rows;
+      const dir = sort.dir === 'desc' ? -1 : 1, col = sort.col;
+      return rows.slice().sort((a, b) => {
+        const va = a[col], vb = b[col];
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        const c = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+        return c * dir;
+      });
+    }
+    function wireSort(thead, state, rerender) {
+      thead.onclick = (e) => {
+        const th = e.target.closest('th[data-col]'); if (!th) return;
+        const col = th.dataset.col;
+        const flip = state.sort && state.sort.col === col;
+        state.sort = { col, dir: flip ? (state.sort.dir === 'desc' ? 'asc' : 'desc') : ((TXT.has(col) || col === 'season') ? 'asc' : 'desc') };
+        thead.querySelectorAll('th').forEach(t => {
+          t.classList.remove('sort-desc', 'sort-asc'); t.removeAttribute('aria-sort');
+          if (t.dataset.col === col) { t.classList.add('sort-' + state.sort.dir); t.setAttribute('aria-sort', state.sort.dir === 'desc' ? 'descending' : 'ascending'); }
+        });
+        rerender();
+      };
+    }
+
+    let LAST = null;   // the result rows on screen, their columns, and how they are sorted
     function renderTable(d) {
       const res = document.getElementById('results');
       if (!d.rows.length) { res.style.display = 'none'; document.getElementById('scrollTop').style.display = 'none'; return; }
-      LAST = { rows: d.rows, cols: d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url') };
-      SORT = null;
+      LAST = { rows: d.rows, cols: d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url'), sort: null };
       const thead = document.getElementById('thead');
       thead.innerHTML = '<tr><th></th>' + LAST.cols.map(c => `<th data-col="${c}" class="${TXT.has(c) ? 'txt' : ''}" title="${(META.display[c] || c).replace(/"/g, '')} — click to sort">${head(c)}</th>`).join('') + '</tr>';
-      thead.onclick = (e) => { const th = e.target.closest('th[data-col]'); if (th) sortBy(th.dataset.col); };
+      wireSort(thead, LAST, () => renderBody(sortRows(LAST.rows, LAST.sort)));
       renderBody(d.rows);
       res.style.display = 'block';
       syncScrollbars();
     }
     function renderBody(rows) {
-      const tbody = document.getElementById('tbody'), sc = SORT && SORT.col;
+      const tbody = document.getElementById('tbody'), sc = LAST.sort && LAST.sort.col;
       tbody.innerHTML = rows.map(row => {
         const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
         const tds = `<td style="padding:4px 10px;text-align:center;">${imgStr}</td>` + LAST.cols.map(c => {
@@ -948,22 +985,6 @@
         }).join('');
         return `<tr data-id="${row.player_id}">${tds}</tr>`;
       }).join('');
-    }
-    // first click sorts high-to-low (A-Z for text), the next click flips it; blanks always sink to the bottom
-    function sortBy(col) {
-      if (!LAST) return;
-      SORT = SORT && SORT.col === col ? { col, dir: SORT.dir === 'desc' ? 'asc' : 'desc' } : { col, dir: TXT.has(col) ? 'asc' : 'desc' };
-      const dir = SORT.dir === 'desc' ? -1 : 1;
-      const rows = LAST.rows.slice().sort((a, b) => {
-        const va = a[col], vb = b[col];
-        if (va == null && vb == null) return 0;
-        if (va == null) return 1;
-        if (vb == null) return -1;
-        const c = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
-        return c * dir;
-      });
-      document.querySelectorAll('#thead th').forEach(th => { th.classList.remove('sort-desc', 'sort-asc'); th.removeAttribute('aria-sort'); if (th.dataset.col === col) { th.classList.add('sort-' + SORT.dir); th.setAttribute('aria-sort', SORT.dir === 'desc' ? 'descending' : 'ascending'); } });
-      renderBody(rows);
     }
 
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
