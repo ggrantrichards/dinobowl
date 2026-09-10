@@ -960,6 +960,10 @@ EXTRA_CSS = """
     a.plink:hover { color: var(--accent); border-bottom-color: var(--accent) }
 
     /* ============ 3.0: the pieces the page grew ============ */
+    /* the hidden attribute always wins: .toolbar is display:flex and .colpick display:grid,
+       and a class rule outranks the browser's [hidden] rule, so without this the empty
+       column chooser sat on the page as a white bar that could not be closed */
+    [hidden] { display: none !important }
     /* type & spacing on one scale: 11 / 12 / 13 / 15 / 17 / 22 / 34; controls 32px tall */
     .toolbar button, .chart-bar select, .tabs button, .theme, .dino-head .tools button, .dino-head .tools a { height: 32px; box-sizing: border-box }
     .hint { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim); font-weight: 400; letter-spacing: 0; text-transform: none }
