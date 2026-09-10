@@ -54,7 +54,7 @@ def api_query():
         return jsonify({"error": "Type a query first."}), 400
     try:
         df = get_df()
-        res, notes, conds = qe.run_full(df, q)
+        res, notes, conds, ignored = qe.run_full(df, q)
     except qe.QueryError as e:
         return jsonify({"error": str(e), "notes": []}), 200
     except FileNotFoundError as e:
@@ -68,6 +68,7 @@ def api_query():
     LIMIT = 2000
     return jsonify({
         "notes": notes,
+        "ignored": ignored,
         "count": len(rows),
         "columns": cols,
         "rows": rows[:LIMIT],

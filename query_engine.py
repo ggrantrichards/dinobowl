@@ -709,6 +709,14 @@ def _stat_for_number(q, start, end, fwd_len):
     if st: return st
     return _find_stat_last(q[max(0, start - 40):start])
 
+_NUM_RE = re.compile(r"\d[\d,\.]*")
+_PCT_TAIL_RE = re.compile(r"\s*(%|percent)")
+
+def _covered(i, spans):
+    return any(a <= i < b for a, b in spans)
+
+_SIGN = {">": ">", "<": "<", ">=": "≥", "<=": "≤"}
+
 def _pct_value(col, num, marked):
     """A percent stat typed as '5%' or '5' means 0.05; typed as '0.05' stays."""
     if col in PCT_STATS and (marked or num >= 1): return num / 100.0
@@ -718,7 +726,8 @@ def parse(query):
     q = " " + query.lower().strip() + " "
     # 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
     q = re.sub(r"(\d)['\u2019-](\d{1,2})(?:\"|''|\u201d| in\b|\b)", lambda m: str(int(m.group(1)) * 12 + int(m.group(2))), q)
-    conds, notes = [], []
+    conds, notes, ignored = [], [], []
+    spans = []   # character ranges already turned into a condition
 
     for word in sorted(POSITIONS, key=len, reverse=True):
         if re.search(rf"\b{re.escape(word)}\b", q):
@@ -732,20 +741,24 @@ def parse(query):
         a, b = int(m.group(1)), int(m.group(2))
         conds.append({"kind": "season_range", "min": min(a, b), "max": max(a, b)})
         notes.append(f"season between {min(a,b)} and {max(a,b)}")
+        spans.append(m.span())
     else:
         m = re.search(r"since (\d{4})", q)
         if m:
             conds.append({"kind": "season_range", "min": int(m.group(1)), "max": None})
             notes.append(f"season since {m.group(1)}")
+            spans.append(m.span())
         m = re.search(r"before (\d{4})", q)
         if m:
             conds.append({"kind": "season_range", "min": None, "max": int(m.group(1)) - 1})
             notes.append(f"season before {m.group(1)}")
+            spans.append(m.span())
         m = re.search(r"\bin (\d{4})\b", q)
         if m:
             yr = int(m.group(1))
             conds.append({"kind": "season_range", "min": yr, "max": yr})
             notes.append(f"season is {yr}")
+            spans.append(m.span())
 
     if re.search(r"playoff|postseason", q):
         conds.append({"kind": "playoffs"})
@@ -757,6 +770,7 @@ def parse(query):
             col = st[0]
             conds.append({"kind": "rank", "col": col, "n": 1, "asc": col in ASCENDING_GOOD})
             notes.append(f"led the league in {DISPLAY.get(col, col)}")
+            spans.append((mm.start(), st[2]))
 
     rank_starts = [m.start() for m in re.finditer(r"(top|bottom)\s+\d+", q)]
     for mm in re.finditer(r"(top|bottom)\s+(\d+)", q):
@@ -787,6 +801,7 @@ def parse(query):
             notes.append(f"{word} {n} in {DISPLAY.get(col, col)} ({arrow})")
             pos = s_end
             found_any = True
+        spans.append(mm.span())   # "top 10" is spoken for either way
         if not found_any: continue
 
     thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]+)\s*(%|percent)?"
@@ -806,13 +821,19 @@ def parse(query):
         num = _pct_value(col, num, pct_mark)
         conds.append({"kind": "threshold", "col": col, "op": op, "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
-        notes.append(f"{DISPLAY.get(col, col)} {op} {shown}")
+        notes.append(f"{DISPLAY.get(col, col)} {_SIGN[op]} {shown}")
+        spans.append(mm.span())
 
-    post_pat = r"([\d,\.]+)\s*(\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(%|percent|years old)?"
+    # "12%+" and "12+%" mean the same thing, so the percent mark is allowed on
+    # either side of the plus. It used to be accepted only after it, which made
+    # "12%+ pressure rate" parse as nothing.
+    post_pat = (r"(?P<num>[\d,\.]+)\s*(?P<pre>%|percent)?\s*"
+                r"(?P<word>\+|or more|or fewer|or less|or higher|or lower|or younger|or older)"
+                r"\s*(?P<post>%|percent|years old)?")
     for mm in re.finditer(post_pat, q):
-        num = float(mm.group(1).replace(",", ""))
-        phrase = mm.group(2)
-        is_pct = bool(mm.group(3))
+        num = float(mm.group("num").replace(",", ""))
+        phrase = mm.group("word")
+        is_pct = mm.group("pre") in ("%", "percent") or mm.group("post") in ("%", "percent")
         gte = phrase in ("+", "or more", "or higher", "or older")
 
         window_fwd = q[mm.end():mm.end() + 45]
@@ -831,19 +852,43 @@ def parse(query):
         num = _pct_value(col, num, is_pct)
         conds.append({"kind": "threshold", "col": col, "op": ">=" if gte else "<=", "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
-        notes.append(f"{DISPLAY.get(col, col)} {'≥' if gte else '≤'} {shown}")
+        notes.append(f"{DISPLAY.get(col, col)} {_SIGN['>=' if gte else '<=']} {shown}")
+        spans.append(mm.span())
+
+    # A number next to a stat with no comparison word at all — "100 receptions",
+    # "12% pressure rate" — is a floor, the way anyone reading it out loud would
+    # take it. Without this the clause was dropped and the answer came back
+    # looking right: "WRs with 100 receptions" returned every WR season ever.
+    for mm in _NUM_RE.finditer(q):
+        if _covered(mm.start(), spans): continue
+        num = float(mm.group(0).replace(",", ""))
+        tail = _PCT_TAIL_RE.match(q[mm.end():])
+        end = mm.end() + (tail.end() if tail else 0)
+        st = _stat_for_number(q, mm.start(), end, 40)
+        col = st[0] if st else None
+        # "25 years old" is an equality, not a floor, so age stays explicit
+        if col is None or col == "age":
+            frag = q[mm.start():mm.start() + 30].strip()
+            frag = re.split(r"\b(and|with|who|that|since|before|between)\b|,", frag)[0].strip()
+            ignored.append(frag)
+            continue
+        value = _pct_value(col, num, bool(tail))
+        conds.append({"kind": "threshold", "col": col, "op": ">=", "value": value})
+        shown = f"{value*100:g}%" if col in PCT_STATS else f"{value:g}"
+        notes.append(f"{DISPLAY.get(col, col)} {_SIGN['>=']} {shown}")
+        spans.append((mm.start(), end))
 
     if not conds:
         raise QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.")
-    return conds, notes
+    return conds, notes, ignored
 
 def run(df, query):
-    res, notes, _conds = run_full(df, query)
+    res, notes, _conds, _ignored = run_full(df, query)
     return res, notes
 
 def run_full(df, query):
-    """Like run(), but also returns the parsed conditions (for column selection)."""
-    conds, notes = parse(query)
+    """run() plus the parsed conditions (for column choice) and anything ignored."""
+    conds, notes, ignored = parse(query)
     mask = df.index == df.index
 
     for c in conds:
@@ -879,7 +924,7 @@ def run_full(df, query):
                 mask &= aligned_rank.notna() & (aligned_rank <= c["n"])
 
     res = df[mask].copy()
-    return res, notes, conds
+    return res, notes, conds, ignored
 
 RESULT_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games",
                "made_playoffs", "passing_yards", "passing_tds", "completions",

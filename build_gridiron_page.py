@@ -270,7 +270,10 @@ BODY = r"""
           if (e instanceof Gridiron.QueryError || e.name === 'QueryError') { read.classList.remove('show'); status.className = 'status error'; status.textContent = e.message; document.getElementById('results').style.display = 'none'; return; }
           throw e;
         }
-        conds.innerHTML = d.notes.map((n, i) => `<div class="cond">${i > 0 ? '<span class="and">and</span>' : ''}${n}</div>`).join('');
+        const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+        conds.innerHTML = d.notes.map((n, i) => `<div class="cond">${i > 0 ? '<span class="and">and</span>' : ''}${esc(n)}</div>`).join('')
+          + ((d.ignored && d.ignored.length)
+            ? `<div class="cond ignored">couldn't read ${d.ignored.map(x => '“' + esc(x) + '”').join(', ')} — not used as a filter</div>` : '');
         read.classList.add('show');
         status.innerHTML = `<span class="count">${d.count.toLocaleString()}</span> player-season${d.count === 1 ? '' : 's'} matched` + (d.truncated ? ' · showing first 2000' : '');
         renderTable(d); renderScatter(d.rows, d.columns);
@@ -365,6 +368,9 @@ EXTRA_CSS = """
     .dino-mute:hover { filter: brightness(1.3); transform: translateY(-1px) }
     .dino-mute:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
     .dino-mute.is-muted { background: var(--accent); color: #1a1200 }
+
+    /* a clause the parser could not read is shown, not swallowed */
+    .cond.ignored { color: var(--danger); border-color: var(--danger) }
 """
 
 def main():

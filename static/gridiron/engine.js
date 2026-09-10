@@ -110,12 +110,17 @@
     }
     // a percent stat typed as "5%" or "5" means 0.05; typed as "0.05" stays
     const pctValue = (col, value, marked) => (PCT.has(col) && (marked || value >= 1)) ? value / 100 : value;
+    const SIGN = { ">": ">", "<": "<", ">=": "\u2265", "<=": "\u2264" };
+    const NUM_RE = /\d[\d,.]*/g;
+    const PCT_TAIL_RE = /^\s*(%|percent)/;
+    const covered = (i, spans) => spans.some(([a, b]) => a <= i && i < b);
 
     function parse(query) {
       let q = " " + String(query).toLowerCase().trim() + " ";
       // 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
       q = q.replace(/(\d)['’-](\d{1,2})(?:"|''|”| in\b|\b)/g, (m, f, i) => String(parseInt(f, 10) * 12 + parseInt(i, 10)));
-      const conds = [], notes = [];
+      const conds = [], notes = [], ignored = [];
+      const spans = [];   // character ranges already turned into a condition
       for (const [word, re] of posRegex) {
         if (re.test(q)) {
           const pos = POSITIONS[word];
@@ -129,13 +134,14 @@
         const a = +m[1], b = +m[2];
         conds.push({ kind: "season_range", min: Math.min(a, b), max: Math.max(a, b) });
         notes.push("season between " + Math.min(a, b) + " and " + Math.max(a, b));
+        spans.push([m.index, m.index + m[0].length]);
       } else {
         m = q.match(/since (\d{4})/);
-        if (m) { conds.push({ kind: "season_range", min: +m[1], max: null }); notes.push("season since " + m[1]); }
+        if (m) { conds.push({ kind: "season_range", min: +m[1], max: null }); notes.push("season since " + m[1]); spans.push([m.index, m.index + m[0].length]); }
         m = q.match(/before (\d{4})/);
-        if (m) { conds.push({ kind: "season_range", min: null, max: +m[1] - 1 }); notes.push("season before " + m[1]); }
+        if (m) { conds.push({ kind: "season_range", min: null, max: +m[1] - 1 }); notes.push("season before " + m[1]); spans.push([m.index, m.index + m[0].length]); }
         m = q.match(/\bin (\d{4})\b/);
-        if (m) { conds.push({ kind: "season_range", min: +m[1], max: +m[1] }); notes.push("season is " + m[1]); }
+        if (m) { conds.push({ kind: "season_range", min: +m[1], max: +m[1] }); notes.push("season is " + m[1]); spans.push([m.index, m.index + m[0].length]); }
       }
       if (/playoff|postseason/.test(q)) { conds.push({ kind: "playoffs" }); notes.push("appeared in the playoffs that season"); }
 
@@ -145,6 +151,7 @@
           const col = st[0];
           conds.push({ kind: "rank", col, n: 1, asc: ASC_GOOD.has(col) });
           notes.push("led the league in " + disp(col));
+          spans.push([mm.index, st[2]]);
         }
       }
 
@@ -175,6 +182,7 @@
           notes.push(word + " " + n + " in " + disp(col) + " (" + arrow + ")");
           pos = sEnd;
         }
+        spans.push([mm.index, end]);
       }
 
       const threshPat = new RegExp("(" + COMPARE_RE + ")\\s+([\\d,\\.]+)\\s*(%|percent)?", "g");
@@ -198,14 +206,19 @@
         value = pctValue(col, value, pctMark);
         conds.push({ kind: "threshold", col, op, value });
         const shown = PCT.has(col) ? g(value * 100) + "%" : g(value);
-        notes.push(disp(col) + " " + op + " " + shown);
+        notes.push(disp(col) + " " + SIGN[op] + " " + shown);
+        spans.push([mm.index, end]);
       }
 
-      const postPat = /([\d,\.]+)\s*(\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(%|percent|years old)?/g;
+      // "12%+" and "12+%" mean the same thing, so the percent mark is allowed
+      // on either side of the plus. It used to be accepted only after it, which
+      // made "12%+ pressure rate" parse as nothing at all.
+      const postPat = /(?<num>[\d,.]+)\s*(?<pre>%|percent)?\s*(?<word>\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(?<post>%|percent|years old)?/g;
       for (const mm of q.matchAll(postPat)) {
-        let value = parseFloat(mm[1].replace(/,/g, ""));
+        let value = parseFloat(mm.groups.num.replace(/,/g, ""));
         if (!Number.isFinite(value)) continue;
-        const phrase = mm[2], isPct = !!mm[3];
+        const phrase = mm.groups.word;
+        const isPct = ["%", "percent"].includes(mm.groups.pre) || ["%", "percent"].includes(mm.groups.post);
         const gte = ["+", "or more", "or higher", "or older"].includes(phrase);
         const end = mm.index + mm[0].length;
         const fwd = q.slice(end, end + 45);
@@ -219,11 +232,39 @@
         value = pctValue(col, value, isPct);
         conds.push({ kind: "threshold", col, op: gte ? ">=" : "<=", value });
         const shown = PCT.has(col) ? g(value * 100) + "%" : g(value);
-        notes.push(disp(col) + " " + (gte ? "≥" : "≤") + " " + shown);
+        notes.push(disp(col) + " " + SIGN[gte ? ">=" : "<="] + " " + shown);
+        spans.push([mm.index, end]);
+      }
+
+      // A number next to a stat with no comparison word at all — "100
+      // receptions", "12% pressure rate" — is a floor, the way anyone reading
+      // it out loud would take it. Without this the clause was dropped and the
+      // answer still looked right: "WRs with 100 receptions" returned every WR
+      // season ever. Anything left over is reported rather than swallowed.
+      NUM_RE.lastIndex = 0;
+      for (const mm of q.matchAll(NUM_RE)) {
+        if (covered(mm.index, spans)) continue;
+        const value = parseFloat(mm[0].replace(/,/g, ""));
+        if (!Number.isFinite(value)) continue;
+        const tail = PCT_TAIL_RE.exec(q.slice(mm.index + mm[0].length));
+        const end = mm.index + mm[0].length + (tail ? tail[0].length : 0);
+        const st = statForNumber(q, mm.index, end, 40);
+        const col = st ? st[0] : null;
+        // "25 years old" is an equality, not a floor, so age stays explicit
+        if (col === null || col === "age") {
+          let frag = q.slice(mm.index, mm.index + 30).trim();
+          frag = frag.split(/\b(?:and|with|who|that|since|before|between)\b|,/)[0].trim();
+          ignored.push(frag);
+          continue;
+        }
+        const v = pctValue(col, value, !!tail);
+        conds.push({ kind: "threshold", col, op: ">=", value: v });
+        notes.push(disp(col) + " " + SIGN[">="] + " " + (PCT.has(col) ? g(v * 100) + "%" : g(v)));
+        spans.push([mm.index, end]);
       }
 
       if (!conds.length) throw new QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.");
-      return { conds, notes };
+      return { conds, notes, ignored };
     }
 
     return { parse, findStat, QueryError, DISPLAY, ASC_GOOD, PCT, PP };
@@ -302,7 +343,7 @@
     }
     run(query) {
       const E = this.engine;
-      const { conds, notes } = E.parse(query);
+      const { conds, notes, ignored } = E.parse(query);
       let mask = new Uint8Array(this.n).fill(1);
       for (const c of conds) {
         if (c.kind === "position") {
@@ -344,7 +385,7 @@
       }
       const idx = [];
       for (let i = 0; i < this.n; i++) if (mask[i]) idx.push(i);
-      return { idx, conds, notes };
+      return { idx, conds, notes, ignored };
     }
     // query_engine.result_columns
     resultColumns(idx, conds) {
@@ -374,11 +415,11 @@
       return idx.slice().sort((a, b) => (s[b] - s[a]) || String(nm[a] || "").localeCompare(String(nm[b] || ""), "en"));
     }
     query(text, limit) {
-      const { idx, conds, notes } = this.run(text);
+      const { idx, conds, notes, ignored } = this.run(text);
       const cols = this.resultColumns(idx, conds);
       const sorted = this.sortIdx(idx);
       const rows = sorted.slice(0, limit || 2000).map((i) => this.row(i, cols));
-      return { notes, count: idx.length, columns: cols, rows, truncated: idx.length > (limit || 2000) };
+      return { notes, ignored, count: idx.length, columns: cols, rows, truncated: idx.length > (limit || 2000) };
     }
     career(playerId) {
       const idx = [];

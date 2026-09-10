@@ -42,6 +42,15 @@ QUERIES = [
     "rookies drafted in 2020 with over 1000 receiving yards",
     "QBs with a cpoe over 5 and an aggressiveness above 20%",
     "top 3 in sacks per blitz among linebackers with at least 25 blitzes",
+    "EDGE RUSHERS with a season with 12%+ pressure rate and 300+ snaps since 2010",
+    "edge rushers with a 12%+ pressure rate",
+    "edge rushers with 12+% pressure rate",
+    "edge rushers with a pressure rate of 12%+",
+    "edge rushers with 12% pressure rate and 300 snaps",
+    "WRs with 100 receptions",
+    "QBs with 4000 passing yards and 30 passing tds",
+    "linebackers with 100 tackles who had 5 sacks in 2022",
+    "QBs with 5 rings",
 ]
 
 NODE_RUNNER = r"""
@@ -51,7 +60,7 @@ const T = new Table(data);
 const qs = JSON.parse(require("fs").readFileSync(process.argv[4], "utf8"));
 const out = [];
 for (const q of qs) {
-  try { const r = T.run(q); out.push({ notes: r.notes, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort() }); }
+  try { const r = T.run(q); out.push({ notes: r.notes, ignored: r.ignored, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort() }); }
   catch (e) { out.push({ error: e.message }); }
 }
 process.stdout.write(JSON.stringify(out));
@@ -68,8 +77,9 @@ def main():
     fails = 0
     for q, j in zip(QUERIES, js):
         try:
-            res, notes, _ = qe.run_full(df, q)
-            py = {"notes": notes, "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"]))}
+            res, notes, _, ignored = qe.run_full(df, q)
+            py = {"notes": notes, "ignored": ignored,
+                  "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"]))}
         except qe.QueryError as e:
             py = {"error": str(e)}
         ok = py == j
