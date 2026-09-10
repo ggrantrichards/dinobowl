@@ -325,6 +325,27 @@ pd.set_option('future.no_silent_downcasting', True)
 # rating allowed" before "passer rating", "pressure rate" before "pressures").
 # The catch-all stats block (2.1) sits at the top for exactly that reason.
 STAT_ALIASES = [
+    # ---- big plays by LENGTH (play-by-play) and DEPTH (20+ air yards)
+    ("deep passing touchdowns", "pass_td_20"), ("deep pass touchdowns", "pass_td_20"),
+    ("deep touchdown passes", "pass_td_20"), ("deep passing tds", "pass_td_20"),
+    ("deep pass tds", "pass_td_20"), ("deep td passes", "pass_td_20"),
+    ("long touchdown passes", "pass_td_20"), ("long td passes", "pass_td_20"),
+    ("bomb touchdowns", "pass_td_40"), ("bomb tds", "pass_td_40"),
+    ("deep ball completion percentage", "deep_cmp_pct"), ("deep completion percentage", "deep_cmp_pct"),
+    ("deep ball accuracy", "deep_cmp_pct"),
+    ("deep ball attempts", "deep_att"), ("deep attempts", "deep_att"),
+    ("deep ball completions", "deep_cmp"), ("deep completions", "deep_cmp"),
+    ("deep ball yards", "deep_yards"), ("deep pass yards", "deep_yards"),
+    ("deep ball touchdowns", "deep_td"), ("deep ball tds", "deep_td"),
+    ("deep ball interceptions", "deep_int"), ("deep interceptions", "deep_int"),
+    ("deep receiving touchdowns", "deep_rec_td"), ("deep receiving tds", "deep_rec_td"),
+    ("deep receiving yards", "deep_rec_yards"), ("deep targets", "deep_targets"),
+    ("deep receptions", "deep_recs"), ("deep catches", "deep_recs"),
+    ("long receiving touchdowns", "rec_td_20"), ("long receiving tds", "rec_td_20"),
+    ("long rushing touchdowns", "rush_td_20"), ("long rushing tds", "rush_td_20"),
+    ("explosive completions", "pass_20_plus"), ("big completions", "pass_20_plus"),
+    ("explosive runs", "rush_20_plus"), ("long runs", "rush_20_plus"), ("breakaway runs", "rush_40_plus"),
+    ("explosive catches", "rec_20_plus"), ("long catches", "rec_20_plus"),
     # ---- efficiency: EPA, CPOE, QBR, passer rating
     ("passing epa per play", "pass_epa_per_play"), ("epa per dropback", "pass_epa_per_play"),
     ("passing epa per dropback", "pass_epa_per_play"), ("epa per pass play", "pass_epa_per_play"),
@@ -584,6 +605,16 @@ DISPLAY = {
     "pat_att": "extra point attempts", "punts": "punts", "punt_yards": "punt yards", "punts_inside_20": "punts inside the 20",
     "punt_returns": "punt returns", "punt_return_yards": "punt return yards", "kickoff_returns": "kick returns", "kickoff_return_yards": "kick return yards",
     # bio
+    "pass_td_20": "TD passes of 20+ yards", "pass_td_40": "TD passes of 40+ yards",
+    "rush_td_20": "rushing TDs of 20+ yards", "rush_td_40": "rushing TDs of 40+ yards",
+    "rec_td_20": "receiving TDs of 20+ yards", "rec_td_40": "receiving TDs of 40+ yards",
+    "pass_20_plus": "completions of 20+ yards", "pass_40_plus": "completions of 40+ yards",
+    "rush_20_plus": "runs of 20+ yards", "rush_40_plus": "runs of 40+ yards",
+    "rec_20_plus": "catches of 20+ yards", "rec_40_plus": "catches of 40+ yards",
+    "deep_att": "deep attempts (20+ air yards)", "deep_cmp": "deep completions", "deep_cmp_pct": "deep completion %",
+    "deep_yards": "deep pass yards", "deep_td": "deep pass TDs", "deep_int": "deep interceptions",
+    "deep_targets": "deep targets", "deep_recs": "deep catches", "deep_rec_yards": "deep receiving yards",
+    "deep_rec_td": "deep receiving TDs",
     "height": "height", "weight": "weight", "college": "college", "draft_year": "draft year", "draft_round": "draft round",
     "draft_pick": "draft pick", "rookie_season": "rookie season", "experience": "years of experience",
 }
@@ -594,12 +625,12 @@ ASCENDING_GOOD = {"interceptions", "int_rate", "sacks_taken", "sack_pct", "sack_
                   "times_pressured", "pressured_pct", "times_hurried", "times_hit", "bad_throws", "bad_throw_pct",
                   "drops", "drop_pct", "drops_suffered", "drop_pct_suffered", "missed_tackles", "missed_tackle_pct",
                   "cov_cmp_pct", "cov_yards", "cov_tds", "cov_rating", "cov_completions", "penalties", "penalty_yards",
-                  "time_to_throw", "rush_efficiency", "draft_round", "draft_pick"}
+                  "time_to_throw", "rush_efficiency", "draft_round", "draft_pick", "deep_int"}
 # fractions shown as percentages
 PCT_STATS = {"completion_pct", "int_rate", "td_pct", "sack_pct", "turnover_pct", "catch_pct", "pressure_rate", "blitz_pct",
              "qb_hit_rate", "missed_tackle_pct", "cov_cmp_pct", "pressured_pct", "drop_pct", "drop_pct_suffered",
              "bad_throw_pct", "on_target_pct", "aggressiveness", "stacked_box_pct", "iay_share", "xcomp_pct",
-             "target_share", "air_yards_share", "fg_pct", "rush_pct_oe"}
+             "target_share", "air_yards_share", "fg_pct", "rush_pct_oe", "deep_cmp_pct"}
 # already in percentage points (shown with a sign, no scaling)
 PP_STATS = {"cpoe", "cpoe_ngs"}
 
@@ -726,6 +757,9 @@ def parse(query):
     q = " " + query.lower().strip() + " "
     # 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
     q = re.sub(r"(\d)['\u2019-](\d{1,2})(?:\"|''|\u201d| in\b|\b)", lambda m: str(int(m.group(1)) * 12 + int(m.group(2))), q)
+    # A parenthetical that is only a length — "deep pass TDs (20+ yards)" — is
+    # restating what the stat already means, not asking for a second filter.
+    q = re.sub(r"\(\s*\d+\s*\+?\s*(?:or more\s*)?(?:air\s+)?(?:yards?|yds?)\s*\)", " ", q)
     conds, notes, ignored = [], [], []
     spans = []   # character ranges already turned into a condition
 
@@ -804,6 +838,17 @@ def parse(query):
         spans.append(mm.span())   # "top 10" is spoken for either way
         if not found_any: continue
 
+    # "who has the most X" / "fewest X" asks for an ORDER, not a filter. Skipped
+    # when the sentence already says top N, which is the explicit form.
+    if not re.search(r"(top|bottom)\s+\d+", q):
+        mm = re.search(r"\b(most|fewest|least|lowest|highest|best|leader in|leaders in)\b\s*", q)
+        if mm:
+            st = _find_stat(q[mm.end():mm.end() + 45], 0)
+            if st:
+                asc = mm.group(1) in ("fewest", "least", "lowest")
+                conds.append({"kind": "sort", "col": st[0], "asc": asc})
+                notes.append(f"sorted by {DISPLAY.get(st[0], st[0])} ({'lowest' if asc else 'highest'} first)")
+
     thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]+)\s*(%|percent)?"
     for mm in re.finditer(thresh_pat, q):
         op_word, num, pct_mark = mm.group(1), float(mm.group(2).replace(",", "")), bool(mm.group(3))
@@ -881,6 +926,14 @@ def parse(query):
     if not conds:
         raise QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.")
     return conds, notes, ignored
+
+def sort_result(res, conds):
+    """Result order: an explicit "most/fewest X" first, otherwise newest season."""
+    s = next((c for c in conds if c["kind"] == "sort" and c["col"] in res.columns), None)
+    if s is not None:
+        return res.sort_values([s["col"], "season", "player_display_name"],
+                               ascending=[s["asc"], False, True], na_position="last")
+    return res.sort_values(["season", "player_display_name"], ascending=[False, True])
 
 def run(df, query):
     res, notes, _conds, _ignored = run_full(df, query)

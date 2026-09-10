@@ -51,6 +51,11 @@ QUERIES = [
     "QBs with 4000 passing yards and 30 passing tds",
     "linebackers with 100 tackles who had 5 sacks in 2022",
     "QBs with 5 rings",
+    "What QB has had the most deep pass TDs (20+ yards) since 2021",
+    "which WR has the most deep catches since 2018",
+    "QBs with the fewest interceptions in 2023",
+    "RBs with the most explosive runs since 2015",
+    "QBs with the best deep ball completion percentage since 2018",
 ]
 
 NODE_RUNNER = r"""
@@ -60,7 +65,11 @@ const T = new Table(data);
 const qs = JSON.parse(require("fs").readFileSync(process.argv[4], "utf8"));
 const out = [];
 for (const q of qs) {
-  try { const r = T.run(q); out.push({ notes: r.notes, ignored: r.ignored, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort() }); }
+  try {
+    const r = T.run(q);
+    const ordered = T.sortIdx(r.idx, r.conds).slice(0, 10).map(i => T.cols.season[i] + "|" + T.cols.player_id[i]);
+    out.push({ notes: r.notes, ignored: r.ignored, first10: ordered, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort() });
+  }
   catch (e) { out.push({ error: e.message }); }
 }
 process.stdout.write(JSON.stringify(out));
@@ -77,8 +86,10 @@ def main():
     fails = 0
     for q, j in zip(QUERIES, js):
         try:
-            res, notes, _, ignored = qe.run_full(df, q)
+            res, notes, conds, ignored = qe.run_full(df, q)
+            ordered = qe.sort_result(res, conds).head(10)
             py = {"notes": notes, "ignored": ignored,
+                  "first10": [f"{int(s)}|{p}" for s, p in zip(ordered["season"], ordered["player_id"])],
                   "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"]))}
         except qe.QueryError as e:
             py = {"error": str(e)}
@@ -92,6 +103,10 @@ def main():
             if "keys" in py and "keys" in j:
                 a, b = set(py["keys"]), set(j["keys"])
                 print("      only py:", sorted(a - b)[:5], " only js:", sorted(b - a)[:5])
+            if py.get("ignored") != j.get("ignored"): print("      ignored py:", py.get("ignored"), " js:", j.get("ignored"))
+            if py.get("first10") != j.get("first10"):
+                print("      order py:", py.get("first10"))
+                print("      order js:", j.get("first10"))
             if "error" in py or "error" in j: print("      py:", py.get("error"), " js:", j.get("error"))
     print(f"\n{len(QUERIES) - fails} of {len(QUERIES)} questions answered identically by both engines")
     sys.exit(1 if fails else 0)

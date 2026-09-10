@@ -496,6 +496,16 @@
 
     /* a clause the parser could not read is shown, not swallowed */
     .cond.ignored { color: var(--danger); border-color: var(--danger) }
+
+    /* per-player totals for a "most X" question */
+    .totals { margin-top: 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px }
+    .totals h3 { margin: 0 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 600 }
+    .tot-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px }
+    .tot-row:last-child { border-bottom: 0 }
+    .tot-rank { width: 18px; color: var(--chalk-dim); font-size: 11px; text-align: right }
+    .tot-name { flex: 1; font-weight: 600 }
+    .tot-team, .tot-sub { color: var(--chalk-dim); font-size: 11px }
+    .tot-val { font-family: 'IBM Plex Mono', monospace; color: var(--accent); min-width: 56px; text-align: right }
   </style>
 </head>
 
@@ -529,6 +539,8 @@
       <canvas id="scatterChart" height="80"></canvas>
     </div>
 
+    <div class="totals" id="totals" style="display:none"></div>
+
     <div class="results" id="results" style="display:none">
       <table>
         <thead id="thead"></thead>
@@ -538,7 +550,7 @@
 
     <details class="glossary" id="glossary">
       <summary>Every stat I know, with its formula and source</summary>
-      <p class="gloss-note">Counting stats and rates come from nflverse play-by-play aggregates (2000–). Pressures, blitzes, hurries, knockdowns, coverage and drops are Pro Football Reference advanced stats (2018–). Rates per snap use nflverse snap counts (2012–). Total QBR is ESPN's (2006–). Time to throw, aggressiveness, separation, cushion and yards over expected are NFL Next Gen Stats (2016–). <b>ESPN's Pass Rush Win Rate and Run Stop Win Rate are not published as data</b>, so “pass rush win rate” answers with pressure rate and “run stop win rate” with tackles for loss, and the column says so. Per-lineman <b>sacks allowed</b> is not public either; “sacks allowed” answers with the quarterback's sacks taken.</p>
+      <p class="gloss-note">Counting stats and rates come from nflverse play-by-play aggregates (2000–). Pressures, blitzes, hurries, knockdowns, coverage and drops are Pro Football Reference advanced stats (2018–). Rates per snap use nflverse snap counts (2012–). Total QBR is ESPN's (2006–). Time to throw, aggressiveness, separation, cushion and yards over expected are NFL Next Gen Stats (2016–). Length- and depth-qualified numbers — TD passes of 20+ yards, 20+ air-yard deep balls, explosive runs — are counted from nflverse play-by-play, regular season only (air yards are charted from 2006). <b>ESPN's Pass Rush Win Rate and Run Stop Win Rate are not published as data</b>, so “pass rush win rate” answers with pressure rate and “run stop win rate” with tackles for loss, and the column says so. Per-lineman <b>sacks allowed</b> is not public either; “sacks allowed” answers with the quarterback's sacks taken.</p>
       <div id="gloss-body"></div>
     </details>
   </div>
@@ -566,9 +578,9 @@
     </div>
   </div>
 
-  <script src="/gridiron/engine.js?v=g2"></script>
+  <script src="/gridiron/engine.js?v=g4"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g2';
+    const DATA_URL = '/gridiron/data.json?v=g4';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -580,6 +592,7 @@
       "QBs with a sack rate under 5% and a passer rating over 100 since 2018",
       "safeties top 3 in interception return touchdowns",
       "kickers with a field goal percentage over 90% and at least 25 field goals made",
+      "What QB has had the most deep pass TDs (20+ yards) since 2021",
       "Qbs under 25 years old"
     ];
     // short table headers; anything not listed falls back to the display name
@@ -603,6 +616,12 @@
       times_pressured: "Prss'd", pressured_pct: "Prss'd%", times_blitzed: "Blitzed", times_hurried: "Hurried", times_hit: "Hit",
       pocket_time: "Pocket", time_to_throw: "TTT", aggressiveness: "AGG%", bad_throw_pct: "Bad%", on_target_pct: "OnTgt%",
       fg_made: "FGM", fg_att: "FGA", fg_pct: "FG%", fg_long: "Lng", pat_made: "XPM", pat_att: "XPA", punts: "Punts", punt_yards: "Punt Yds", punts_inside_20: "In20",
+      pass_td_20: "TD 20+", pass_td_40: "TD 40+", rush_td_20: "RuTD 20+", rush_td_40: "RuTD 40+",
+      rec_td_20: "ReTD 20+", rec_td_40: "ReTD 40+", pass_20_plus: "Cmp 20+", pass_40_plus: "Cmp 40+",
+      rush_20_plus: "Run 20+", rush_40_plus: "Run 40+", rec_20_plus: "Catch 20+", rec_40_plus: "Catch 40+",
+      deep_att: "Deep Att", deep_cmp: "Deep Cmp", deep_cmp_pct: "Deep Cmp%", deep_yards: "Deep Yds",
+      deep_td: "Deep TD", deep_int: "Deep INT", deep_targets: "Deep Tgt", deep_recs: "Deep Rec",
+      deep_rec_yards: "Deep ReYds", deep_rec_td: "Deep ReTD",
       height: "Ht", weight: "Wt", college: "College", draft_year: "Draft", draft_round: "Rd", draft_pick: "Pick", experience: "Exp",
     };
     const TXT = new Set(["player_display_name", "position", "recent_team", "college"]);
@@ -759,9 +778,24 @@
             ? `<div class="cond ignored">couldn't read ${d.ignored.map(x => '“' + esc(x) + '”').join(', ')} — not used as a filter</div>` : '');
         read.classList.add('show');
         status.innerHTML = `<span class="count">${d.count.toLocaleString()}</span> player-season${d.count === 1 ? '' : 's'} matched` + (d.truncated ? ' · showing first 2000' : '');
-        renderTable(d); renderScatter(d.rows, d.columns);
+        renderTotals(d); renderTable(d); renderScatter(d.rows, d.columns);
       } catch (e) { status.className = 'status error'; status.textContent = 'Something broke: ' + e.message; }
       finally { runBtn.disabled = false; runBtn.textContent = 'Run query'; }
+    }
+
+    // "who has the most X since 2021" is about a SPAN, but every row below is
+    // one season. This adds the per-player totals over the matched seasons, so
+    // the question has its actual answer on screen.
+    function renderTotals(d) {
+      const box = document.getElementById('totals');
+      if (!d.totals) { box.style.display = 'none'; return; }
+      const t = d.totals, name = head(t.col);
+      box.innerHTML = `<h3>${name}: totals over the ${t.spanned} matched seasons</h3>` +
+        t.rows.map((r, i) => `<div class="tot-row"><span class="tot-rank">${i + 1}</span>` +
+          `<span class="tot-name">${r.name || '—'}</span><span class="tot-team">${r.team || ''}</span>` +
+          `<span class="tot-val">${fmt(t.col, r.total)}</span>` +
+          `<span class="tot-sub">${r.seasons} season${r.seasons === 1 ? '' : 's'}</span></div>`).join('');
+      box.style.display = 'block';
     }
 
     function renderTable(d) {

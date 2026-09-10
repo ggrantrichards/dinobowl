@@ -119,6 +119,9 @@
       let q = " " + String(query).toLowerCase().trim() + " ";
       // 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
       q = q.replace(/(\d)['’-](\d{1,2})(?:"|''|”| in\b|\b)/g, (m, f, i) => String(parseInt(f, 10) * 12 + parseInt(i, 10)));
+      // A parenthetical that is only a length — "deep pass TDs (20+ yards)" — is
+      // restating what the stat already means, not asking for a second filter.
+      q = q.replace(/\(\s*\d+\s*\+?\s*(?:or more\s*)?(?:air\s+)?(?:yards?|yds?)\s*\)/g, " ");
       const conds = [], notes = [], ignored = [];
       const spans = [];   // character ranges already turned into a condition
       for (const [word, re] of posRegex) {
@@ -183,6 +186,21 @@
           pos = sEnd;
         }
         spans.push([mm.index, end]);
+      }
+
+      // "who has the most X" / "fewest X" asks for an ORDER, not a filter.
+      // Skipped when the sentence already says top N, the explicit form.
+      if (!/(top|bottom)\s+\d+/.test(q)) {
+        const mm = q.match(/\b(most|fewest|least|lowest|highest|best|leader in|leaders in)\b\s*/);
+        if (mm) {
+          const after = mm.index + mm[0].length;
+          const st = findStat(q.slice(after, after + 45), 0);
+          if (st) {
+            const asc = ["fewest", "least", "lowest"].includes(mm[1]);
+            conds.push({ kind: "sort", col: st[0], asc });
+            notes.push("sorted by " + disp(st[0]) + " (" + (asc ? "lowest" : "highest") + " first)");
+          }
+        }
       }
 
       const threshPat = new RegExp("(" + COMPARE_RE + ")\\s+([\\d,\\.]+)\\s*(%|percent)?", "g");
@@ -409,17 +427,61 @@
       return ordered.filter((c) => always.has(c) || idx.some((i) => this.cols[c][i] != null));
     }
     row(i, cols) { const o = {}; for (const c of cols) o[c] = this.cols[c][i]; return o; }
-    // python: sort_values(["season", "player_display_name"], ascending=[False, True])
-    sortIdx(idx) {
+    // mirrors query_engine.sort_result: an explicit "most/fewest X" first
+    // (NA last, as pandas na_position="last"), otherwise newest season
+    sortIdx(idx, conds) {
       const s = this.cols.season, nm = this.cols.player_display_name;
-      return idx.slice().sort((a, b) => (s[b] - s[a]) || String(nm[a] || "").localeCompare(String(nm[b] || ""), "en"));
+      // Python compares strings by code point and pandas puts NA last; locale
+      // collation disagrees on names like "A.J." vs "Aaron", so match Python.
+      const byName = (a, b) => {
+        const d = s[b] - s[a];
+        if (d) return d;
+        const x = nm[a], y = nm[b];
+        if (x == null && y == null) return 0;
+        if (x == null) return 1;
+        if (y == null) return -1;
+        return x < y ? -1 : x > y ? 1 : 0;
+      };
+      const so = (conds || []).find((c) => c.kind === "sort" && this.has(c.col));
+      if (!so) return idx.slice().sort(byName);
+      const v = this.cols[so.col], dir = so.asc ? 1 : -1;
+      return idx.slice().sort((a, b) => {
+        const va = v[a], vb = v[b];
+        if (va == null && vb == null) return byName(a, b);
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        return va === vb ? byName(a, b) : (va - vb) * dir;
+      });
     }
     query(text, limit) {
       const { idx, conds, notes, ignored } = this.run(text);
       const cols = this.resultColumns(idx, conds);
-      const sorted = this.sortIdx(idx);
+      const sorted = this.sortIdx(idx, conds);
       const rows = sorted.slice(0, limit || 2000).map((i) => this.row(i, cols));
-      return { notes, ignored, count: idx.length, columns: cols, rows, truncated: idx.length > (limit || 2000) };
+      const sort = conds.find((c) => c.kind === "sort" && this.has(c.col)) || null;
+      return { notes, ignored, sort, count: idx.length, columns: cols, rows,
+               truncated: idx.length > (limit || 2000), totals: sort ? this.totals(idx, sort.col) : null };
+    }
+    // "who has the most X since 2021" is a question about a SPAN, but every row
+    // here is one season, so the season table alone answers "best season". This
+    // sums the matched seasons per player; only for counting stats, where a sum
+    // means something.
+    totals(idx, col) {
+      const M = this.meta;
+      if (!M.rank_desc.includes(col) || M.pct_stats.includes(col) || (M.pp_stats || []).includes(col)) return null;
+      const seasons = new Set(idx.map((i) => this.cols.season[i]));
+      if (seasons.size < 2) return null;
+      const by = new Map();
+      for (const i of idx) {
+        const v = this.cols[col][i];
+        if (v == null) continue;
+        const id = this.cols.player_id[i];
+        const cur = by.get(id) || { id, name: this.cols.player_display_name[i], team: this.cols.recent_team[i], total: 0, seasons: 0 };
+        cur.total += v; cur.seasons++; cur.name = this.cols.player_display_name[i] || cur.name;
+        by.set(id, cur);
+      }
+      const rows = [...by.values()].sort((a, b) => b.total - a.total || (a.name < b.name ? -1 : 1)).slice(0, 10);
+      return rows.length ? { col, rows, spanned: seasons.size } : null;
     }
     career(playerId) {
       const idx = [];

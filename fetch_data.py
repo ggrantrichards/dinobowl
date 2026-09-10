@@ -43,7 +43,16 @@ ADV_URL = BASE + "pfr_advstats/advstats_season_{kind}.parquet"
 SNAP_URL = BASE + "snap_counts/snap_counts_{year}.parquet"
 QBR_URL = BASE + "espn_data/qbr_season_level.parquet"      # ESPN Total QBR, 2006-present
 NGS_URL = BASE + "nextgen_stats/ngs_{kind}.parquet"          # NFL Next Gen Stats, 2016-present
+PBP_URL = BASE + "pbp/play_by_play_{year}.parquet"           # every play, 1999-present
 PFR_FROM, SNAPS_FROM, QBR_FROM, NGS_FROM = 2018, 2012, 2006, 2016
+AIR_YARDS_FROM = 2006     # air yards are charted from 2006; before that the deep-ball columns are NA
+
+# Play-by-play, read one column-pruned slice per season (a few MB, not the whole
+# 50 MB file). This is the only way to get length- and depth-qualified numbers
+# like "TD passes of 20+ yards" — the season aggregates only carry totals.
+PBP_COLS = ["season", "season_type", "passer_player_id", "rusher_player_id", "receiver_player_id",
+            "pass_touchdown", "rush_touchdown", "pass_attempt", "complete_pass", "interception",
+            "yards_gained", "air_yards"]
 
 # ESPN Total QBR (season totals, regular season). player_id there is the ESPN
 # id; players.parquet maps it to gsis.
@@ -79,16 +88,19 @@ STAT_COLS = {
     "passing_yards_after_catch": "pass_yac", "passing_first_downs": "pass_first_downs",
     "passing_epa": "pass_epa", "passing_2pt_conversions": "pass_2pt",
     "passing_cpoe": "cpoe", "pacr": "pacr",
+    "passing_20": "pass_20_plus", "passing_40": "pass_40_plus",
     # rushing
     "carries": "carries", "rushing_yards": "rushing_yards", "rushing_tds": "rushing_tds",
     "rushing_fumbles": "rushing_fumbles", "rushing_fumbles_lost": "rushing_fumbles_lost",
     "rushing_first_downs": "rush_first_downs", "rushing_epa": "rush_epa",
+    "rushing_20": "rush_20_plus", "rushing_40": "rush_40_plus",
     # receiving
     "targets": "targets", "receptions": "receptions", "receiving_yards": "receiving_yards",
     "receiving_tds": "receiving_tds", "receiving_fumbles": "receiving_fumbles",
     "receiving_fumbles_lost": "receiving_fumbles_lost", "receiving_air_yards": "rec_air_yards",
     "receiving_yards_after_catch": "rec_yac", "receiving_first_downs": "rec_first_downs",
     "receiving_epa": "rec_epa", "racr": "racr", "target_share": "target_share",
+    "receiving_20": "rec_20_plus", "receiving_40": "rec_40_plus",
     "air_yards_share": "air_yards_share", "wopr": "wopr",
     # ball security, misc
     "fumbles_total": "fumbles", "fumbles_lost_total": "fumbles_lost",
@@ -144,6 +156,9 @@ RANK_DESC = ["passing_yards", "passing_tds", "pass_attempts", "completions", "pa
              "passes_defended", "forced_fumbles", "fumble_recoveries", "def_tds", "int_tds", "fumble_rec_tds",
              "int_plus_pd", "def_int_yards", "tfl_yards", "safeties",
              "pressures", "hurries", "qb_knockdowns", "blitzes",
+             "pass_td_20", "pass_td_40", "rush_td_20", "rush_td_40", "rec_td_20", "rec_td_40",
+             "pass_20_plus", "pass_40_plus", "rush_20_plus", "rush_40_plus", "rec_20_plus", "rec_40_plus",
+             "deep_att", "deep_cmp", "deep_yards", "deep_td", "deep_targets", "deep_recs", "deep_rec_yards", "deep_rec_td",
              "fg_made", "punt_return_yards", "kickoff_return_yards", "special_teams_tds"]
 # Rate stats ranked per season with a QUALIFIER so a one-attempt season cannot
 # lead the league. (col, ascending_is_better, qualifier column, minimum per
@@ -199,6 +214,7 @@ RATE_RANKS = [
     ("wopr", False, "targets", 2.5, True),
     # lowest-is-best counting stats need a qualifier too, or a backup with one
     # attempt "leads the league" in fewest interceptions
+    ("deep_cmp_pct", False, "deep_att", 20, False),
     ("interceptions", True, "pass_attempts", 14, True),
     ("sacks_taken", True, "pass_attempts", 14, True),
     ("fumbles_lost", True, "touches", 6.25, True),
@@ -256,6 +272,19 @@ DERIVED = {
     "separation": "NGS average yards of separation at catch/incompletion",
     "cushion": "NGS average yards of cushion at the snap",
     "yac_oe": "NGS yards after catch above expectation, per reception",
+    "pass_td_20": "TD passes that gained 20+ yards (play-by-play)",
+    "pass_td_40": "TD passes that gained 40+ yards (play-by-play)",
+    "rush_td_20": "rushing TDs of 20+ yards", "rush_td_40": "rushing TDs of 40+ yards",
+    "rec_td_20": "receiving TDs of 20+ yards", "rec_td_40": "receiving TDs of 40+ yards",
+    "pass_20_plus": "completions of 20+ yards", "pass_40_plus": "completions of 40+ yards",
+    "rush_20_plus": "runs of 20+ yards", "rush_40_plus": "runs of 40+ yards",
+    "rec_20_plus": "catches of 20+ yards", "rec_40_plus": "catches of 40+ yards",
+    "deep_att": "pass attempts with 20+ air yards (2006+)",
+    "deep_cmp": "completions with 20+ air yards", "deep_cmp_pct": "deep_cmp / deep_att",
+    "deep_yards": "yards on completions with 20+ air yards", "deep_td": "TDs on passes with 20+ air yards",
+    "deep_int": "interceptions on passes with 20+ air yards",
+    "deep_targets": "targets with 20+ air yards", "deep_recs": "catches with 20+ air yards",
+    "deep_rec_yards": "yards on catches with 20+ air yards", "deep_rec_td": "TDs on catches with 20+ air yards",
 }
 
 def current_year():
@@ -356,6 +385,70 @@ def load_season(year, rebuild=False):
     os.makedirs(CACHE_DIR, exist_ok=True)
     df.to_parquet(cache, index=False)
     return df
+
+def load_pbp(year, rebuild=False):
+    """Per-player big-play and deep-ball counts for one season, from play-by-play."""
+    cache = os.path.join(CACHE_DIR, f"pbp_{year}.parquet")
+    if os.path.exists(cache) and not rebuild:
+        return pd.read_parquet(cache)
+    try:
+        p = pd.read_parquet(PBP_URL.format(year=year), columns=PBP_COLS)
+    except Exception as e:
+        print(f"  ! no play-by-play for {year} ({e})")
+        return None
+    p = p[p["season_type"] == "REG"].copy()
+    has_air = p["air_yards"].notna().any()
+    yds, air = p["yards_gained"], p["air_yards"]
+    ptd, rtd = p["pass_touchdown"] == 1, p["rush_touchdown"] == 1
+    deep = air >= 20                              # the standard deep-ball line
+    frames = []
+
+    def roll(id_col, spec):
+        d = p[p[id_col].notna()]
+        if d.empty:
+            return None
+        out = pd.DataFrame({k: v.loc[d.index] for k, v in spec.items()})
+        out[id_col] = d[id_col].values
+        g = out.groupby(id_col).sum()
+        g.index.name = "player_id"
+        return g
+
+    frames.append(roll("passer_player_id", {
+        "pass_td_20": (ptd & (yds >= 20)).astype(int),
+        "pass_td_40": (ptd & (yds >= 40)).astype(int),
+        "deep_att": (deep & (p["pass_attempt"] == 1)).astype(int),
+        "deep_cmp": (deep & (p["complete_pass"] == 1)).astype(int),
+        "deep_yards": (deep & (p["complete_pass"] == 1)).astype(int) * yds.fillna(0),
+        "deep_td": (deep & ptd).astype(int),
+        "deep_int": (deep & (p["interception"] == 1)).astype(int),
+    }))
+    frames.append(roll("rusher_player_id", {
+        "rush_td_20": (rtd & (yds >= 20)).astype(int),
+        "rush_td_40": (rtd & (yds >= 40)).astype(int),
+    }))
+    frames.append(roll("receiver_player_id", {
+        "rec_td_20": (ptd & (yds >= 20)).astype(int),
+        "rec_td_40": (ptd & (yds >= 40)).astype(int),
+        "deep_targets": (deep & (p["pass_attempt"] == 1)).astype(int),
+        "deep_recs": (deep & (p["complete_pass"] == 1)).astype(int),
+        "deep_rec_yards": (deep & (p["complete_pass"] == 1)).astype(int) * yds.fillna(0),
+        "deep_rec_td": (deep & ptd).astype(int),
+    }))
+    frames = [f for f in frames if f is not None]
+    if not frames:
+        return None
+    out = frames[0]
+    for f in frames[1:]:
+        out = out.join(f, how="outer")
+    out = out.reset_index()
+    out["season"] = year
+    if not has_air:
+        for c in ("deep_att", "deep_cmp", "deep_yards", "deep_td", "deep_int",
+                  "deep_targets", "deep_recs", "deep_rec_yards", "deep_rec_td"):
+            out[c] = pd.NA
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    out.to_parquet(cache, index=False)
+    return out
 
 def load_advstats(pfr_to_gsis):
     """PFR advanced stats, one row per (player, season), keyed back to gsis ids."""
@@ -539,6 +632,18 @@ def main():
             bl = df["blitzes"]
             df["sack_per_blitz"] = (df["sacks"].fillna(0) / bl.where(bl > 0)).round(3)
         if "qb_hits" in df: df["qb_hit_rate"] = (df["qb_hits"] / ds.where(ds > 0)).round(4)
+    print("Play-by-play big plays and deep balls...")
+    pbp = []
+    for year in range(START_YEAR, end + 1):
+        one = load_pbp(year, rebuild=args.rebuild)
+        if one is not None:
+            pbp.append(one)
+            print(f"  {year}: {len(one):,} players")
+    if pbp:
+        df = df.merge(pd.concat(pbp, ignore_index=True), on=["player_id", "season"], how="left")
+        da = df["deep_att"]
+        df["deep_cmp_pct"] = (df["deep_cmp"] / da.where(da > 0)).round(4)
+
     print("ESPN Total QBR (2006+)...")
     espn_to_gsis = {}
     if not players.empty and "espn_id" in players.columns:
