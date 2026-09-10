@@ -26,7 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
-  const BUILD = "2.0";   // shown on the title; the shells carry the cache-bust token
+  const BUILD = "2.3";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -4267,6 +4267,7 @@
       continuePose(who, catchPose, (who.diveT > 0 || stretch || highPoint) ? 0.56 : 0.42);
       if (who.diveT > 0 || stretch) who.catchDiveT = 0.56;
       who.catchT = G.playT;   // fresh catches are vulnerable to a big hit
+      who.catchX = who.x;
       becomeCarrier(who);
       if (G.playPass) { G.playPass.receiver = who; addStat(G.playPass.passer, "cmp"); addStat(who, "rec"); }
       // a deep strike or a contested high-point SOUNDS bigger than a checkdown
@@ -4439,7 +4440,7 @@
     const throwDepth = prior.from ? Math.hypot(spot.x - prior.from.x, spot.y - prior.from.y) : 0;
     defender.jumpT = Math.max(defender.jumpT || 0, 0.4);
     playPose(defender, prior.kind === "bullet" ? "catchLow" : (throwDepth > 8 * YPX ? "catchHigh" : "catch"), 0.62);
-    defender.catchT = G.playT;
+    defender.catchT = G.playT; defender.catchX = defender.x;
     G.carrier = defender;
     G.ball = { mode: "held", holder: defender, x: defender.x, y: defender.y, z: 12 };
     if (G.playPass) addStat(G.playPass.passer, "passInt");
@@ -7746,6 +7747,21 @@
         cpuSoarSave(G.carrier);
       }
     }
+    // A safety who has been RUN PAST comes back with his wings. The breakaway
+    // latch above only fires once, when nobody is left in front; a receiver
+    // with 15 yards of YAC and one trailing safety never tripped it, so the
+    // safety jogged behind him. Re-evaluated 5x a second (geometric, no dice);
+    // cpuSoarSave itself still refuses flights that cannot beat him to the spot.
+    if (G.phase === "carry" && G.carrier && !G.patMode) {
+      G.soarChaseT = (G.soarChaseT || 0) + dt;
+      if (G.soarChaseT >= 0.2) {
+        G.soarChaseT = 0;
+        const c = G.carrier, ahead = c.team === "off" ? 1 : -1;
+        const gained = (c.x - xAtYd(G.losYd)) * ahead;
+        const nearest = Math.min(...G.players.filter((e) => e.team !== c.team).map((e) => dist(e, c)));
+        if (gained > 6 * YPX && nearest > 30 && c.vx * ahead > 0) cpuSoarSave(c, true);
+      }
+    }
     // check-down outlet: after his chip, the blocking back releases to the
     // flat and becomes a live target for user and CPU quarterbacks alike
     if (G.phase === "drop" && G.curPlay && G.curPlay.type === "pass") {
@@ -8045,6 +8061,14 @@
     if (e === G.carrier) e.carryT = (e.carryT || 0) + dt;
     const tired = e.stamNow < 0.55 ? (0.92 - (0.55 - e.stamNow) * 0.32) : 1;
     const longCarryFade = e === G.carrier ? clamp(((e.carryT || 0) - 2.2) * 0.05, 0, 0.18) : 0;
+    // owner play-test: "after the catch they don't slow down slightly and
+    // consistently over time to let the defense catch up after 20 yards of
+    // YAC". Distance-based, not time-based, so it reads the same at any
+    // speed: -0.6% of top speed per yard after the first 6 yards of YAC,
+    // 8.4% down at 20 yards, floor at 18% (36 yards). Deterministic.
+    const yac = (e === G.carrier && e.catchT != null && e.catchX != null) ? Math.abs(e.x - e.catchX) / YPX : 0;
+    const yacFade = clamp((yac - 6) * 0.006, 0, 0.18);
+    const carryFade = Math.max(longCarryFade, yacFade);
     const burst = (e === G.carrier && !G.playPass && (e.carryT || 0) < 1.2) ? 1.12 : 1;   // hitting the hole
     // CATCH GATHER (owner play-test: "players don't slow down after
     // receiving", so the defense never converges). completeCatch stamps
@@ -8119,7 +8143,7 @@
     if (e.jukePlantT > 0) plant *= JUKE_PLANT_SPEED + (1 - JUKE_PLANT_SPEED) * (1 - e.jukePlantT / JUKE_PLANT_T);
     if (e.stiffPlantT > 0) plant *= STIFF_PLANT_SPEED + (1 - STIFF_PLANT_SPEED) * (1 - e.stiffPlantT / STIFF_PLANT_T);
     const speedMod = G.weather.speedMod * wrapDrive * plant * (e.diveT > 0 ? 1.9 : 1) *
-      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - longCarryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather;
+      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - carryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather;
     if (e.jukeT > 0) e.jukeT -= dt;
     if (e.diveT > 0) {
       e.diveT -= dt;
@@ -9408,12 +9432,17 @@
   // keeper: playable defense, LESSON #22), and a flight that cannot beat the
   // carrier to the spot is not attempted: a truly beaten defense stays beaten
   // rather than wasting the meter on cinema.
-  function cpuSoarSave(c) {
+  function cpuSoarSave(c, chase) {
     if (!c) return false;
+    const ahead = c.team === "off" ? 1 : -1;
     let best = null, bestT = 1e9, bestTgt = null;
     for (const e of G.players) {
       if (e.team === c.team || e.species !== "quetz" || e.controlled) continue;
       if (e.blockedBy || e.grapT > 0 || e.proneT > 0 || e.staggerT > 0 || !soarReady(e)) continue;
+      // chase mode is only for a safety the carrier has already run past, and
+      // only with a real flight in the tank: short hops every second would be
+      // the "hovering" pursue() refuses to become
+      if (chase && ((e.x - c.x) * ahead > -8 || (e.soarCharge || 0) < 0.6)) continue;
       const fsp = e.spd * 1.9 * (G.weather ? G.weather.speedMod : 1);
       const maxT = 0.35 + (e.soarCharge || 0) * 1.35;
       // two-pass intercept estimate: aim where the carrier WILL be when the
@@ -9421,7 +9450,9 @@
       let t = dist(e, c) / fsp;
       t = clamp(dist(e, { x: c.x + c.vx * t, y: c.y + c.vy * t }) / fsp, 0.3, maxT);
       const tgt = { x: c.x + c.vx * t, y: clamp(c.y + c.vy * t, TOP + 4, BOT - 4) };
-      if (dist(e, tgt) > fsp * maxT * 1.02) continue;   // out of wing range
+      // out of wing range. A chase may land up to 4 yards short: the carrier is
+      // fading with every yard of YAC and a fresh safety runs him down from there.
+      if (dist(e, tgt) > fsp * maxT * 1.02 + (chase ? 4 * YPX : 0)) continue;
       if (ydAtX(tgt.x) >= 100) continue;                // he scores before the meet
       if (t < bestT) { best = e; bestT = t; bestTgt = tgt; }
     }

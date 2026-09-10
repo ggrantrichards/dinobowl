@@ -115,6 +115,44 @@
     const PCT_TAIL_RE = /^\s*(%|percent)/;
     const covered = (i, spans) => spans.some(([a, b]) => a <= i && i < b);
 
+    // mirrors query_engine._rewrite_lengths: "20+ yard passing tds" and
+    // "td passes of 40 or more yards" become one digit-free stat name
+    const LEN = "(\\d{2,3})\\s*(?:\\+|plus|or more|or longer)?\\s*-?\\s*(?:yards?|yds?|yarders?)";
+    const LEN_FAMILIES = [
+      ["pass_td", "(?:passing|pass|throwing)\\s+(?:touchdowns?|tds?)|(?:touchdown|td)\\s+(?:passes|throws)"],
+      ["rush_td", "(?:rushing|rush|running)\\s+(?:touchdowns?|tds?)|(?:touchdown|td)\\s+(?:runs?|rushes|carries)"],
+      ["rec_td", "(?:receiving|rec)\\s+(?:touchdowns?|tds?)|(?:touchdown|td)\\s+(?:catches|receptions|grabs)"],
+      ["pos_td", "(?:touchdowns?|tds?|scores)"],
+      ["pass", "(?:completions|passes|throws|passing plays)"],
+      ["rush", "(?:runs|rushes|carries|rushing plays)"],
+      ["rec", "(?:catches|receptions|grabs|receiving plays)"],
+    ];
+    const LEN_NAMES = { pass_td: "td passes", rush_td: "td runs", rec_td: "td catches", pass: "completions", rush: "runs", rec: "catches" };
+    const POS_TD_FAMILY = { QB: "pass_td", RB: "rush_td", FB: "rush_td", WR: "rec_td", TE: "rec_td" };
+    // only 20+ and 40+ buckets exist; any other length is reported, not guessed
+    function rewriteLengths(q, posCodes, ignored) {
+      const name = (fam, n) => {
+        if (fam === "pos_td") {
+          fam = (posCodes || []).map((c) => POS_TD_FAMILY[c]).find(Boolean);
+          if (!fam) return null;
+        }
+        if (parseInt(n, 10) < 20) return "";
+        return (parseInt(n, 10) >= 40 ? "fortyplus" : "twentyplus") + " yard " + LEN_NAMES[fam];
+      };
+      for (const [fam, pat] of LEN_FAMILIES) {
+        for (const rx of [new RegExp(LEN + "\\s+(?:long\\s+)?(?:" + pat + ")\\b", "g"),
+                          new RegExp("\\b(?:" + pat + ")\\s+(?:of|over|for|going|longer than|greater than|at least|more than|beyond)\\s+(?:at least\\s+)?" + LEN, "g")]) {
+          q = q.replace(rx, (m, n) => {
+            const nm = name(fam, n);
+            if (nm === null) return m;
+            if (nm === "") { ignored.push(m.trim() + " (only 20+ and 40+ yard plays are counted)"); return " "; }
+            return " " + nm + " ";
+          });
+        }
+      }
+      return q;
+    }
+
     function parse(query) {
       let q = " " + String(query).toLowerCase().trim() + " ";
       // 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
@@ -124,14 +162,17 @@
       q = q.replace(/\(\s*\d+\s*\+?\s*(?:or more\s*)?(?:air\s+)?(?:yards?|yds?)\s*\)/g, " ");
       const conds = [], notes = [], ignored = [];
       const spans = [];   // character ranges already turned into a condition
+      let posCodes = null;
       for (const [word, re] of posRegex) {
         if (re.test(q)) {
           const pos = POSITIONS[word];
+          posCodes = pos.codes;
           conds.push({ kind: "position", value: pos.codes });
           notes.push("position is " + pos.label);
           break;
         }
       }
+      q = rewriteLengths(q, posCodes, ignored);
       let m = q.match(/between (\d{4}) and (\d{4})/);
       if (m) {
         const a = +m[1], b = +m[2];
@@ -146,7 +187,21 @@
         m = q.match(/\bin (\d{4})\b/);
         if (m) { conds.push({ kind: "season_range", min: +m[1], max: +m[1] }); notes.push("season is " + m[1]); spans.push([m.index, m.index + m[0].length]); }
       }
-      if (/playoff|postseason/.test(q)) { conds.push({ kind: "playoffs" }); notes.push("appeared in the playoffs that season"); }
+      // WON a playoff game / the Super Bowl is a result, not an appearance
+      m = q.match(/\b(?:won|win|winning|wins)\b[^,]{0,25}?\bsuper bowl\b|\bsuper bowl (?:champions?|champs|winners?|mvp)\b|\b(?:has|have|with|got|earned) (?:a |their |his |her )?rings?\b/);
+      if (m) {
+        conds.push({ kind: "threshold", col: "super_bowl_wins", op: ">=", value: 1 });
+        notes.push("won the Super Bowl that season");
+        spans.push([m.index, m.index + m[0].length]);
+      }
+      m = q.match(/\b(?:won|win|winning|wins)\b[^,]{0,25}?\b(?:playoff|postseason)\s+(?:game|games|win|wins|matchup)\b|\bwon in the (?:playoffs|postseason)\b|\b(?:playoff|postseason) (?:win|wins|victory|victories)\b/);
+      if (m) {
+        if (!/\d\s*\+?\s*(?:or more\s+)?(?:playoff|postseason) (?:win|wins|victories)/.test(q)) {
+          conds.push({ kind: "threshold", col: "playoff_wins", op: ">=", value: 1 });
+          notes.push("won a playoff game that season");
+          spans.push([m.index, m.index + m[0].length]);
+        }
+      } else if (/playoff|postseason/.test(q)) { conds.push({ kind: "playoffs" }); notes.push("appeared in the playoffs that season"); }
 
       for (const mm of q.matchAll(/led the league in /g)) {
         const st = findStat(q, mm.index + mm[0].length);
@@ -282,6 +337,14 @@
       }
 
       if (!conds.length) throw new QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.");
+      // "5 rings" is a career count; a season has at most one
+      for (const c of conds) {
+        if (c.kind === "threshold" && c.col === "super_bowl_wins" && c.value > 1) {
+          c.value = 1;
+          for (let i = 0; i < notes.length; i++) if (notes[i].startsWith("Super Bowl wins")) notes[i] = "Super Bowl wins \u2265 1 (a season holds one ring at most \u2014 the totals below add them up per player)";
+          if (!conds.some((k) => k.kind === "sort")) conds.push({ kind: "sort", col: "super_bowl_wins", asc: false });
+        }
+      }
       return { conds, notes, ignored };
     }
 
@@ -468,7 +531,8 @@
     // means something.
     totals(idx, col) {
       const M = this.meta;
-      if (!M.rank_desc.includes(col) || M.pct_stats.includes(col) || (M.pp_stats || []).includes(col)) return null;
+      const counting = M.rank_desc.includes(col) || col === "playoff_wins" || col === "super_bowl_wins";
+      if (!counting || M.pct_stats.includes(col) || (M.pp_stats || []).includes(col)) return null;
       const seasons = new Set(idx.map((i) => this.cols.season[i]));
       if (seasons.size < 2) return null;
       const by = new Map();

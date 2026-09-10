@@ -112,7 +112,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g4   # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g5   # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -123,6 +123,18 @@ formula is listed in `fetch_data.DERIVED` and on the page under "Every stat I kn
 ESPN's Pass Rush Win Rate / Run Stop Win Rate and per-lineman sacks allowed are not
 public data; the page says so and answers with the nearest real stat (pressure rate,
 tackles for loss, the QB's sacks taken).
+
+### 2.2 — lengths, playoff results, and a table that fits the monitor (2026-09-10)
+
+- **"20+ yard passing TDs" means the play-by-play bucket**, not "passing TDs ≥ 20". Any
+  `N+ yard <stat>` or `<stat> of N or more yards` is rewritten to the 20+/40+ column before
+  the numbers are read; other lengths are reported as not counted instead of guessed.
+- **Won, not played:** `playoff_wins` (postseason games the player's playoff team won) and
+  `super_bowl_wins` (1 in a ring season) come from play-by-play results. "who won a playoff
+  game", "won the Super Bowl", "most rings" all resolve; a per-season table cannot hold
+  "5 rings", so that asks for ring seasons and the totals panel adds them up per player.
+- The results table owns its scrollbars (one above, one below, both always on screen) and
+  may use the whole monitor width; the page itself never scrolls sideways.
 
 ## Dino Bowl
 

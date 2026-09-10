@@ -21,7 +21,27 @@ Two independent methods fed it, and they found different things — keep both:
   corrupt-save boot, sprite-cel pixel metrics). Four of the five defects fixed on
   08-12 were found *only* by probing, not by reading.
 
-## DINO BOWL 2.0 — 2026-09-09 (branch `dinobowl-2.0`, NOT yet shipped)
+## DINO BOWL 2.3 — 2026-09-10 (shipped): YAC fade + safety chase flight
+
+Owner play-test: receivers never slowed after the catch, and the CPU quetzalcoatlus
+safety only ever flew on the once-a-play breakaway latch (nobody left in front), so a
+trailing safety jogged behind a 20-yard YAC run. Two deterministic changes in `updateEntity`
+and the live loop, no dice (LESSON #15/#19):
+
+- **YAC FADE** — `catchX` is stamped with `catchT`; the carrier loses 0.6% of top speed per
+  yard after the first 6 yards of YAC, 8.4% down at 20, floor 18% at 36 (`yacFade`, merged
+  with `longCarryFade` by max). Pinned scenario: 100% → 88% at 25 yd → 82% at 40 yd; the old
+  build measured flat.
+- **SOAR CHASE** — every 0.2s of a carry 6+ yards past the LOS with no defender within 30px,
+  `cpuSoarSave(c, true)` lets a CPU quetz the carrier has already run past fly at the
+  intercept point, with a real charge (≥0.6) only, landing up to 4 yards short (the fade
+  and a fresh pursuit close the rest). Pinned scenario, safety 7 yards behind: 12/12
+  flights within a second; old build 0/12. Human-steered safeties are never auto-launched.
+
+Gridiron in the same push: length buckets ("20+ yard passing TDs"), playoff wins / Super
+Bowl wins from play-by-play, table scrollbars (see README).
+
+## DINO BOWL 2.0 — 2026-09-09 (branch `dinobowl-2.0`, shipped)
 
 The 2.0 pass is a **presentation and UX** release. Gameplay, physics, balance,
 tackle timings, the kick meter math, the throw model and every keeper in §7 /

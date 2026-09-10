@@ -26,8 +26,9 @@ cover a season the column is NA and the UI shows a dash.
 """
 import argparse
 import datetime as dt
-import os
+import json, os
 import sys
+import numpy as np
 import pandas as pd
 
 START_YEAR = 2000
@@ -52,7 +53,7 @@ AIR_YARDS_FROM = 2006     # air yards are charted from 2006; before that the dee
 # like "TD passes of 20+ yards" — the season aggregates only carry totals.
 PBP_COLS = ["season", "season_type", "passer_player_id", "rusher_player_id", "receiver_player_id",
             "pass_touchdown", "rush_touchdown", "pass_attempt", "complete_pass", "interception",
-            "yards_gained", "air_yards"]
+            "yards_gained", "air_yards", "game_id", "week", "home_team", "away_team", "result"]
 
 # ESPN Total QBR (season totals, regular season). player_id there is the ESPN
 # id; players.parquet maps it to gsis.
@@ -226,6 +227,8 @@ RATE_RANKS = [
 
 # Formulas, for the glossary and for anyone checking the numbers.
 DERIVED = {
+    "playoff_wins": "postseason games the player's playoff team won that season (0 if the team missed the playoffs)",
+    "super_bowl_wins": "1 in a season the player's team won the Super Bowl; ask for 'most Super Bowl wins' to count rings across seasons",
     "completion_pct": "completions / pass_attempts",
     "int_rate": "interceptions / pass_attempts",
     "td_pct": "passing_tds / pass_attempts",
@@ -315,10 +318,11 @@ def load_season(year, rebuild=False):
     except Exception as e:
         print(f"  ! no regular-season file for {year} ({e}); skipping")
         return None
-    playoff_ids = set()
+    playoff_ids, post_team = set(), pd.Series(dtype=object)
     try:
         post = _read(POST_URL.format(year=year))
         playoff_ids = set(post["player_id"].dropna().unique())
+        post_team = post.dropna(subset=["player_id"]).drop_duplicates("player_id").set_index("player_id")["recent_team"]
     except Exception:
         pass
 
@@ -326,6 +330,7 @@ def load_season(year, rebuild=False):
     keep = [c for c in ID_COLS if c in reg.columns] + have
     df = reg[keep].copy().rename(columns=STAT_COLS)
     df["made_playoffs"] = df["player_id"].isin(playoff_ids)
+    df["post_team"] = df["player_id"].map(post_team)
 
     g = df["games"].fillna(0)
     att = df["pass_attempts"].fillna(0) if "pass_attempts" in df else pd.Series(0, index=df.index)
@@ -389,13 +394,24 @@ def load_season(year, rebuild=False):
 def load_pbp(year, rebuild=False):
     """Per-player big-play and deep-ball counts for one season, from play-by-play."""
     cache = os.path.join(CACHE_DIR, f"pbp_{year}.parquet")
-    if os.path.exists(cache) and not rebuild:
+    jcache = os.path.join(CACHE_DIR, f"post_{year}.json")
+    if os.path.exists(cache) and os.path.exists(jcache) and not rebuild:
         return pd.read_parquet(cache)
     try:
         p = pd.read_parquet(PBP_URL.format(year=year), columns=PBP_COLS)
     except Exception as e:
         print(f"  ! no play-by-play for {year} ({e})")
         return None
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    # who won each playoff game: `result` is home score minus away score, and
+    # the Super Bowl is the last week of the postseason
+    post = p[(p["season_type"] == "POST") & p["result"].notna()].groupby("game_id").first()
+    wins, sb = {}, None
+    if len(post):
+        post["winner"] = np.where(post["result"] > 0, post["home_team"], post["away_team"])
+        wins = post["winner"].value_counts().to_dict()
+        sb = post.loc[post["week"].idxmax(), "winner"]
+    json.dump({"wins": {k: int(v) for k, v in wins.items()}, "super_bowl": sb}, open(jcache, "w"))
     p = p[p["season_type"] == "REG"].copy()
     has_air = p["air_yards"].notna().any()
     yds, air = p["yards_gained"], p["air_yards"]
@@ -445,10 +461,17 @@ def load_pbp(year, rebuild=False):
     if not has_air:
         for c in ("deep_att", "deep_cmp", "deep_yards", "deep_td", "deep_int",
                   "deep_targets", "deep_recs", "deep_rec_yards", "deep_rec_td"):
-            out[c] = pd.NA
-    os.makedirs(CACHE_DIR, exist_ok=True)
+            out[c] = np.nan
     out.to_parquet(cache, index=False)
     return out
+
+def playoff_results(year):
+    """{team: playoff wins} and the Super Bowl winner, from load_pbp's cache."""
+    jcache = os.path.join(CACHE_DIR, f"post_{year}.json")
+    if not os.path.exists(jcache):
+        return {}, None
+    j = json.load(open(jcache))
+    return j["wins"], j["super_bowl"]
 
 def load_advstats(pfr_to_gsis):
     """PFR advanced stats, one row per (player, season), keyed back to gsis ids."""
@@ -641,8 +664,19 @@ def main():
             print(f"  {year}: {len(one):,} players")
     if pbp:
         df = df.merge(pd.concat(pbp, ignore_index=True), on=["player_id", "season"], how="left")
+        for c in ("deep_att", "deep_cmp", "deep_yards", "deep_td", "deep_int", "deep_targets", "deep_recs", "deep_rec_yards", "deep_rec_td"):
+            df[c] = pd.to_numeric(df[c], errors="coerce")   # seasons without air yards carry NA
         da = df["deep_att"]
         df["deep_cmp_pct"] = (df["deep_cmp"] / da.where(da > 0)).round(4)
+    print("Playoff wins and Super Bowls...")
+    df["playoff_wins"], df["super_bowl_wins"] = 0, 0
+    for year in range(START_YEAR, end + 1):
+        wins, sb = playoff_results(year)
+        yr = (df["season"] == year) & df["made_playoffs"]
+        df.loc[yr, "playoff_wins"] = df.loc[yr, "post_team"].map(wins).fillna(0).astype(int)
+        if sb:
+            df.loc[yr & (df["post_team"] == sb), "super_bowl_wins"] = 1
+    df = df.drop(columns=["post_team"])
 
     print("ESPN Total QBR (2006+)...")
     espn_to_gsis = {}
@@ -658,7 +692,6 @@ def main():
         df = df.merge(ngs, on=["player_id", "season"], how="left")
 
     # nflverse divides by zero in a few share columns; an infinite share is NA
-    import numpy as np
     fcols = df.select_dtypes(include="float").columns
     df[fcols] = df[fcols].replace([np.inf, -np.inf], np.nan)
     df = add_ranks(df)

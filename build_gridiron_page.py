@@ -48,6 +48,7 @@ BODY = r"""
 
     <div class="totals" id="totals" style="display:none"></div>
 
+    <div class="scroll-top" id="scrollTop" style="display:none"><div id="scrollTopInner"></div></div>
     <div class="results" id="results" style="display:none">
       <table>
         <thead id="thead"></thead>
@@ -100,6 +101,9 @@ BODY = r"""
       "safeties top 3 in interception return touchdowns",
       "kickers with a field goal percentage over 90% and at least 25 field goals made",
       "What QB has had the most deep pass TDs (20+ yards) since 2021",
+      "QBs with the most 20+ yard passing TDs since 2021",
+      "QBs who won a playoff game with 4000+ passing yards",
+      "which QB has the most rings since 2000",
       "Qbs under 25 years old"
     ];
     // short table headers; anything not listed falls back to the display name
@@ -129,7 +133,7 @@ BODY = r"""
       deep_att: "Deep Att", deep_cmp: "Deep Cmp", deep_cmp_pct: "Deep Cmp%", deep_yards: "Deep Yds",
       deep_td: "Deep TD", deep_int: "Deep INT", deep_targets: "Deep Tgt", deep_recs: "Deep Rec",
       deep_rec_yards: "Deep ReYds", deep_rec_td: "Deep ReTD",
-      height: "Ht", weight: "Wt", college: "College", draft_year: "Draft", draft_round: "Rd", draft_pick: "Pick", experience: "Exp",
+      playoff_wins: "PO W", super_bowl_wins: "SB W", height: "Ht", weight: "Wt", college: "College", draft_year: "Draft", draft_round: "Rd", draft_pick: "Pick", experience: "Exp",
     };
     const TXT = new Set(["player_display_name", "position", "recent_team", "college"]);
     const INT_COLS = new Set(["games", "age", "weight", "draft_year", "draft_round", "draft_pick", "rookie_season", "experience", "season"]);
@@ -305,9 +309,26 @@ BODY = r"""
       box.style.display = 'block';
     }
 
+    // a second horizontal scrollbar above the table, kept in step with the real one
+    function syncScrollbars() {
+      const res = document.getElementById('results'), top = document.getElementById('scrollTop'), inner = document.getElementById('scrollTopInner');
+      const table = res.querySelector('table');
+      res.style.width = top.style.width = '';
+      document.documentElement.style.setProperty('--table-w', table.scrollWidth + 2 + 'px');
+      const wide = table.scrollWidth > res.clientWidth + 1;
+      top.style.display = wide ? 'block' : 'none';
+      inner.style.width = table.scrollWidth + 'px';
+      if (!top.dataset.wired) {
+        top.dataset.wired = '1';
+        let lock = false;
+        top.addEventListener('scroll', () => { if (lock) return; lock = true; res.scrollLeft = top.scrollLeft; lock = false; });
+        res.addEventListener('scroll', () => { if (lock) return; lock = true; top.scrollLeft = res.scrollLeft; lock = false; });
+        window.addEventListener('resize', () => { if (res.style.display !== 'none') syncScrollbars(); });
+      }
+    }
     function renderTable(d) {
       const res = document.getElementById('results');
-      if (!d.rows.length) { res.style.display = 'none'; return; }
+      if (!d.rows.length) { res.style.display = 'none'; document.getElementById('scrollTop').style.display = 'none'; return; }
       const thead = document.getElementById('thead'), tbody = document.getElementById('tbody');
       const visibleCols = d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url');
       thead.innerHTML = '<tr><th></th>' + visibleCols.map(c => `<th class="${TXT.has(c) ? 'txt' : ''}" title="${(META.display[c] || c).replace(/"/g, '')}">${head(c)}</th>`).join('') + '</tr>';
@@ -320,6 +341,7 @@ BODY = r"""
         return `<tr data-id="${row.player_id}" onclick="openModal(this)" style="cursor:pointer" title="Click for career history">${tds}</tr>`;
       }).join('');
       res.style.display = 'block';
+      syncScrollbars();
     }
 
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
@@ -397,6 +419,14 @@ EXTRA_CSS = """
     .cond.ignored { color: var(--danger); border-color: var(--danger) }
 
     /* per-player totals for a "most X" question */
+    .results { max-height: calc(100vh - 24px); overflow: auto; width: min(100%, var(--table-w, 100%)) }
+    .scroll-top { margin-top: 18px; overflow-x: auto; overflow-y: hidden; height: 14px; width: min(100%, var(--table-w, 100%)) }
+    .scroll-top > div { height: 1px }
+    .scroll-top + .results { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0 }
+    @media (min-width: 1240px) {
+      /* the table may use the whole monitor even though the copy above it stays at 1180px */
+      .scroll-top, .results { margin-left: calc(50% - 50vw + 24px); width: min(calc(100vw - 48px), var(--table-w, 100vw)) }
+    }
     .totals { margin-top: 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px }
     .totals h3 { margin: 0 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 600 }
     .tot-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px }

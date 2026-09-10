@@ -56,6 +56,16 @@ QUERIES = [
     "QBs with the fewest interceptions in 2023",
     "RBs with the most explosive runs since 2015",
     "QBs with the best deep ball completion percentage since 2018",
+    "QBs with the most 20+ yard passing TDs since 2021",
+    "QB with the most passing TDs of 20+ yards since 2021",
+    "QBs with the most 40+ yard touchdown passes",
+    "RBs with the most 20+ yard runs in 2023",
+    "WRs with the most 40 yard TDs since 2020",
+    "receivers with 15+ yard catches",
+    "QBs who won a playoff game with 4000 passing yards",
+    "QBs who won the super bowl",
+    "which QB has the most rings since 2000",
+    "QBs with 3+ playoff wins",
 ]
 
 NODE_RUNNER = r"""

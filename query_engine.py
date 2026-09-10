@@ -325,6 +325,18 @@ pd.set_option('future.no_silent_downcasting', True)
 # rating allowed" before "passer rating", "pressure rate" before "pressures").
 # The catch-all stats block (2.1) sits at the top for exactly that reason.
 STAT_ALIASES = [
+    # ---- canonical names written by the length rewrite in parse()
+    ("twentyplus yard td passes", "pass_td_20"), ("fortyplus yard td passes", "pass_td_40"),
+    ("twentyplus yard td runs", "rush_td_20"), ("fortyplus yard td runs", "rush_td_40"),
+    ("twentyplus yard td catches", "rec_td_20"), ("fortyplus yard td catches", "rec_td_40"),
+    ("twentyplus yard completions", "pass_20_plus"), ("fortyplus yard completions", "pass_40_plus"),
+    ("twentyplus yard runs", "rush_20_plus"), ("fortyplus yard runs", "rush_40_plus"),
+    ("twentyplus yard catches", "rec_20_plus"), ("fortyplus yard catches", "rec_40_plus"),
+    # ---- postseason results
+    ("playoff wins", "playoff_wins"), ("postseason wins", "playoff_wins"), ("playoff victories", "playoff_wins"),
+    ("super bowl wins", "super_bowl_wins"), ("super bowl victories", "super_bowl_wins"),
+    ("super bowl titles", "super_bowl_wins"), ("super bowl rings", "super_bowl_wins"),
+    ("super bowls won", "super_bowl_wins"), ("rings", "super_bowl_wins"),
     # ---- big plays by LENGTH (play-by-play) and DEPTH (20+ air yards)
     ("deep passing touchdowns", "pass_td_20"), ("deep pass touchdowns", "pass_td_20"),
     ("deep touchdown passes", "pass_td_20"), ("deep passing tds", "pass_td_20"),
@@ -547,6 +559,7 @@ POSITIONS = {
 }
 
 DISPLAY = {
+    "playoff_wins": "playoff wins", "super_bowl_wins": "Super Bowl wins",
     "passing_yards": "passing yards", "passing_tds": "passing TDs",
     "interceptions": "interceptions", "int_rate": "interception rate",
     "pass_attempts": "pass attempts", "completions": "completions",
@@ -721,6 +734,45 @@ _COMPARE_RE = "|".join(sorted(COMPARE_GT | COMPARE_LT | {"at least", "at most"},
 # a stat found FORWARD of a number that sits past a conjunction belongs to the
 # NEXT clause ("QBR over 70 and EPA per play above 0.2"), so prefer the stat
 # behind the number in that case
+_LEN = r"(\d{2,3})\s*(?:\+|plus|or more|or longer)?\s*-?\s*(?:yards?|yds?|yarders?)"
+_LEN_FAMILIES = [
+    ("pass_td", r"(?:passing|pass|throwing)\s+(?:touchdowns?|tds?)|(?:touchdown|td)\s+(?:passes|throws)"),
+    ("rush_td", r"(?:rushing|rush|running)\s+(?:touchdowns?|tds?)|(?:touchdown|td)\s+(?:runs?|rushes|carries)"),
+    ("rec_td", r"(?:receiving|rec)\s+(?:touchdowns?|tds?)|(?:touchdown|td)\s+(?:catches|receptions|grabs)"),
+    ("pos_td", r"(?:touchdowns?|tds?|scores)"),
+    ("pass", r"(?:completions|passes|throws|passing plays)"),
+    ("rush", r"(?:runs|rushes|carries|rushing plays)"),
+    ("rec", r"(?:catches|receptions|grabs|receiving plays)"),
+]
+_LEN_NAMES = {"pass_td": "td passes", "rush_td": "td runs", "rec_td": "td catches",
+              "pass": "completions", "rush": "runs", "rec": "catches"}
+_POS_TD_FAMILY = {"QB": "pass_td", "RB": "rush_td", "FB": "rush_td", "WR": "rec_td", "TE": "rec_td"}
+
+def _rewrite_lengths(q, pos_codes, ignored):
+    """'20+ yard passing tds' / 'td passes of 40 or more yards' -> a stat name.
+    Only 20+ and 40+ buckets exist; any other length is reported, not guessed."""
+    def name(fam, n):
+        if fam == "pos_td":
+            fam = next((_POS_TD_FAMILY[c] for c in (pos_codes or []) if c in _POS_TD_FAMILY), None)
+            if not fam:
+                return None
+        if int(n) < 20:
+            return ""
+        return ("fortyplus" if int(n) >= 40 else "twentyplus") + " yard " + _LEN_NAMES[fam]
+    for fam, pat in _LEN_FAMILIES:
+        for rx in (rf"{_LEN}\s+(?:long\s+)?(?:{pat})\b",
+                   rf"\b(?:{pat})\s+(?:of|over|for|going|longer than|greater than|at least|more than|beyond)\s+(?:at least\s+)?{_LEN}"):
+            def sub(m):
+                nm = name(fam, m.group(1))
+                if nm is None:
+                    return m.group(0)
+                if nm == "":
+                    ignored.append(f"{m.group(0).strip()} (only 20+ and 40+ yard plays are counted)")
+                    return " "
+                return f" {nm} "
+            q = re.sub(rx, sub, q)
+    return q
+
 _CLAUSE_BREAK = re.compile(r"\b(and|with|who|that|or|while)\b|,")
 
 def _find_stat_last(text):
@@ -763,12 +815,15 @@ def parse(query):
     conds, notes, ignored = [], [], []
     spans = []   # character ranges already turned into a condition
 
+    pos_codes = None
     for word in sorted(POSITIONS, key=len, reverse=True):
         if re.search(rf"\b{re.escape(word)}\b", q):
             pos = POSITIONS[word]
+            pos_codes = pos["codes"]
             conds.append({"kind": "position", "value": pos["codes"]})
             notes.append(f"position is {pos['label']}")
             break
+    q = _rewrite_lengths(q, pos_codes, ignored)
 
     m = re.search(r"between (\d{4}) and (\d{4})", q)
     if m:
@@ -794,7 +849,18 @@ def parse(query):
             notes.append(f"season is {yr}")
             spans.append(m.span())
 
-    if re.search(r"playoff|postseason", q):
+    m = re.search(r"\b(?:won|win|winning|wins)\b[^,]{0,25}?\bsuper bowl\b|\bsuper bowl (?:champions?|champs|winners?|mvp)\b|\b(?:has|have|with|got|earned) (?:a |their |his |her )?rings?\b", q)
+    if m:
+        conds.append({"kind": "threshold", "col": "super_bowl_wins", "op": ">=", "value": 1})
+        notes.append("won the Super Bowl that season")
+        spans.append(m.span())
+    m = re.search(r"\b(?:won|win|winning|wins)\b[^,]{0,25}?\b(?:playoff|postseason)\s+(?:game|games|win|wins|matchup)\b|\bwon in the (?:playoffs|postseason)\b|\b(?:playoff|postseason) (?:win|wins|victory|victories)\b", q)
+    if m:
+        if not re.search(r"\d\s*\+?\s*(?:or more\s+)?(?:playoff|postseason) (?:win|wins|victories)", q):
+            conds.append({"kind": "threshold", "col": "playoff_wins", "op": ">=", "value": 1})
+            notes.append("won a playoff game that season")
+            spans.append(m.span())
+    elif re.search(r"playoff|postseason", q):
         conds.append({"kind": "playoffs"})
         notes.append("appeared in the playoffs that season")
 
@@ -925,6 +991,12 @@ def parse(query):
 
     if not conds:
         raise QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.")
+    for c in conds:
+        if c["kind"] == "threshold" and c["col"] == "super_bowl_wins" and c["value"] > 1:
+            c["value"] = 1
+            notes[:] = [n if not n.startswith("Super Bowl wins") else "Super Bowl wins ≥ 1 (a season holds one ring at most — the totals below add them up per player)" for n in notes]
+            if not any(k["kind"] == "sort" for k in conds):
+                conds.append({"kind": "sort", "col": "super_bowl_wins", "asc": False})
     return conds, notes, ignored
 
 def sort_result(res, conds):
