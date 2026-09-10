@@ -202,7 +202,12 @@ BODY = r"""
 
     function renderExamples() {
       const box = document.getElementById('examples');
-      EXAMPLES.forEach(ex => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = ex; b.onclick = () => { q.value = ex; q.focus(); run(); }; box.appendChild(b); });
+      EXAMPLES.forEach((ex, i) => { const b = document.createElement('button'); b.className = 'chip' + (i >= 6 ? ' extra' : ''); b.textContent = ex; b.onclick = () => { q.value = ex; q.focus(); run(); }; box.appendChild(b); });
+      if (EXAMPLES.length > 6) {
+        const more = document.createElement('button'); more.className = 'chip more'; more.textContent = (EXAMPLES.length - 6) + ' more examples ▾';
+        more.onclick = () => { const open = box.classList.toggle('open'); more.textContent = open ? 'fewer examples ▴' : (EXAMPLES.length - 6) + ' more examples ▾'; };
+        box.appendChild(more);
+      }
     }
 
     let scatterChart = null, lineChart = null;
@@ -284,7 +289,10 @@ BODY = r"""
           throw e;
         }
         const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-        conds.innerHTML = d.notes.map((n, i) => `<div class="cond">${i > 0 ? '<span class="and">and</span>' : ''}${esc(n)}</div>`).join('')
+        const kind = (n) => /^position is/.test(n) ? 'k-pos' : /^season/.test(n) ? 'k-season' : /^sorted by/.test(n) ? 'k-sort'
+          : /^(won |appeared|led the league|top \d|bottom \d)/.test(n) ? 'k-flag' : 'k-filter';
+        const pill = (n) => kind(n) === 'k-filter' ? esc(n).replace(/(\S+)$/, '<b>$1</b>') : esc(n);
+        conds.innerHTML = d.notes.map((n) => `<div class="cond ${kind(n)}">${pill(n)}</div>`).join('')
           + ((d.ignored && d.ignored.length)
             ? `<div class="cond ignored">couldn't read ${d.ignored.map(x => '“' + esc(x) + '”').join(', ')} — not used as a filter</div>` : '');
         read.classList.add('show');
@@ -301,8 +309,9 @@ BODY = r"""
       const box = document.getElementById('totals');
       if (!d.totals) { box.style.display = 'none'; return; }
       const t = d.totals, name = head(t.col);
-      box.innerHTML = `<h3>${name}: totals over the ${t.spanned} matched seasons</h3>` +
-        t.rows.map((r, i) => `<div class="tot-row"><span class="tot-rank">${i + 1}</span>` +
+      const top = Math.max(...t.rows.map(r => r.total)) || 1;
+      box.innerHTML = `<h3>${name} · totals over the ${t.spanned} matched seasons</h3>` +
+        t.rows.map((r, i) => `<div class="tot-row"><div class="tot-bar" style="width:${(100 * r.total / top).toFixed(1)}%"></div><span class="tot-rank">${i + 1}</span>` +
           `<span class="tot-name">${r.name || '—'}</span><span class="tot-team">${r.team || ''}</span>` +
           `<span class="tot-val">${fmt(t.col, r.total)}</span>` +
           `<span class="tot-sub">${r.seasons} season${r.seasons === 1 ? '' : 's'}</span></div>`).join('');
@@ -326,22 +335,46 @@ BODY = r"""
         window.addEventListener('resize', () => { if (res.style.display !== 'none') syncScrollbars(); });
       }
     }
+    let LAST = null, SORT = null;   // the rows on screen and how they are sorted
     function renderTable(d) {
       const res = document.getElementById('results');
       if (!d.rows.length) { res.style.display = 'none'; document.getElementById('scrollTop').style.display = 'none'; return; }
-      const thead = document.getElementById('thead'), tbody = document.getElementById('tbody');
-      const visibleCols = d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url');
-      thead.innerHTML = '<tr><th></th>' + visibleCols.map(c => `<th class="${TXT.has(c) ? 'txt' : ''}" title="${(META.display[c] || c).replace(/"/g, '')}">${head(c)}</th>`).join('') + '</tr>';
-      tbody.innerHTML = d.rows.map(row => {
-        const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'" style="width:28px;height:28px;border-radius:50%;object-fit:cover;vertical-align:middle;">` : `<div style="width:28px;height:28px;border-radius:50%;background:var(--line);display:inline-block;vertical-align:middle;"></div>`;
-        const tds = `<td style="padding:4px 10px;text-align:center;">${imgStr}</td>` + visibleCols.map(c => {
-          const val = (c === 'season') ? `<span class="season-badge">${row[c]}</span>` : fmt(c, row[c]);
-          return `<td class="${(c === 'player_display_name') ? 'name txt' : (TXT.has(c) ? 'txt' : '')}">${val}</td>`;
+      LAST = { rows: d.rows, cols: d.columns.filter(c => c !== 'player_id' && c !== 'headshot_url') };
+      SORT = null;
+      const thead = document.getElementById('thead');
+      thead.innerHTML = '<tr><th></th>' + LAST.cols.map(c => `<th data-col="${c}" class="${TXT.has(c) ? 'txt' : ''}" title="${(META.display[c] || c).replace(/"/g, '')} — click to sort">${head(c)}</th>`).join('') + '</tr>';
+      thead.onclick = (e) => { const th = e.target.closest('th[data-col]'); if (th) sortBy(th.dataset.col); };
+      renderBody(d.rows);
+      res.style.display = 'block';
+      syncScrollbars();
+    }
+    function renderBody(rows) {
+      const tbody = document.getElementById('tbody'), sc = SORT && SORT.col;
+      tbody.innerHTML = rows.map(row => {
+        const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
+        const tds = `<td style="padding:4px 10px;text-align:center;">${imgStr}</td>` + LAST.cols.map(c => {
+          const val = c === 'season' ? `<span class="season-badge">${row[c]}</span>` : c === 'recent_team' ? `<span class="team">${row[c] || '—'}</span>` : c === 'position' ? `<span class="pos">${row[c] || '—'}</span>` : fmt(c, row[c]);
+          const cls = (c === 'player_display_name' ? 'name txt' : TXT.has(c) ? 'txt' : '') + (c === sc ? ' sorted' : '');
+          return `<td class="${cls}">${val}</td>`;
         }).join('');
         return `<tr data-id="${row.player_id}" onclick="openModal(this)" style="cursor:pointer" title="Click for career history">${tds}</tr>`;
       }).join('');
-      res.style.display = 'block';
-      syncScrollbars();
+    }
+    // first click sorts high-to-low (A-Z for text), the next click flips it; blanks always sink to the bottom
+    function sortBy(col) {
+      if (!LAST) return;
+      SORT = SORT && SORT.col === col ? { col, dir: SORT.dir === 'desc' ? 'asc' : 'desc' } : { col, dir: TXT.has(col) ? 'asc' : 'desc' };
+      const dir = SORT.dir === 'desc' ? -1 : 1;
+      const rows = LAST.rows.slice().sort((a, b) => {
+        const va = a[col], vb = b[col];
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        const c = (typeof va === 'number' && typeof vb === 'number') ? va - vb : String(va).localeCompare(String(vb));
+        return c * dir;
+      });
+      document.querySelectorAll('#thead th').forEach(th => { th.classList.remove('sort-desc', 'sort-asc'); th.removeAttribute('aria-sort'); if (th.dataset.col === col) { th.classList.add('sort-' + SORT.dir); th.setAttribute('aria-sort', SORT.dir === 'desc' ? 'descending' : 'ascending'); } });
+      renderBody(rows);
     }
 
     q.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); run(); } });
@@ -390,51 +423,179 @@ BODY = r"""
 """
 
 EXTRA_CSS = """
-    /* 2.1: definitions + career table */
-    .glossary { margin-top: 28px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); padding: 10px 16px; }
-    .glossary summary { cursor: pointer; font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--accent); padding: 6px 0; }
-    .glossary .gloss-note { font-size: 13px; color: var(--chalk-dim); line-height: 1.5; }
-    .glossary table.gloss { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .glossary table.gloss th, .glossary table.gloss td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-    .glossary table.gloss th { color: var(--chalk-dim); font-weight: 600; }
-    .results.career { margin-top: 14px; max-height: 320px; overflow: auto; }
-    .results.career table { font-size: 12px; }
-    .modal-header p { margin: 4px 0; color: var(--chalk-dim); font-size: 13px; }
+    /* ============ 2.3 design system: broadcast-night palette, real surfaces ============
+       The template's own rules come first; everything here overrides them. */
+    :root {
+      --field: #0a0e13; --field-2: #0f1620;
+      --card: #121a23; --card-2: #17212c;
+      --line: #22303f; --line-2: #2f4155;
+      --chalk: #eef2f6; --chalk-dim: #97a5b4;
+      --accent: #ffc531; --accent-2: #35d07f;
+      --blue: #62aeff; --violet: #b096ff; --danger: #ff6b6b;
+      --radius: 12px; --radius-sm: 7px;
+      --shadow: 0 12px 34px rgba(0, 0, 0, .38);
+      --gold-grad: linear-gradient(135deg, #ffd86a 0%, #ffc531 55%, #f0a91b 100%);
+    }
+    html { background: var(--field) }
+    body {
+      background:
+        radial-gradient(1100px 520px at 50% -180px, rgba(31, 92, 62, .55) 0%, rgba(31, 92, 62, 0) 70%),
+        repeating-linear-gradient(90deg, transparent 0 119px, rgba(255, 255, 255, .018) 119px 120px),
+        linear-gradient(180deg, #0c131b 0%, var(--field) 55%);
+      background-attachment: fixed;
+      font-family: Inter, system-ui, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    .wrap { padding: 0 24px 96px }
+    header { padding: 44px 0 22px; border-bottom: 0 }
+    .eyebrow { font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .18em; color: var(--accent-2); display: flex; align-items: center; gap: 8px }
+    .eyebrow::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent-2); box-shadow: 0 0 10px var(--accent-2) }
+    h1 { font-size: clamp(44px, 6.4vw, 76px); line-height: .95; letter-spacing: .01em; color: var(--chalk); margin: 8px 0 10px }
+    h1 span { background: var(--gold-grad); -webkit-background-clip: text; background-clip: text; color: transparent }
+    .sub { font-size: 16px; color: var(--chalk-dim); max-width: 62ch; margin: 0 0 18px }
+    #meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; max-width: 720px; font-family: Inter, sans-serif; letter-spacing: 0; text-transform: none }
+    #meta span { display: block; background: linear-gradient(180deg, var(--card-2), var(--card)); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 14px; font-size: 11px; color: var(--chalk-dim); text-transform: uppercase; letter-spacing: .08em }
+    #meta b { display: block; font-family: Oswald, sans-serif; font-weight: 600; font-size: 22px; color: var(--chalk); letter-spacing: .01em; margin-top: 2px }
+    @media (max-width: 640px) { #meta { grid-template-columns: repeat(2, minmax(0, 1fr)) } }
 
-    /* 2.2: the launcher and the mute chip share one dock in the corner, so the
-       mute stays put (and stays clickable) whether the panel is open or not */
-    .dino-dock { position: fixed; right: 22px; bottom: 22px; z-index: 1200; display: flex; align-items: stretch; gap: 8px; }
-    .dino-dock .dino-btn { position: static; right: auto; bottom: auto; }
+    /* ---- surfaces */
+    .search, .read, .totals, .results, .glossary, #chart-container {
+      background: linear-gradient(180deg, var(--card-2), var(--card)) !important;
+      border: 1px solid var(--line) !important; border-radius: var(--radius) !important; box-shadow: var(--shadow);
+    }
+    .search { margin-top: 22px; padding: 18px }
+    .search textarea {
+      background: #0b1119; border: 1px solid var(--line-2); border-radius: var(--radius-sm); color: var(--chalk);
+      font-family: Inter, sans-serif; font-size: 17px; line-height: 1.45; padding: 14px 16px; min-height: 64px;
+      transition: border-color .15s, box-shadow .15s;
+    }
+    .search textarea:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(255, 197, 49, .18); outline: 0 }
+    .bar { margin-top: 12px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap }
+    .run {
+      background: var(--gold-grad); color: #1a1200; border: 0; border-radius: var(--radius-sm);
+      font-family: Oswald, sans-serif; font-weight: 600; font-size: 15px; letter-spacing: .08em; text-transform: uppercase;
+      padding: 11px 22px; cursor: pointer; box-shadow: 0 6px 18px rgba(255, 197, 49, .22); transition: transform .12s, box-shadow .12s, filter .12s;
+    }
+    .run:hover { transform: translateY(-1px); box-shadow: 0 10px 24px rgba(255, 197, 49, .3); filter: brightness(1.04) }
+    .run:disabled { opacity: .7; transform: none; cursor: progress }
+    #hint { font-family: Inter, sans-serif; font-size: 12px; color: var(--chalk-dim) }
+    .examples { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px }
+    .chip {
+      font-family: Inter, sans-serif; font-size: 12.5px; color: var(--chalk-dim); background: rgba(255, 255, 255, .03);
+      border: 1px solid var(--line-2); border-radius: 999px; padding: 7px 13px; cursor: pointer; text-align: left; line-height: 1.3;
+      transition: transform .12s, border-color .12s, color .12s, background .12s;
+    }
+    .chip:hover { transform: translateY(-1px); border-color: var(--accent); color: var(--chalk); background: rgba(255, 197, 49, .06) }
+    .chip.extra { display: none }
+    .examples.open .chip.extra { display: inline-block }
+    .chip.more { color: var(--accent); border-style: dashed }
+
+    /* ---- how I read that: pills, coloured by what they do */
+    .read { margin-top: 18px; padding: 14px 18px 16px; border-left: 1px solid var(--line) !important }
+    .read h3 { font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .14em; color: var(--chalk-dim); margin: 0 0 10px }
+    .conds { display: flex; flex-wrap: wrap; gap: 8px; border-left: 0; padding: 0 }
+    .cond {
+      font-family: Inter, sans-serif; font-size: 13.5px; font-weight: 500; letter-spacing: 0; padding: 7px 13px; border-radius: 999px;
+      border: 1px solid var(--line-2); background: rgba(255, 255, 255, .03); color: var(--chalk); display: inline-flex; align-items: center; gap: 6px;
+    }
+    .cond::before { display: none }
+    .cond .and { display: none }
+    .cond.k-pos { border-color: rgba(98, 174, 255, .5); background: rgba(98, 174, 255, .10); color: #cfe4ff }
+    .cond.k-season { border-color: rgba(176, 150, 255, .5); background: rgba(176, 150, 255, .10); color: #e2d9ff }
+    .cond.k-sort { border-color: rgba(53, 208, 127, .5); background: rgba(53, 208, 127, .10); color: #c8f5dc }
+    .cond.k-flag { border-color: rgba(255, 197, 49, .55); background: rgba(255, 197, 49, .10); color: #ffe7a3 }
+    .cond.k-filter b { color: var(--accent); font-weight: 600 }
+    .cond.ignored { border-color: rgba(255, 107, 107, .6); background: rgba(255, 107, 107, .10); color: #ffd1d1 }
+
+    .status { margin-top: 18px; font-family: Inter, sans-serif; font-size: 14px; color: var(--chalk-dim) }
+    .status .count { font-family: Oswald, sans-serif; font-size: 26px; font-weight: 600; color: var(--chalk); margin-right: 6px; letter-spacing: .01em }
+    .status.error { color: var(--danger); font-weight: 500 }
+
+    /* ---- totals leaderboard with bars */
+    .totals { margin-top: 18px; padding: 14px 18px 8px }
+    .totals h3 { font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--chalk-dim); margin: 0 0 10px }
+    .tot-row { position: relative; display: flex; align-items: center; gap: 12px; padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, .04); border-radius: 6px; overflow: hidden; font-family: Inter, sans-serif; font-size: 14px }
+    .tot-row:last-child { border-bottom: 0 }
+    .tot-bar { position: absolute; left: 0; top: 0; bottom: 0; background: linear-gradient(90deg, rgba(255, 197, 49, .16), rgba(255, 197, 49, .04)); pointer-events: none }
+    .tot-row > span { position: relative }
+    .tot-rank { width: 22px; font-family: Oswald, sans-serif; font-weight: 600; font-size: 15px; color: var(--chalk-dim); text-align: right }
+    .tot-row:nth-child(2) .tot-rank { color: var(--accent) }
+    .tot-row:nth-child(3) .tot-rank { color: #d6dde6 }
+    .tot-row:nth-child(4) .tot-rank { color: #d9a066 }
+    .tot-name { flex: 1; font-weight: 600; color: var(--chalk) }
+    .tot-team { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim); border: 1px solid var(--line-2); border-radius: 4px; padding: 1px 6px }
+    .tot-val { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600; color: var(--accent); min-width: 56px; text-align: right }
+    .tot-sub { font-size: 11px; color: var(--chalk-dim); min-width: 68px; text-align: right }
+
+    /* ---- the table: the page's centrepiece */
+    .results { margin-top: 18px; max-height: calc(100vh - 24px); overflow: auto; width: min(100%, var(--table-w, 100%)) }
+    .scroll-top { margin-top: 18px; overflow-x: auto; overflow-y: hidden; height: 14px; width: min(100%, var(--table-w, 100%)) }
+    .scroll-top > div { height: 1px }
+    .scroll-top + .results { margin-top: 0; border-top-left-radius: 0 !important; border-top-right-radius: 0 !important }
+    @media (min-width: 1240px) {
+      /* the table may use the whole monitor even though the copy above it stays at 1180px */
+      .scroll-top, .results { margin-left: calc(50% - 50vw + 24px); width: min(calc(100vw - 48px), var(--table-w, 100vw)) }
+    }
+    table { font-size: 13px }
+    thead th {
+      background: #0d141c; color: #aab7c5; font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: .07em;
+      padding: 12px 13px; border-bottom: 1px solid var(--line-2); cursor: pointer; user-select: none; transition: color .12s, background .12s;
+    }
+    thead th:first-child { cursor: default }
+    thead th:hover { color: var(--chalk) }
+    thead th.sort-desc, thead th.sort-asc { color: var(--accent); background: #121c27 }
+    thead th.sort-desc::after { content: " ▼"; font-size: 9px }
+    thead th.sort-asc::after { content: " ▲"; font-size: 9px }
+    tbody td { font-family: 'IBM Plex Mono', monospace; font-size: 13px; padding: 9px 13px; border-bottom: 1px solid rgba(255, 255, 255, .045); color: #d7dee6 }
+    tbody td.txt { font-family: Inter, sans-serif }
+    tbody td.name { font-family: Inter, sans-serif; font-weight: 600; font-size: 14px; color: var(--chalk); letter-spacing: 0 }
+    tbody td.sorted { background: rgba(255, 197, 49, .07); color: var(--chalk) }
+    tbody tr:nth-child(even) td { background-color: rgba(255, 255, 255, .015) }
+    tbody tr:nth-child(even) td.sorted { background-color: rgba(255, 197, 49, .09) }
+    tbody tr:hover td { background-color: rgba(53, 208, 127, .09) }
+    tbody img, tbody .avatar { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; vertical-align: middle; background: var(--card-2); border: 1px solid var(--line-2) }
+    .season-badge { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: #cfe4ff; background: rgba(98, 174, 255, .12); border: 1px solid rgba(98, 174, 255, .35); border-radius: 5px; padding: 2px 7px }
+    .team { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--chalk-dim); border: 1px solid var(--line-2); border-radius: 4px; padding: 2px 6px }
+    .pos { font-family: Inter, sans-serif; font-size: 11px; font-weight: 600; color: var(--chalk-dim); letter-spacing: .06em }
+    .yes { color: var(--accent-2); font-weight: 600 }
+    .no { color: var(--chalk-dim) }
+    tbody tr:hover td.name { color: #ffffff }
+
+    #chart-container { margin-top: 18px; padding: 16px 18px }
+
+    /* ---- glossary, career, modal */
+    .glossary { margin-top: 24px; padding: 12px 18px }
+    .glossary summary { font-family: Inter, sans-serif; font-size: 13.5px; font-weight: 600; color: var(--accent); cursor: pointer; padding: 6px 0 }
+    .glossary .gloss-note { font-size: 13px; color: var(--chalk-dim); line-height: 1.55 }
+    .glossary table.gloss { width: 100%; border-collapse: collapse; font-size: 12.5px }
+    .glossary table.gloss th, .glossary table.gloss td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); vertical-align: top; font-family: Inter, sans-serif }
+    .glossary table.gloss th { color: var(--chalk-dim); font-weight: 600 }
+    .results.career { margin-top: 14px; max-height: 320px; overflow: auto; margin-left: 0 !important; width: 100% !important }
+    .results.career table { font-size: 12px }
+    .modal { background-color: rgba(6, 10, 14, .78) }
+    .modal-content { background: linear-gradient(180deg, var(--card-2), var(--card)); border: 1px solid var(--line-2); border-radius: 14px; box-shadow: var(--shadow) }
+    .modal-header img { border-color: var(--accent) }
+    .modal-header p { margin: 4px 0; color: var(--chalk-dim); font-size: 13px }
+
+    /* ---- Dino Bowl dock: launcher and mute share the corner, so the mute stays
+       put (and clickable) whether the panel is open or not */
+    .dino-dock { position: fixed; right: 22px; bottom: 22px; z-index: 1200; display: flex; align-items: stretch; gap: 8px }
+    .dino-dock .dino-btn { position: static; right: auto; bottom: auto; background: var(--gold-grad); border-radius: var(--radius-sm); font-family: Oswald, sans-serif; font-size: 14px; letter-spacing: .08em; padding: 12px 18px }
     .dino-mute {
-      width: 42px; flex: none; display: inline-flex; align-items: center; justify-content: center;
+      width: 44px; flex: none; display: inline-flex; align-items: center; justify-content: center;
       font-size: 18px; line-height: 1; cursor: pointer; padding: 0;
-      background: #10231a; color: var(--chalk); border: 1px solid var(--accent); border-radius: var(--radius);
+      background: var(--card-2); color: var(--chalk); border: 1px solid var(--accent); border-radius: var(--radius-sm);
       box-shadow: 0 6px 24px rgba(0, 0, 0, .45); transition: transform .1s, filter .15s;
     }
     .dino-mute:hover { filter: brightness(1.3); transform: translateY(-1px) }
     .dino-mute:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
     .dino-mute.is-muted { background: var(--accent); color: #1a1200 }
+    .dino-panel { border-radius: var(--radius); border-color: var(--line-2); background: #070b0f }
 
-    /* a clause the parser could not read is shown, not swallowed */
-    .cond.ignored { color: var(--danger); border-color: var(--danger) }
-
-    /* per-player totals for a "most X" question */
-    .results { max-height: calc(100vh - 24px); overflow: auto; width: min(100%, var(--table-w, 100%)) }
-    .scroll-top { margin-top: 18px; overflow-x: auto; overflow-y: hidden; height: 14px; width: min(100%, var(--table-w, 100%)) }
-    .scroll-top > div { height: 1px }
-    .scroll-top + .results { margin-top: 0; border-top-left-radius: 0; border-top-right-radius: 0 }
-    @media (min-width: 1240px) {
-      /* the table may use the whole monitor even though the copy above it stays at 1180px */
-      .scroll-top, .results { margin-left: calc(50% - 50vw + 24px); width: min(calc(100vw - 48px), var(--table-w, 100vw)) }
-    }
-    .totals { margin-top: 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px }
-    .totals h3 { margin: 0 0 8px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--accent); font-weight: 600 }
-    .tot-row { display: flex; align-items: baseline; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); font-size: 13px }
-    .tot-row:last-child { border-bottom: 0 }
-    .tot-rank { width: 18px; color: var(--chalk-dim); font-size: 11px; text-align: right }
-    .tot-name { flex: 1; font-weight: 600 }
-    .tot-team, .tot-sub { color: var(--chalk-dim); font-size: 11px }
-    .tot-val { font-family: 'IBM Plex Mono', monospace; color: var(--accent); min-width: 56px; text-align: right }
+    /* ---- motion */
+    @keyframes rise { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+    .read.show, .totals, .results, #chart-container { animation: rise .28s ease-out }
+    @media (prefers-reduced-motion: reduce) { .read.show, .totals, .results, #chart-container { animation: none } }
 """
 
 def main():

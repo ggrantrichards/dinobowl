@@ -48,7 +48,24 @@
     const disp = (col) => DISPLAY[col] || col;
     const g = (v) => Number(v).toLocaleString("en-US", { maximumFractionDigits: 6, useGrouping: false });   // python %g-ish
 
+    // the same word is a different column depending on who is asked about
+    // (mirrors query_engine.POS_SWAP)
+    const DEF_CODES = new Set(["CB", "DB", "S", "FS", "SAF", "DE", "OLB", "DT", "NT", "DL", "LB", "ILB", "MLB"]);
+    const POS_SWAP = {
+      interceptions: { DEF: "def_interceptions" },
+      sacks: { QB: "sacks_taken" },
+      fumbles: { DEF: "forced_fumbles" },
+      total_tds: { QB: "passing_tds", RB: "rushing_tds", FB: "rushing_tds", WR: "receiving_tds", TE: "receiving_tds", DEF: "def_tds" },
+      total_yards: { QB: "passing_yards", RB: "rushing_yards", FB: "rushing_yards", WR: "receiving_yards", TE: "receiving_yards" },
+    };
+    let posGroup = null;   // set by parse() for the one question being read
+    const posGroupOf = (codes) => !codes ? null : (codes.some((c) => DEF_CODES.has(c)) ? "DEF" : codes[0]);
     function findStat(text, start) {
+      const r = findStatRaw(text, start);
+      if (r && posGroup && POS_SWAP[r[0]] && POS_SWAP[r[0]][posGroup]) return [POS_SWAP[r[0]][posGroup], r[1], r[2]];
+      return r;
+    }
+    function findStatRaw(text, start) {
       start = start || 0;
       const search = text.slice(start).trim();
       if (!search) return null;
@@ -154,6 +171,7 @@
     }
 
     function parse(query) {
+      posGroup = null;
       let q = " " + String(query).toLowerCase().trim() + " ";
       // 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
       q = q.replace(/(\d)['’-](\d{1,2})(?:"|''|”| in\b|\b)/g, (m, f, i) => String(parseInt(f, 10) * 12 + parseInt(i, 10)));
@@ -172,6 +190,7 @@
           break;
         }
       }
+      posGroup = posGroupOf(posCodes);
       q = rewriteLengths(q, posCodes, ignored);
       let m = q.match(/between (\d{4}) and (\d{4})/);
       if (m) {
@@ -246,7 +265,7 @@
       // "who has the most X" / "fewest X" asks for an ORDER, not a filter.
       // Skipped when the sentence already says top N, the explicit form.
       if (!/(top|bottom)\s+\d+/.test(q)) {
-        const mm = q.match(/\b(most|fewest|least|lowest|highest|best|leader in|leaders in)\b\s*/);
+        const mm = q.match(/(?<!at )\b(most|fewest|least|lowest|highest|best|leader in|leaders in)\b\s*/);
         if (mm) {
           const after = mm.index + mm[0].length;
           const st = findStat(q.slice(after, after + 45), 0);

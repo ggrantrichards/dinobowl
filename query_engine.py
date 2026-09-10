@@ -90,7 +90,7 @@
 #     "passing_yards": "passing yards", "passing_tds": "passing TDs",
 #     "interceptions": "interceptions", "int_rate": "interception rate",
 #     "pass_attempts": "pass attempts", "completions": "completions",
-#     "completion_pct": "completion %", "total_tds": "total TDs",
+#     "completion_pct": "completion %", "total_tds": "TDs scored",
 #     "rushing_yards": "rushing yards", "rushing_tds": "rushing TDs",
 #     "carries": "carries", "receiving_yards": "receiving yards",
 #     "receiving_tds": "receiving TDs", "receptions": "receptions",
@@ -503,6 +503,8 @@ STAT_ALIASES = [
     ("pass breakups", "passes_defended"), ("pbus", "passes_defended"),
     ("forced fumbles", "forced_fumbles"), ("fumbles forced", "forced_fumbles"),
     ("defensive touchdowns", "def_tds"), ("defensive tds", "def_tds"),
+    # ---- generic words, resolved by position in _find_stat (POS_SWAP)
+    ("touchdowns", "total_tds"), ("tds", "total_tds"), ("yards", "total_yards"),
 ]
 
 # word/phrase -> (list of raw position codes in the data, friendly label)
@@ -686,7 +688,31 @@ def result_columns(res, conds):
 class QueryError(Exception):
     pass
 
+# The same word is a different column depending on who is asked about: a
+# cornerback's "interceptions" are the ones he MADE, a quarterback's "sacks"
+# are the ones he TOOK, a receiver's "touchdowns" are receiving TDs.
+_DEF_CODES = {"CB", "DB", "S", "FS", "SAF", "DE", "OLB", "DT", "NT", "DL", "LB", "ILB", "MLB"}
+POS_SWAP = {
+    "interceptions": {"DEF": "def_interceptions"},
+    "sacks": {"QB": "sacks_taken"},
+    "fumbles": {"DEF": "forced_fumbles"},
+    "total_tds": {"QB": "passing_tds", "RB": "rushing_tds", "FB": "rushing_tds", "WR": "receiving_tds", "TE": "receiving_tds", "DEF": "def_tds"},
+    "total_yards": {"QB": "passing_yards", "RB": "rushing_yards", "FB": "rushing_yards", "WR": "receiving_yards", "TE": "receiving_yards"},
+}
+_POS_GROUP = None   # set by parse() for the one question being read
+
+def _pos_group(codes):
+    if not codes:
+        return None
+    return "DEF" if any(c in _DEF_CODES for c in codes) else codes[0]
+
 def _find_stat(text, start=0):
+    r = _find_stat_raw(text, start)
+    if r and _POS_GROUP and _POS_GROUP in POS_SWAP.get(r[0], {}):
+        return (POS_SWAP[r[0]][_POS_GROUP], r[1], r[2])
+    return r
+
+def _find_stat_raw(text, start=0):
     search_text = text[start:].strip()
     if not search_text: return None
 
@@ -806,6 +832,8 @@ def _pct_value(col, num, marked):
     return num
 
 def parse(query):
+    global _POS_GROUP
+    _POS_GROUP = None
     q = " " + query.lower().strip() + " "
     # 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
     q = re.sub(r"(\d)['\u2019-](\d{1,2})(?:\"|''|\u201d| in\b|\b)", lambda m: str(int(m.group(1)) * 12 + int(m.group(2))), q)
@@ -823,6 +851,7 @@ def parse(query):
             conds.append({"kind": "position", "value": pos["codes"]})
             notes.append(f"position is {pos['label']}")
             break
+    _POS_GROUP = _pos_group(pos_codes)
     q = _rewrite_lengths(q, pos_codes, ignored)
 
     m = re.search(r"between (\d{4}) and (\d{4})", q)
@@ -907,7 +936,7 @@ def parse(query):
     # "who has the most X" / "fewest X" asks for an ORDER, not a filter. Skipped
     # when the sentence already says top N, which is the explicit form.
     if not re.search(r"(top|bottom)\s+\d+", q):
-        mm = re.search(r"\b(most|fewest|least|lowest|highest|best|leader in|leaders in)\b\s*", q)
+        mm = re.search(r"(?<!at )\b(most|fewest|least|lowest|highest|best|leader in|leaders in)\b\s*", q)
         if mm:
             st = _find_stat(q[mm.end():mm.end() + 45], 0)
             if st:

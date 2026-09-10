@@ -66,6 +66,15 @@ QUERIES = [
     "QBs who won the super bowl",
     "which QB has the most rings since 2000",
     "QBs with 3+ playoff wins",
+    "CBs with 3+ interceptions plus with a completion percentage allowed under 80% since 2020",
+    "safeties with the most interceptions since 2015",
+    "QBs with fewer than 20 sacks and 4000 yards in 2023",
+    "edge rushers with 50+ sacks",
+    "linebackers with 3+ fumbles in 2022",
+    "QBs with 30+ touchdowns in 2024",
+    "WRs with the most touchdowns since 2020",
+    "RBs with 1500 yards in 2023",
+    "players with the most touchdowns in 2024",
 ]
 
 NODE_RUNNER = r"""

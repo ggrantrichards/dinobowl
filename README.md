@@ -112,7 +112,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g5   # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g6   # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -135,6 +135,13 @@ tackles for loss, the QB's sacks taken).
   "5 rings", so that asks for ring seasons and the totals panel adds them up per player.
 - The results table owns its scrollbars (one above, one below, both always on screen) and
   may use the whole monitor width; the page itself never scrolls sideways.
+- **Words mean what the position means:** a cornerback's "interceptions" are the ones he made
+  (`def_interceptions`), a quarterback's "sacks" are the ones he took, "touchdowns" are passing /
+  rushing / receiving TDs by position and TDs *scored* with no position (`query_engine.POS_SWAP`).
+  "at least 4.5" is no longer read as a "least X" ordering. Id-less team-total lines are dropped.
+- Click any column header to sort high-to-low, click again to flip; blanks sink to the bottom.
+- 2.3 look: broadcast-night palette (slate + gold + turf green), real card surfaces, coloured
+  read-back pills, a totals leaderboard with bars, six examples up front and the rest behind a toggle.
 
 ## Dino Bowl
 

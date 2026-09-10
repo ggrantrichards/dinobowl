@@ -243,7 +243,7 @@ DERIVED = {
     "rec_ypg": "receiving_yards / games",
     "total_yards": "passing_yards + rushing_yards + receiving_yards",
     "total_ypg": "total_yards / games",
-    "total_tds": "passing_tds + rushing_tds + receiving_tds",
+    "total_tds": "rushing_tds + receiving_tds + special_teams_tds — touchdowns the player SCORED (a QB's TD passes are passing_tds)",
     "touches": "pass_attempts + carries + receptions + sacks_taken",
     "turnovers": "interceptions + fumbles_lost",
     "turnover_pct": "turnovers / touches",
@@ -361,7 +361,7 @@ def load_season(year, rebuild=False):
     if yd_parts:
         df["total_yards"] = df[yd_parts].fillna(0).sum(axis=1).astype(int)
         df["total_ypg"] = (df["total_yards"] / g.where(g > 0)).where(df["total_yards"] != 0).round(1)
-    td_parts = [c for c in ("passing_tds", "rushing_tds", "receiving_tds") if c in df]
+    td_parts = [c for c in ("rushing_tds", "receiving_tds", "special_teams_tds") if c in df]
     if td_parts:
         df["total_tds"] = df[td_parts].fillna(0).sum(axis=1).astype(int)
     sk = df["sacks_taken"].fillna(0) if "sacks_taken" in df else 0
@@ -633,6 +633,7 @@ def main():
         print("No data pulled. Check your network connection.")
         sys.exit(1)
     df = pd.concat(frames, ignore_index=True)
+    df = df[df["player_id"].notna()].copy()   # nflverse ships one id-less team-total line per season
     # defensive TD split: nflverse gives fumble-return TDs on their own; the
     # rest of a player's defensive TDs are interception returns
     if "def_tds" in df and "fumble_rec_tds" in df:
