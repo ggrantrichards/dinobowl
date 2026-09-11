@@ -167,6 +167,43 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
+### Dino Bowl 2.5 (2026-09-11) — THE KING, a real catch meter, a bigger playbook
+
+- **Catch meter, second pass.** The bar shows only for players who can play the ball: the
+  intended receiver, or a CB / S, within ~6 yards of the landing spot. No more bar under an
+  edge rusher. The CPU now times its own leap through the same door (`timedJump`): each
+  contester picks a press time around the green window with rating-scaled error, so it gets
+  PERFECT / GOOD / EARLY the same way you do, and its bar draws dimmer under him so you can
+  see why the corner won the ball. Replaces two flat arrival dice.
+- **HB option / sweep pass.** Behind the line, a back who can still throw steers freely
+  (back, sideways, forward) instead of auto-churning; hands off, he jogs forward. Past the
+  line the normal carrier model resumes. Only on plays flagged `hbPass`.
+- **QB scrambles.** No more step from 90% pocket legs to full stride the frame he crosses
+  the line: a one-second build, and the running back's hole-burst no longer applies to QBs.
+- **Playbook.** 12 more offensive calls (SMASH, Y CROSS, LEVELS, STICK, DOUBLE POST, TE SEAM,
+  HB WHEEL, GO BALLS, SPOT, HB COUNTER, HB OPTION, HB TOSS) and 6 defensive (COVER 1 ROBBER,
+  COVER 6, DIME DROP, FIRE ZONE, BEAR FRONT, MAN PRESS), all from the route / flag vocabulary
+  the engine already runs. The sheet is **sampled** by score instead of sliced: the same
+  down-and-distance no longer hands you the same four cards, plays on the last few sheets are
+  penalised, and a sheet always mixes run and pass (short yardage included).
+- **THE KING.** One halftime in ten, instead of a mascot game, a giant T-rex looms top-left
+  and roars. Mouse aims, click / space throws footballs (head = double damage), A / D slides
+  you out of the red chomp lane. Three hearts, thirty seconds, 14 HP. Scare him off and the
+  rampage meter is fed.
+- **Rampage.** The meter glows gold and pulses when full, and the ★ apex dino's eyes glow red
+  until he goes.
+- **First visit.** After the cold open, the first ENTER opens the how-to-play pages once
+  (ENTER = next, ESC = skip; it stays under TUTORIAL). Two new pages: THE CATCH METER and
+  GAMEDAY. Only a flag is written; seasons, careers and records are untouched.
+
+Also fixed: the Gridiron `data.json` 404 — the 2.4 deploy ran from the repo root, where the
+gitignored 24 MB table does not exist. Hosting deploys run from the worktree that has it.
+
+Token `dinobowl-2-5-20260911`; title reads V2.5. 12 Node suites green; new 32-check scenario
+(tutorial gate, 14+ distinct plays over 40 snaps, every sheet mixed, passes on 3rd & 2, no bar
+for an edge, bar for a CB, CPU leap stamps `jumpAt` and grades by the same rule, QB ramp, option
+back steers backward, THE KING headshot 2 / body 1 / chomp costs a heart / dodge / win).
+
 ### Dino Bowl 2.4 (2026-09-11) — GAMEDAY: weather with a clock, a catch meter
 
 Presentation only; no weather modifier, speed, catch or kick number moves during a game.

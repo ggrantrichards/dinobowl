@@ -59,6 +59,8 @@ global.localStorage = {
   setItem: (k, v) => store.set(k, String(v)),
   removeItem: (k) => store.delete(k),
 };
+// the harness is a returning player: the first-visit tutorial gate is tested on its own
+store.set("dinobowl_tut_seen", "1");
 let rafCb = null;
 global.requestAnimationFrame = (cb) => { rafCb = cb; };
 global.alert = () => { };

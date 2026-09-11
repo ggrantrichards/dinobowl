@@ -52,6 +52,30 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## DINO BOWL 2.5 — 2026-09-11 (shipped): THE KING, the CPU's own catch meter, a sampled playbook
+
+Owner list after 2.4, in his order of priority. Gridiron first: `data.json` was 404 because
+the 2.4 deploy ran from the repo root, which has no copy of the gitignored table. Redeployed
+from the worktree; rule recorded in memory.
+
+| Ask | Change | Where |
+|---|---|---|
+| Bar showed for edge rushers | `canPlayBall(e, b)`: receiver = `routeEligible`, defender = CB / S, both within 170 px of `b.to` | `meterState` |
+| AI should time its own green | `b.aiPlanned` at 0.8 s out: nearest uncontrolled eligible + nearest defender get `aiJumpAt = 0.185 + N(0,σ)`, σ 0.24 (rec, − hands) / 0.45 (def, − jump); pressed through `timedJump(e, true)` at ≤52 px. Replaces `Math.random() < 0.44 / 0.2` PERFECT rolls | ball flight update |
+| Show the AI's bar | `aiContester(b)` (target or nearest CB/S ≤60 px) drawn at 65% alpha with its verdict | `drawJumpMeter` |
+| Option back moves only forward | free steer at 0.9× behind `losYd + 4` when `canPass && curPlay.hbPass`; hands-off = 0.6× forward churn; D/→ is steering there, not the dive | carrier branch, onKey |
+| QB speed jumps at the LOS | `qbRampT` starts at `becomeCarrier`; `qbRamp = 0.9 + 0.1·clamp(t)`; hole `burst` skips QBs | speedMod |
+| Same 6–7 calls every snap | `pickVaried`: softmax (×1.25) sampling without replacement, −1.2 for names on the last 8 sheets, sorted so slot 0 is still the best for fast flow; `ensureMix` after the signature / MY PLAY swaps; +12 OFF / +6 DEF plays | `relevantOffense/Defense`, `askOffense` |
+| T-rex halftime boss (~10%) | kind `trex`: `KING` box 400×330 top-left, `kingHead()` = right 46% × top 42%; balls 0.42 s arc, head 2 / body 1 of 14 HP; chomp telegraph 0.85 s at your x then 0.3 s bite (lane 120 → 150 px after 6 hits); 3 hearts, 30 s; win = +70 meter, else 10 + 3·hits | `startHalftimeShow`, `updateHalfTrex`, `drawHalfTrex`, `trexThrow`, `HALF_TITLES.trex` |
+| Rampage meter obvious, eyes glow | gold pulse plate + 2 px outline when full; apex eyes: 2×2 red at head with a 6×6 glow, live + presnap, not while ramping | `drawRampMeter`, `drawPlayers` |
+| Skippable intro after the animation, progress kept | `leaveTitle()`: no `dinobowl_tut_seen` → `tutorial` with `tutFirst`; ENTER on the last page / ESC → `leaveTutorial()` sets the flag; menu TUTORIAL entry unchanged; two new pages | title key/click, tutorial key/click |
+
+Harness note: `tests/harness.js` and `tests/test_online.js` now seed `dinobowl_tut_seen`
+so every existing flow is a returning player; the gate is tested explicitly. Caught before
+shipping: the first free-steer draft fired for any `canPass` carrier and crawled at 30% with
+no input — the glitchless suite's run-game median went to −0.98 yd. Gated to `hbPass` plays
+with a 0.6× hands-off churn; median back in band.
+
 ## DINO BOWL 2.4 — 2026-09-11 (shipped): GAMEDAY — the weather has a clock
 
 Owner: "ideas from Madden 27 like dynamic snow that improve the game without adding bugs",

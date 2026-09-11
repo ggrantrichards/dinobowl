@@ -26,7 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
-  const BUILD = "2.4";   // shown on the title; the shells carry the cache-bust token
+  const BUILD = "2.5";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -85,11 +85,23 @@
     { name: "SWEEP PASS", type: "run", tags: ["trick", "medium"], lane: -1, hbPass: true, sweepPass: true },
     { name: "HB DRAW", type: "run", tags: ["run", "draw"], lane: 0, draw: true },
     { name: "QB SNEAK", type: "run", tags: ["run", "short", "goalline"], lane: 0, qbKeep: true },
+    { name: "SMASH", type: "pass", tags: ["medium"], primary: "WR3", routes: { WR1: R.curl, WR3: R.corner(1), TE: R.flat(-1), WR2: R.curl, RB: R.block } },
+    { name: "Y CROSS", type: "pass", tags: ["medium", "deep"], primary: "TE", routes: { WR1: R.go, WR3: R.post(1), TE: R.drag(1), WR2: R.dig(-1), RB: R.flat(1) } },
+    { name: "LEVELS", type: "pass", tags: ["medium"], primary: "WR1", routes: { WR1: R.dig(1), WR3: R.drag(1), TE: R.seam, WR2: R.slantIn(-1), RB: R.block } },
+    { name: "STICK", type: "pass", tags: ["quick"], primary: "TE", routes: { WR1: R.go, WR3: R.out(1), TE: R.curl, WR2: R.out(-1), RB: R.flat(-1) } },
+    { name: "DOUBLE POST", type: "pass", tags: ["deep"], primary: "WR2", routes: { WR1: R.post(1), WR3: R.seam, TE: R.flat(1), WR2: R.post(-1), RB: R.screen } },
+    { name: "TE SEAM", type: "pass", tags: ["medium"], primary: "TE", routes: { WR1: R.comeback, WR3: R.flat(1), TE: R.seam, WR2: R.curl, RB: R.block } },
+    { name: "HB WHEEL", type: "pass", tags: ["medium", "deep"], primary: "RB", routes: { WR1: R.go, WR3: R.slantIn(1), TE: R.drag(-1), WR2: R.go, RB: R.wheel(1) } },
+    { name: "GO BALLS", type: "pass", tags: ["deep"], primary: "WR2", routes: { WR1: R.go, WR3: R.drag(1), TE: R.block, WR2: R.go, RB: R.block } },
+    { name: "SPOT", type: "pass", tags: ["quick", "medium"], primary: "WR1", routes: { WR1: R.curl, WR3: R.flat(1), TE: R.corner(-1), WR2: R.slantIn(-1), RB: R.block } },
+    { name: "HB COUNTER", type: "run", tags: ["run", "draw"], lane: 1, draw: true },
+    { name: "HB OPTION ▼", type: "run", tags: ["trick", "medium"], lane: 1, hbPass: true, sweepPass: true },
+    { name: "HB TOSS ▲", type: "run", tags: ["run", "medium"], lane: -1 },
   ];
   const PASS_PLAYS = OFF_PLAYS.filter((p) => p.type === "pass");
   const RUN_PLAYS = OFF_PLAYS.filter((p) => p.type === "run");
   const ALL_PLAYS = OFF_PLAYS;
-  // 10 defensive calls; deep = safeties bail, run = crashes the box, spy = contain the QB
+  // 17 defensive calls; deep = safeties bail, run = crashes the box, spy = contain the QB
   const DEF_PLAYS = [
     { name: "MAN 2 HIGH", rush: 4, man: true, tags: ["balanced"] },
     { name: "COVER 2 ZONE", rush: 4, man: false, tags: ["balanced"] },
@@ -102,37 +114,72 @@
     { name: "QB SPY", rush: 3, man: true, spy: true, tags: ["spy", "medium"] },
     { name: "TAMPA 2", rush: 4, man: false, tampa: true, tags: ["balanced", "deep"] },
     { name: "PREVENT", rush: 3, man: false, deep: true, prevent: true, tags: ["deep", "long", "prevent"] },
+    { name: "COVER 1 ROBBER", rush: 4, man: true, deep: true, tags: ["balanced", "medium"] },
+    { name: "COVER 6", rush: 4, man: false, deep: true, tags: ["balanced", "long"] },
+    { name: "DIME DROP", rush: 3, man: false, deep: true, tags: ["deep", "long"] },
+    { name: "FIRE ZONE", rush: 5, man: false, tags: ["blitz", "medium"] },
+    { name: "BEAR FRONT", rush: 6, man: false, run: true, tags: ["run", "short"] },
+    { name: "MAN PRESS", rush: 4, man: true, tags: ["short", "balanced"] },
   ];
 
-  // score plays for the current situation and return the N most relevant
+  // Weighted sampling, not a hard top-N: the same down-and-distance used to
+  // hand you the same four cards every snap. Scores still steer (short
+  // yardage still leans run) but every play in the book can show, plays on
+  // the last few sheets are penalised, and a sheet always mixes run and pass.
+  function pickVaried(scored, n, recentKey) {
+    const recent = G[recentKey] || (G[recentKey] = []);
+    const pool = scored.map((x) => ({ p: x.p, s: x.s - (recent.includes(x.p.name) ? 1.2 : 0) }));
+    const out = [];
+    while (out.length < n && pool.length) {
+      const ws = pool.map((x) => Math.exp(x.s * 1.25));
+      let r = Math.random() * ws.reduce((a, b) => a + b, 0), i = 0;
+      while (i < ws.length - 1 && (r -= ws[i]) > 0) i++;
+      out.push(pool.splice(i, 1)[0]);
+    }
+    out.sort((a, b) => b.s - a.s);
+    for (const x of out) recent.push(x.p.name);
+    while (recent.length > 8) recent.shift();
+    return out;
+  }
   function relevantOffense(n) {
     const toGain = G.toGain, goal = G.losYd + G.toGain >= 100, deep = 100 - G.losYd;
     const late = G.quarter >= 4 && (G.score.A - G.score.B) < 0; // trailing late → pass
-    return OFF_PLAYS.map((p) => {
-      let s = Math.random() * 0.3;
+    const scored = OFF_PLAYS.map((p) => {
+      let s = Math.random() * 0.6;
       if (goal || G.losYd >= 96) { if (p.tags.includes("goalline")) s += 3; if (p.tags.includes("run")) s += 1.2; if (p.tags.includes("quick")) s += 0.8; }
-      if (toGain <= 3) { if (p.tags.includes("run") || p.tags.includes("short")) s += 2; if (p.tags.includes("quick")) s += 1; }
+      if (toGain <= 3) { if (p.tags.includes("run") || p.tags.includes("short")) s += 1.6; if (p.tags.includes("quick")) s += 1; }
       else if (toGain >= 8) { if (p.tags.includes("deep")) s += 2; if (p.tags.includes("medium")) s += 1.2; if (p.tags.includes("run")) s -= 0.4; }
       else { if (p.tags.includes("medium")) s += 1.6; if (p.tags.includes("run")) s += 0.8; }
       if (deep > 60) { if (p.tags.includes("deep")) s += 0.6; }  // backed up: take shots less
       if (late) { if (p.type === "pass") s += 1; }
       return { p, s };
-    }).sort((a, b) => b.s - a.s).slice(0, n).map((x) => x.p);
+    });
+    return pickVaried(scored, n, "recentOff").map((x) => x.p);
+  }
+  // never four of a kind: after the signature / MY PLAY swaps, a one-type
+  // sheet gets the situation's best card of the other type in slot 2
+  function ensureMix(sheet) {
+    if (sheet.length < 3 || new Set(sheet.map((p) => p.type)).size > 1) return;
+    const want = sheet[0].type === "pass" ? "run" : "pass";
+    const alt = OFF_PLAYS.filter((p) => p.type === want && !sheet.includes(p))
+      .sort((a, b) => (b.tags.includes(G.toGain <= 3 ? "short" : G.toGain >= 8 ? "deep" : "medium") ? 1 : 0) - (a.tags.includes(G.toGain <= 3 ? "short" : G.toGain >= 8 ? "deep" : "medium") ? 1 : 0))[0];
+    if (alt) sheet[1] = alt;
   }
   function relevantDefense(n) {
     const toGain = G.toGain, goal = G.losYd + G.toGain >= 100 || G.losYd >= 96;
     const late = G.quarter >= 4 && (G.score.B - G.score.A) < 0; // CPU/opp trailing? prevent when protecting a lead
     const protect = G.quarter >= 4 && (G.score.A - G.score.B) > 0 && G.clock < 40;
-    return DEF_PLAYS.map((d) => {
-      let s = Math.random() * 0.3;
+    const scored = DEF_PLAYS.map((d) => {
+      let s = Math.random() * 0.6;
       if (goal) { if (d.tags.includes("goalline") || d.tags.includes("run")) s += 3; }
       if (toGain <= 3) { if (d.tags.includes("short") || d.tags.includes("run") || d.tags.includes("blitz")) s += 1.8; }
       else if (toGain >= 8) { if (d.tags.includes("long") || d.tags.includes("deep")) s += 2; if (d.tags.includes("blitz")) s += 0.6; }
       else { if (d.tags.includes("balanced") || d.tags.includes("medium")) s += 1.6; }
       if (protect && d.tags.includes("prevent")) s += 2.5;
       if (!protect && d.tags.includes("prevent")) s -= 1;
-      return { d, s };
-    }).sort((a, b) => b.s - a.s).slice(0, n).map((x) => x.d);
+      return { p: d, s };
+    });
+    return pickVaried(scored, n, "recentDef").map((x) => x.p);
   }
 
   // ---- signature plays: one famous call per franchise -----------------------
@@ -649,6 +696,13 @@
   // (loadCpuMemory/loadDyn already did this correctly — this generalizes it.)
   function lsGet(key) { try { return localStorage.getItem(key); } catch (_) { return null; } }
   function lsSet(key, val) { try { localStorage.setItem(key, String(val)); return true; } catch (_) { return false; } }
+  // first visit: the how-to-play pages come right after the cold open, once.
+  // Only a flag is written; seasons, careers and records are not touched.
+  function leaveTitle() {
+    if (!lsGet("dinobowl_tut_seen")) { G.tut = 0; G.tutFirst = true; G.state = "tutorial"; return; }
+    G.state = "menu"; G.menuIdx = 0;
+  }
+  function leaveTutorial() { lsSet("dinobowl_tut_seen", 1); G.tutFirst = false; G.state = "menu"; G.menuIdx = 0; }
   function lsDel(key) { try { localStorage.removeItem(key); } catch (_) { } }
   // parse + SHAPE-VALIDATE: a save that parses but is the wrong shape (an older
   // schema, a hand-edited value) is just as fatal downstream as a syntax error,
@@ -2578,6 +2632,7 @@
       if (Math.random() < 0.35) sheet[3] = signaturePlay(teamAbbrOf(G.drive));
       const mine = customPlay();
       if (mine && Math.random() < 0.3) sheet[2] = mine;
+      ensureMix(sheet);
       G.callsheet = sheet;
       G.callFor = G.drive;
       if (G.coachMode) { G.state = "playcall"; return; }
@@ -2738,6 +2793,9 @@
     return choice;
   }
   function cpuChooseDef() {
+    // a conversion try is a goal-line call, full stop (the sampled pool could hand a
+    // two-point play a nickel blitz)
+    if (G.patMode) return DEF_PLAYS.find((d) => d.tags.includes("goalline"));
     const pool = relevantDefense(4);
     // Long-term scouting survives game-to-game. The coordinator remembers
     // player play style by situation, then chooses a counter more often as
@@ -3816,7 +3874,7 @@
     // latch resets where the play resets.
     clearCelebration();
     G.zeroBannerPlay = null;
-    for (const e of G.players) { e.punchedThisPlay = false; e.punchRolled = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; e.stiffConsidered = null; e.jukePlantT = 0; e.stiffPlantT = 0; }
+    for (const e of G.players) { e.punchedThisPlay = false; e.punchRolled = false; e.pressDone = false; e.fdCeleb = 0; e.hasThrown = false; e.canPass = false; e.pancakeDone = false; e.jukeConsidered = null; e.stiffConsidered = null; e.jukePlantT = 0; e.stiffPlantT = 0; e.qbRampT = null; }
     // The takedown ledger, the escape ledger and the per-play contact clock are
     // latches, so they reset where the play resets — LESSON #20, which is exactly
     // what the loop above already exists to honour.
@@ -3856,6 +3914,7 @@
 
   function becomeCarrier(e) {
     e.carryT = 0;   // fresh legs through the hole (short burst)
+    if (e.role === "QB") e.qbRampT = 0;
     G.carrier = e; G.ball.holder = e; G.ball.mode = "held";
     G.phase = "carry"; e.state = "carry";
     // teammates stop running routes and block for the man with the ball
@@ -4086,7 +4145,7 @@
 
   // hand the sticks to the receiver the throw is meant for — move him under
   // the ball and TIME THE JUMP (space/click as it arrives)
-  const resetJumpFlags = () => G.players.forEach((p2) => { p2.jumpTimed = false; p2.jumpMistimed = false; p2.autoJumped = false; p2.jumpAt = null; });
+  const resetJumpFlags = () => G.players.forEach((p2) => { p2.jumpTimed = false; p2.jumpMistimed = false; p2.autoJumped = false; p2.jumpAt = null; p2.aiJumpAt = null; });
   function controlIntendedReceiver(to, intended) {
     if (!offenseIsUser() || G.ball.away) return;
     const rec = intended || pickPassTarget(to);
@@ -4095,15 +4154,15 @@
       setControlled(rec);
     }
   }
-  function timedJump(e) {
+  function timedJump(e, quiet) {
     if (e.jumpT > 0) return;
-    if (G.ball.mode !== "air") { e.jumpT = 0.45; sfx.juke(); return; }   // plain hop
+    if (G.ball.mode !== "air") { e.jumpT = 0.45; if (!quiet) sfx.juke(); return; }   // plain hop
     e.jumpT = 0.4;
     const untilLanding = G.ball.T - G.ball.t;
     e.jumpAt = untilLanding;   // the meter freezes here
     if (untilLanding <= 0.35 && untilLanding >= 0.02) e.jumpTimed = true;   // perfect
     else if (untilLanding > 0.6) e.jumpMistimed = true;                     // way early
-    sfx.juke();
+    if (!quiet) sfx.juke();
   }
 
   // ------------------------------------------------------------ lateral pitch
@@ -5035,7 +5094,8 @@
   function startHalftimeShow(cont) {
     const last = lsGet("dinobowl_lasthalf");
     const pool = HALF_GAMES.filter((k) => k !== last);
-    const kind = pool[(Math.random() * pool.length) | 0];
+    // once in ten halftimes THE KING shows up instead of a mascot game
+    const kind = (Math.random() < 0.10 && last !== "trex") ? "trex" : pool[(Math.random() * pool.length) | 0];
     lsSet("dinobowl_lasthalf", kind);
     const camX = clamp(xAtYd(50) - W / 2, 0, FIELD_LEN - W);
     G.half = {
@@ -5051,6 +5111,8 @@
       Object.assign(h, { t: 18, px: 240, py: MID, runV: 150, jumpZ: 0, jumpV: 0, hurdles, stumbles: 0, camX: 0 });
     } else if (kind === "snack") {
       Object.assign(h, { spawnT: 0.3, combo: 0 });
+    } else if (kind === "trex") {
+      Object.assign(h, { t: 30, hp: 14, hpMax: 14, hearts: 3, px: W / 2, aimX: W / 2, aimY: 140, balls: [], sparks: [], atk: null, atkT: 2.6, roar: 1.4, flash: 0, heads: 0, thrown: 0, won: false });
     }
     G.state = "halftime";
   }
@@ -5074,13 +5136,116 @@
       }
     } else if (h.kind === "dash" && h.jumpZ <= 0) {
       h.jumpV = 235; h.jumpZ = 0.01; sfx.juke();
+    } else if (h.kind === "trex") {
+      trexThrow(h);
     }
+  }
+  // ---------------------------------------------------- halftime: THE KING
+  // A giant T-rex looms top-left and roars. You are one small dino with a bag
+  // of footballs: mouse aims, click/space throws (headshots count double),
+  // A/D slides you out of the chomp lane he telegraphs in red. Three hearts,
+  // thirty seconds. Scare him off and the rampage meter is FED.
+  const KING = { x: 30, y: 30, w: 400, h: 330 };
+  const kingHead = () => ({ x: KING.x + KING.w * 0.52, y: KING.y + 10, w: KING.w * 0.46, h: KING.h * 0.42 });
+  function trexThrow(h) {
+    if (h.stun > 0 || h.roar > 0) return;
+    h.balls.push({ x: h.px, y: H - 78, fx: h.px, fy: H - 78, tx: h.aimX, ty: h.aimY, t: 0, T: 0.42 });
+    h.thrown++; sfx.juke();
+  }
+  function updateHalfTrex(dt) {
+    const h = G.half;
+    if (h.roar > 0) { h.roar -= dt; G.shake = Math.max(G.shake || 0, 0.3); }
+    if (h.stun > 0) h.stun -= dt;
+    if (h.flash > 0) h.flash -= dt;
+    const kd = kdir();
+    if (h.stun <= 0) h.px = clamp(h.px + kd.x * 300 * dt, 50, W - 50);
+    if (mouse.x || mouse.y) { h.aimX = clamp(mouse.x, 0, W); h.aimY = clamp(mouse.y, 0, H - 100); }
+    const head = kingHead();
+    for (const b of h.balls) {
+      b.t += dt; const q = Math.min(1, b.t / b.T);
+      b.x = b.fx + (b.tx - b.fx) * q; b.y = b.fy + (b.ty - b.fy) * q - Math.sin(q * Math.PI) * 60;
+      if (q >= 1 && !b.done) {
+        b.done = true;
+        const inHead = b.tx > head.x && b.tx < head.x + head.w && b.ty > head.y && b.ty < head.y + head.h;
+        const inBody = b.tx > KING.x && b.tx < KING.x + KING.w && b.ty > KING.y && b.ty < KING.y + KING.h;
+        if (inHead || inBody) {
+          h.hp -= inHead ? 2 : 1; h.hits++; if (inHead) h.heads++;
+          h.flash = 0.18; G.shake = Math.max(G.shake || 0, inHead ? 0.22 : 0.1); sfx.tackle();
+          for (let i = 0; i < 7; i++) h.sparks.push({ x: b.tx, y: b.ty, vx: rnd(-110, 110), vy: rnd(-120, 20), t: rnd(0.25, 0.5), c: inHead ? "#ffd23f" : "#f4f6f1" });
+        }
+      }
+    }
+    h.balls = h.balls.filter((b) => !b.done);
+    for (const sp of h.sparks) { sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vy += 260 * dt; sp.t -= dt; }
+    h.sparks = h.sparks.filter((sp) => sp.t > 0);
+    // the chomp: a telegraphed lane at your feet, then the bite
+    if (!h.atk) {
+      h.atkT -= dt;
+      if (h.atkT <= 0 && h.roar <= 0) h.atk = { x: h.px, w: h.hits >= 6 ? 150 : 120, tele: 0.85, bite: 0, hit: false };
+    } else {
+      const a = h.atk;
+      if (a.tele > 0) a.tele -= dt;
+      else {
+        a.bite += dt;
+        if (a.bite < 0.3 && !a.hit && Math.abs(h.px - a.x) < a.w / 2) {
+          a.hit = true; h.hearts--; h.stun = 0.7; G.shake = Math.max(G.shake || 0, 0.4); sfx.tackle(); crowdAww(0.8);
+        }
+        if (a.bite >= 0.5) { h.atk = null; h.atkT = rnd(1.4, 2.2) - Math.min(0.6, (30 - h.t) * 0.02); }
+      }
+    }
+    if (h.hp <= 0 && !h.won) { h.won = true; halfReward(70); sfx.td(); crowdCheer(1); endHalftime(); return; }
+    if (h.hearts <= 0 || h.t <= 0) { halfReward(10 + h.hits * 3); endHalftime(); }
+  }
+  function drawHalfTrex() {
+    const h = G.half;
+    G.camX = h.camX; drawField();
+    cx.fillStyle = "rgba(4,10,7,.55)"; cx.fillRect(0, 0, W, H);
+    const sheet = G.sheets.B || G.sheets.A, spr = sheet && sheet.rampage;
+    const breathe = Math.sin(performance.now() / 400) * 6;
+    const shakeX = h.roar > 0 ? rnd(-6, 6) : 0;
+    if (spr && spr.R && spr.R.length) {
+      const fi = ((performance.now() / (h.roar > 0 ? 80 : 220)) | 0) % spr.R.length;
+      cx.save(); cx.imageSmoothingEnabled = false;
+      if (h.flash > 0) cx.globalAlpha = 0.55;
+      cx.drawImage(spr.R[fi], KING.x + shakeX, KING.y + breathe, KING.w, KING.h);
+      cx.restore();
+    } else { cx.fillStyle = "#6d4520"; cx.fillRect(KING.x, KING.y, KING.w, KING.h); }
+    const head = kingHead(), pulse = 0.6 + 0.4 * Math.sin(performance.now() / 90);
+    cx.fillStyle = "rgba(255,40,30," + pulse + ")";
+    cx.fillRect(Math.round(head.x + head.w * 0.62 + shakeX), Math.round(head.y + head.h * 0.3 + breathe), 14, 8);
+    if (h.roar > 0) { cx.font = PF(22); cx.textAlign = "left"; cx.fillStyle = "#ff5533"; cx.fillText("ROAAAAR!", KING.x + KING.w + 20, 120); }
+    const hy = KING.y + KING.h + 14;
+    cx.fillStyle = "#0d2519"; cx.fillRect(KING.x, hy, 300, 12);
+    cx.fillStyle = "#ff4444"; cx.fillRect(KING.x, hy, 300 * clamp(h.hp / h.hpMax, 0, 1), 12);
+    cx.strokeStyle = "#f4f6f1"; cx.strokeRect(KING.x, hy, 300, 12);
+    cx.font = PF(8); cx.textAlign = "left"; cx.fillStyle = "#f4f6f1"; cx.fillText("THE KING  " + Math.max(0, h.hp) + "/" + h.hpMax, KING.x + 306, hy + 10);
+    if (h.atk) {
+      const a = h.atk;
+      cx.fillStyle = a.tele > 0 ? "rgba(255,60,40," + (0.18 + 0.22 * Math.abs(Math.sin(performance.now() / 70))) + ")" : "rgba(255,240,200,.35)";
+      cx.fillRect(a.x - a.w / 2, H - 150, a.w, 110);
+      if (a.tele <= 0) { cx.fillStyle = "#f4f6f1"; for (let i = 0; i < 6; i++) cx.fillRect(Math.round(a.x - a.w / 2 + 8 + i * (a.w / 6)), H - 150 + (i % 2) * 40, 10, 26); }
+    }
+    const me = G.sheets.A && G.sheets.A.troodon;
+    if (me && me.L && !(h.stun > 0 && ((performance.now() / 90) | 0) % 2)) {
+      const fi = ((performance.now() / 140) | 0) % me.L.length;
+      cx.save(); cx.imageSmoothingEnabled = false;
+      cx.drawImage(me.L[fi], Math.round(h.px - me.w), H - 60 - me.h * 2, me.w * 2, me.h * 2);
+      cx.restore();
+    }
+    for (const b of h.balls) drawFootballAt(b.x, b.y);
+    for (const sp of h.sparks) { cx.fillStyle = sp.c; cx.fillRect(Math.round(sp.x), Math.round(sp.y), 3, 3); }
+    cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(h.aimX - 8, h.aimY - 8, 16, 16); cx.lineWidth = 1;
+    cx.fillStyle = "#ffd23f"; cx.fillRect(h.aimX - 1, h.aimY - 1, 3, 3);
+    cx.font = PF(12); cx.textAlign = "left"; cx.fillStyle = "#ff5533";
+    cx.fillText("♥".repeat(Math.max(0, h.hearts)) + "♡".repeat(Math.max(0, 3 - h.hearts)), 20, H - 26);
+    drawHalfFrame("🦖 THE KING — " + Math.ceil(Math.max(0, h.t)) + "s", "MOUSE AIM · CLICK/SPACE THROW (HEAD = x2) · A/D DODGE THE RED CHOMP LANE");
   }
   function updateHalftime(dt) {
     const h = G.half;
     h.t -= dt;
     if (h.kind === "fg") { updateHalfFG(dt); return; }
     if (h.kind === "dash") { updateHalfDash(dt); return; }
+    if (h.kind === "trex") { updateHalfTrex(dt); return; }
     // meteor + snack share the falling-object engine
     const ramp = 1 + (22 - h.t) / 9;
     h.spawnT -= dt * ramp;
@@ -5193,6 +5358,8 @@
     fg: (h) => ["FIELD GOAL FRENZY: " + h.score + "/" + h.kicks + "!", (h.score >= 4 ? "ICE IN THE VEINS — " : "") + "every make fed the rampage meter!"],
     dash: (h) => ["DINO DASH: " + Math.max(0, Math.round(ydAtX(h.px))) + " YARDS!", h.stumbles ? h.stumbles + " faceplant" + (h.stumbles > 1 ? "s" : "") + " — hurdles are undefeated" : "CLEAN RUN! The crowd is losing it!"],
     snack: (h) => ["SNACK SCRAMBLE: " + h.score + " SNACKS!", "golden drumsticks are 3 · the rampage meter thanks you"],
+    trex: (h) => [h.won ? "THE KING FLEES! " + h.hits + " HITS" : (h.hearts <= 0 ? "SQUISHED BY THE KING" : "THE KING GOT BORED"),
+      h.won ? (h.heads ? h.heads + " headshot" + (h.heads > 1 ? "s" : "") + " · " : "") + "the whole stadium is shaking · rampage meter FED" : "he'll be back · a little meter for trying"],
   };
   function endHalftime() {
     const h = G.half; G.half = null;
@@ -6417,7 +6584,7 @@
   function onPress() {
     if (G.paused) { G.paused = false; return; }   // tap = resume
     const S = G.state;
-    if (S === "title") { G.state = "menu"; G.menuIdx = 0; return; }
+    if (S === "title") { leaveTitle(); return; }
     if (S === "online_wait") { if (!G.online || G.online.phase !== "found") cancelMatch(); return; }
     if (S === "replay") { endReplay(); return; }   // tap anywhere skips the replay
     if (S === "kickfly") { flySkip(); return; }    // tap anywhere lands the kick
@@ -6446,7 +6613,7 @@
       deadSkip();
       return;
     }
-    if (S === "tutorial") { G.tut = Math.min(TUT_PAGES.length - 1, (G.tut || 0) + 1); return; }
+    if (S === "tutorial") { if ((G.tut || 0) >= TUT_PAGES.length - 1) leaveTutorial(); else G.tut = (G.tut || 0) + 1; return; }
     if (S === "scout") { scoutClick(); return; }
     if (S === "editor") { editorClick(); return; }
     if (S === "offseason") { offseasonClick(); return; }
@@ -6755,13 +6922,14 @@
     if (G.state === "kickfly" && (k === " " || k === "enter")) { flySkip(); return; }
     const S = G.state;
     if (S === "online_wait") { if (k === "escape") cancelMatch(); return; }
-    if (S === "title" && (k === "enter" || k === " ")) { G.state = "menu"; G.menuIdx = 0; return; }
+    if (S === "title" && (k === "enter" || k === " ")) { leaveTitle(); return; }
     if (S === "menu" || S === "allmodes") { menuKey(k); return; }
     if (S === "qbs") { if (k === "escape" || k === "enter" || k === " ") { G.state = "menu"; } return; }
     if (S === "tutorial") {
+      if ((k === "enter" || k === " ") && (G.tut || 0) >= TUT_PAGES.length - 1) { leaveTutorial(); return; }
       if (k === "arrowright" || k === "d" || k === "enter" || k === " ") G.tut = Math.min(TUT_PAGES.length - 1, (G.tut || 0) + 1);
       if (k === "arrowleft" || k === "a") G.tut = Math.max(0, (G.tut || 0) - 1);
-      if (k === "escape") G.state = "menu";
+      if (k === "escape") leaveTutorial();
       return;
     }
     if (S === "scout") { scoutKey(k); return; }
@@ -6840,7 +7008,8 @@
       }
       // owner control model: forward-input on an offensive carrier IS the
       // dive — auto-run owns forward motion, so D/→ becomes the lunge
-      if ((k === "e" || k === "control" || ((k === "d" || k === "arrowright") && offenseIsUser())) &&
+      if ((k === "e" || k === "control" || ((k === "d" || k === "arrowright") && offenseIsUser() &&
+        !(G.carrier && G.carrier.canPass && G.curPlay && G.curPlay.hbPass && G.carrier.x < xAtYd(G.losYd) + 4))) &&
         G.carrier && G.controlled === G.carrier) doDive(G.carrier);
       // E is the dive button on defense too (click also dives)
       if (k === "e" && !offenseIsUser() && G.controlled) doDive(G.controlled);
@@ -7933,25 +8102,22 @@
         if (recCue && recCue.d < 60 && cueOk(recCue.e)) playPose(recCue.e, cuePose, cueDur);
         if (defCue && defCue.d < 60 && cueOk(defCue.e)) playPose(defCue.e, cuePose, cueDur);
       }
-      // as the pass arrives, the nearest receiver and nearest defender both leap
-      // (nobody leaps for a throwaway or a ball landing out of bounds)
-      if ((b.kind === "lob" || b.kind === "bullet") && !b.contested && k > 0.8 &&
-        !b.away && b.to.y > TOP + 4 && b.to.y < BOT - 4) {
-        b.contested = true;
-        const rec = eligible().map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
-        const df = G.players.filter((e) => e.team === "def")
-          .map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
-        // YOUR receiver waits for YOU: no reflex jump here for the controlled
-        // dino — his late autopilot hop happens just before the ball lands
-        if (rec && rec.d < 44 && !rec.e.controlled) {
-          rec.e.jumpT = 0.4;
-          // QA balance: 0.38 → 0.44 — AI pros time their leaps a touch better,
-          // tipping normal contested balls toward catch-or-breakup, not picks
-          if (Math.random() < 0.44 + ((rec.e.hands || 75) - 70) * 0.01) rec.e.jumpTimed = true;
+      // The CPU plays the ball the way you do: each contester picks a press
+      // time around the green window (0.185s before landing) with a rating-
+      // scaled error and presses through timedJump — same flags, same grading,
+      // same meter. Replaces two arrival dice (0.44 / 0.2 flat PERFECT rolls).
+      if ((b.kind === "lob" || b.kind === "bullet") && !b.away && b.to.y > TOP + 4 && b.to.y < BOT - 4) {
+        const until = b.T - b.t;
+        if (until <= 0.8 && !b.aiPlanned) {
+          b.aiPlanned = true;
+          const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) * 2;
+          const rec = eligible().filter((e) => !e.controlled).map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
+          const df = G.players.filter((e) => e.team === "def" && !e.controlled).map((e) => ({ e, d: dist(e, b.to) })).sort((a, c2) => a.d - c2.d)[0];
+          if (rec && rec.d < 60) rec.e.aiJumpAt = clamp(0.185 + gauss() * (0.24 - ((rec.e.hands || 75) - 70) * 0.003), 0.03, 0.78);
+          if (df && df.d < 60) df.e.aiJumpAt = clamp(0.185 + gauss() * (0.45 - ((df.e.jump || 75) - 70) * 0.004), 0.03, 0.78);
         }
-        if (df && df.d < 44 && !df.e.controlled) {
-          df.e.jumpT = 0.4;
-          if (Math.random() < 0.2 + ((df.e.jump || 75) - 70) * 0.005) df.e.jumpTimed = true;
+        for (const e of G.players) {
+          if (e.aiJumpAt != null && until <= e.aiJumpAt && e.jumpT <= 0 && e.jumpAt == null && dist(e, b.to) < 52) { timedJump(e, true); e.aiJumpAt = null; }
         }
       }
       // QA balance: BOX-OUT — remember who established position under the
@@ -8074,7 +8240,9 @@
     const yac = (e === G.carrier && e.catchT != null && e.catchX != null) ? Math.abs(e.x - e.catchX) / YPX : 0;
     const yacFade = clamp((yac - 6) * 0.006, 0, 0.18);
     const carryFade = Math.max(longCarryFade, yacFade);
-    const burst = (e === G.carrier && !G.playPass && (e.carryT || 0) < 1.2) ? 1.12 : 1;   // hitting the hole
+    const burst = (e === G.carrier && e.role !== "QB" && !G.playPass && (e.carryT || 0) < 1.2) ? 1.12 : 1;   // hitting the hole (backs only)
+    let qbRamp = 1;   // a scrambling QB was 90% legs in the pocket, 100% the frame he crossed — now a 1s build
+    if (e.qbRampT != null) { e.qbRampT += dt; qbRamp = 0.9 + 0.1 * clamp(e.qbRampT, 0, 1); }
     // CATCH GATHER (owner play-test: "players don't slow down after
     // receiving", so the defense never converges). completeCatch stamps
     // catchT and becomeCarrier in the SAME tick, and moveToward writes
@@ -8148,7 +8316,7 @@
     if (e.jukePlantT > 0) plant *= JUKE_PLANT_SPEED + (1 - JUKE_PLANT_SPEED) * (1 - e.jukePlantT / JUKE_PLANT_T);
     if (e.stiffPlantT > 0) plant *= STIFF_PLANT_SPEED + (1 - STIFF_PLANT_SPEED) * (1 - e.stiffPlantT / STIFF_PLANT_T);
     const speedMod = G.weather.speedMod * wrapDrive * plant * (e.diveT > 0 ? 1.9 : 1) *
-      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - carryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather;
+      (G.ramp && G.ramp.ent === e ? 1.28 : 1) * (e.soarT > 0 ? 1.9 : 1) * passMod * tired * (1 - carryFade) * (e.coldT > 0 ? 0.78 : 1) * burst * gather * qbRamp;
     if (e.jukeT > 0) e.jukeT -= dt;
     if (e.diveT > 0) {
       e.diveT -= dt;
@@ -8222,6 +8390,12 @@
       const isCarrier = e === G.carrier;
       if (isCarrier && e.diveT <= 0) {
         const fwdDir = e.team === "off" ? 1 : -1;
+        // HB OPTION / SWEEP PASS: behind the line a back who can still throw
+        // steers freely — back, sideways, forward — instead of auto-churning
+        if (e.canPass && e.team === "off" && G.curPlay && G.curPlay.hbPass && e.x < xAtYd(G.losYd) + 4) {
+          if (d.x || d.y) { e.vx = d.x * csp * 0.9; e.vy = d.y * csp * 0.9; }
+          else { e.vx = fwdDir * csp * 0.6; e.vy = 0; }
+        } else {
         if (e.cutCd > 0) e.cutCd -= dt;
         if (e.cutSlowT > 0) e.cutSlowT -= dt;
         const wantCut = Math.abs(d.y) > 0.35;
@@ -8259,6 +8433,7 @@
         e.vx = fwdDir * throttle * cutTax * csp;
         e.vy = 0;
         if (e.cutT > 0) { e.cutT -= dt; e.vy = e.cutDir * csp * CUT_BURST; e.vx *= 0.75; }
+        }
       } else {
         const m = Math.hypot(d.x, d.y) || 1;
         e.vx = (d.x / m) * csp; e.vy = (d.y / m) * csp;
@@ -10738,6 +10913,7 @@
     if (S === "halftime" && G.half) {
       if (G.half.kind === "fg") drawHalfFG();
       else if (G.half.kind === "dash") drawHalfDash();
+      else if (G.half.kind === "trex") drawHalfTrex();
       else drawHalftime();
       drawHUD(); cx.restore(); return;
     }
@@ -11482,6 +11658,13 @@
         cx.fillStyle = "#ff5533"; cx.font = PF(8); cx.textAlign = "center";
         cx.fillText("★", e.x - G.camX, y - 18);
       }
+      // ready to RAMPAGE: the apex dino's eyes glow red until he goes
+      if (e.apex && !ramping && G.rampage[sideOf(e)] >= 100 && (G.state === "live" || G.state === "presnap")) {
+        const pulse = 0.55 + 0.45 * Math.sin(performance.now() / 120);
+        const ex = e.dir >= 0 ? x + drawW - 7 : x + 5, ey = y + 3;
+        cx.fillStyle = "rgba(255,60,40," + (0.28 * pulse) + ")"; cx.fillRect(ex - 2, ey - 2, 6, 6);
+        cx.fillStyle = "rgba(255,90,60," + (0.7 + 0.3 * pulse) + ")"; cx.fillRect(ex, ey, 2, 2);
+      }
       // carrier name / QB name
       if (!G.qaCapture && (e === G.carrier || (G.ball.holder === e && G.phase === "drop")) && e.name) {
         // TEXT BOX: the plate used to be a fixed 68px and the name a hard
@@ -11636,19 +11819,32 @@
   // than 0.6s early. The cursor runs with the flight and freezes where you
   // jumped; the verdict is read off the entity flags, which are streamed, so
   // an online guest sees the host's call. Held 0.7s after the ball comes down.
-  let meterHold = null;
-  function drawJumpMeter() {
-    const e = G.controlled, b = G.ball;
-    const up = G.state === "live" && b && b.mode === "air" && !b.away && b.kind !== "lateral" && b.T > 0.25 &&
-      e && (e.routeEligible || e.team === "def");
+  let meterMe = null, meterAi = null;
+  const canPlayBall = (e, b) => e && (e.team === "def" ? (e.role === "CB" || e.role === "S") : !!e.routeEligible) && dist(e, b.to) < 170;
+  function meterState(e, b, prev) {
+    const up = G.state === "live" && b && b.mode === "air" && !b.away && b.kind !== "lateral" && b.T > 0.25 && canPlayBall(e, b);
     if (up) {
       const p = (u) => clamp(1 - u / b.T, 0, 1);
       const jumped = e.jumpAt != null;
       const grade = !jumped ? null : e.jumpTimed ? "PERFECT!" : e.jumpMistimed ? "EARLY!" : "GOOD";
-      meterHold = { x: e.x, y: e.y + 9, red: p(0.6), yel: p(0.35), cur: jumped ? p(e.jumpAt) : p(b.T - b.t), grade, until: performance.now() + 700 };
-    } else if (!meterHold || !meterHold.grade || performance.now() > meterHold.until) { meterHold = null; return; }
-    const m = meterHold, x0 = Math.round(m.x - G.camX - 20), y0 = Math.round(m.y), wd = 40;
+      return { x: e.x, y: e.y + 9, red: p(0.6), yel: p(0.35), cur: jumped ? p(e.jumpAt) : p(b.T - b.t), grade, until: performance.now() + 700 };
+    }
+    return (prev && prev.grade && performance.now() <= prev.until) ? prev : null;
+  }
+  // the CPU player contesting the ball: the intended target, or the nearest CB/S
+  function aiContester(b) {
+    let best = null, bd = 60;
+    for (const e of G.players) {
+      if (e.controlled) continue;
+      if (!(e.team === "def" ? (e.role === "CB" || e.role === "S") : e === b.target)) continue;
+      const d = dist(e, b.to); if (d < bd) { bd = d; best = e; }
+    }
+    return best;
+  }
+  function paintMeter(m, dim) {
+    const x0 = Math.round(m.x - G.camX - 20), y0 = Math.round(m.y), wd = 40;
     const rw = Math.round(wd * m.red), yw = Math.round(wd * m.yel) - rw;
+    cx.globalAlpha = dim ? 0.65 : 1;
     cx.fillStyle = "rgba(4,10,7,.75)"; cx.fillRect(x0 - 1, y0 - 1, wd + 2, 6);
     cx.fillStyle = "#ff5533"; cx.fillRect(x0, y0, rw, 4);
     cx.fillStyle = "#ffd23f"; cx.fillRect(x0 + rw, y0, yw, 4);
@@ -11659,6 +11855,14 @@
       cx.fillStyle = m.grade === "PERFECT!" ? "#4ee36b" : m.grade === "GOOD" ? "#ffd23f" : "#ff5533";
       cx.fillText(m.grade, m.x - G.camX, y0 + 13);
     }
+    cx.globalAlpha = 1;
+  }
+  function drawJumpMeter() {
+    const b = G.ball;
+    meterMe = meterState(G.controlled, b, meterMe);
+    meterAi = meterState(b && b.mode === "air" ? aiContester(b) : null, b, meterAi);
+    if (meterMe) paintMeter(meterMe, false);
+    if (meterAi) paintMeter(meterAi, true);
   }
 
   function drawWeatherFX() {
@@ -12660,6 +12864,27 @@
       "                 mid-air — blocks and jukes can't ground you.",
       "SHIFT (blocked)  spin move to shed an offensive lineman",
       "R .............. RAMPAGE when the ★ apex dino's meter is full"]],
+    ["THE CATCH METER", [
+      "When a pass is up and you control the receiver (or a CB / S),",
+      "a bar appears under him:",
+      "  RED ...... you jumped way early (over 0.6s before it lands)",
+      "  YELLOW .. close (0.35-0.6s out) — a fair leap",
+      "  GREEN ... inside 0.35s — PERFECT hands, wins jump balls",
+      "The cursor runs with the flight. Press SPACE / JUMP and it",
+      "freezes where you pressed: PERFECT! / GOOD / EARLY!",
+      "The CPU times its own leap the same way — its bar shows",
+      "dimmer, so you can see WHY the corner won that ball."]],
+    ["GAMEDAY", [
+      "Weather has a clock: snow piles up over four quarters, puddles",
+      "grow, a dusk kickoff ends under the lights. Pennants on the",
+      "uprights show the wind before a kick.",
+      "",
+      "RAMPAGE: the meter is top-right. When it is full it glows gold",
+      "and your ★ apex dino's EYES GLOW RED — press R to go T-rex.",
+      "One rampage per half.",
+      "",
+      "Halftime: mascot minigames feed the meter. Once in a while",
+      "THE KING shows up instead. Throw footballs. Dodge the chomp."]],
     ["PLAYBOOK GLOSSARY — OFFENSE", [
       "FOUR VERTS ..... everyone sprints deep. Beats teams with few",
       "                 deep defenders; risky vs Cover 4.",
@@ -12944,7 +13169,7 @@
     cx.font = PF(8); cx.textAlign = "left"; cx.fillStyle = "#f4f6f1";
     pg[1].forEach((l, i) => cx.fillText(l, 90, 100 + i * 24));
     cx.textAlign = "center"; cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    cx.fillText("◀ ▶ PAGE " + ((G.tut || 0) + 1) + "/" + TUT_PAGES.length + " · ESC = BACK", W / 2, H - 24);
+    cx.fillText("◀ ▶ PAGE " + ((G.tut || 0) + 1) + "/" + TUT_PAGES.length + (G.tutFirst ? " · ENTER = NEXT · ESC = SKIP (it lives under TUTORIAL)" : " · ESC = BACK"), W / 2, H - 24);
   }
 
   // menu card layout: 3 columns of chunky arcade cards with dino mascots
@@ -14175,9 +14400,11 @@
       const rp = G.rampage[side];
       cx.fillStyle = spent ? "#3a4441" : (rp >= 100 ? "#ff4444" : "#e8622c");
       cx.fillRect(mx0, 8, 90 * (spent ? 1 : rp / 100), 14);
-      cx.strokeStyle = "#f4f6f1"; cx.strokeRect(mx0, 8, 90, 14);
+      const ready = !spent && rp >= 100, pulse = 0.5 + 0.5 * Math.sin(performance.now() / 110);
+      if (ready) { cx.fillStyle = "rgba(255,210,63," + (0.25 + 0.4 * pulse) + ")"; cx.fillRect(mx0 - 4, 4, 98, 22); }
+      cx.strokeStyle = ready ? "#ffd23f" : "#f4f6f1"; cx.lineWidth = ready ? 2 : 1; cx.strokeRect(mx0, 8, 90, 14); cx.lineWidth = 1;
       cx.font = PF(7); cx.textAlign = "center";
-      cx.fillStyle = spent ? "#9db0a4" : "#fff";
+      cx.fillStyle = spent ? "#9db0a4" : (ready && pulse > 0.5 ? "#1a1200" : "#fff");
       cx.fillText(spent ? "SPENT·½" : (rp >= 100 ? "R=RAMPAGE!" : "🦖RAMPAGE"), mx0 + 45, 18);
     };
     drawRampMeter("A", W - 104);
@@ -14446,7 +14673,9 @@
     bodyRadius, bodyContactRange, stageHighlight, updateHighlight, qaExportFrame, beginTackleImpact,
     spriteFrameFor: selectGameplaySpriteFrame,
     loop,   // headless browser pumping (rAF never fires in hidden panes)
-    jumpMeter: () => meterHold,
+    startHalftimeShow,
+    jumpMeter: () => meterMe,
+    aiMeter: () => meterAi,
     bumpDynamicLadder, refreshDynamicDiff, diffScalar, ballSecurityScore,
     irandom, irandomRange, fumbleImmuneSpot, diffTable: DIFFS,
     // ---- UI text seams. tests/test_textfit.js measures copy against these

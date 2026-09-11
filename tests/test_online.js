@@ -99,6 +99,7 @@ function makeInstance(label, sharedDb) {
     __listeners: {},
   };
   const store = new Map();
+  store.set("dinobowl_tut_seen", "1");   // a returning player, like harness.js
   let simTime = 0, rafCb = null;
   let myUid = null;
   const auth = {
