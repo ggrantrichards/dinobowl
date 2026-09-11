@@ -57,6 +57,8 @@
       fumbles: { DEF: "forced_fumbles" },
       total_tds: { QB: "passing_tds", RB: "rushing_tds", FB: "rushing_tds", WR: "receiving_tds", TE: "receiving_tds", DEF: "def_tds" },
       total_yards: { QB: "passing_yards", RB: "rushing_yards", FB: "rushing_yards", WR: "receiving_yards", TE: "receiving_yards" },
+      ypa: { RB: "ypc", FB: "ypc" },                 // a back's yards per attempt are carries
+      pass_attempts: { RB: "carries", FB: "carries" },
     };
     let posGroup = null;   // set by parse() for the one question being read
     const posGroupOf = (codes) => !codes ? null : (codes.some((c) => DEF_CODES.has(c)) ? "DEF" : codes[0]);

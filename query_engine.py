@@ -379,6 +379,8 @@ STAT_ALIASES = [
     ("yards per game", "total_ypg"), ("yards/game", "total_ypg"), ("y/g", "total_ypg"), ("ypg", "total_ypg"),
     ("yards per attempt", "ypa"), ("yards/attempt", "ypa"), ("y/a", "ypa"), ("ypa", "ypa"),
     ("yards per carry", "ypc"), ("yards per rush", "ypc"), ("y/c", "ypc"), ("ypc", "ypc"),
+    ("yards/carry", "ypc"), ("yards/rush", "ypc"), ("yards a carry", "ypc"), ("yards per rushing attempt", "ypc"),
+    ("rushing yards per attempt", "ypc"), ("rushing yards per carry", "ypc"),
     ("yards per reception", "ypr"), ("yards per catch", "ypr"), ("y/r", "ypr"), ("ypr", "ypr"),
     ("catch percentage", "catch_pct"), ("catch rate", "catch_pct"), ("catch pct", "catch_pct"), ("catch %", "catch_pct"),
     ("touchdown percentage", "td_pct"), ("td percentage", "td_pct"), ("td rate", "td_pct"), ("td%", "td_pct"), ("td %", "td_pct"),
@@ -698,6 +700,9 @@ POS_SWAP = {
     "fumbles": {"DEF": "forced_fumbles"},
     "total_tds": {"QB": "passing_tds", "RB": "rushing_tds", "FB": "rushing_tds", "WR": "receiving_tds", "TE": "receiving_tds", "DEF": "def_tds"},
     "total_yards": {"QB": "passing_yards", "RB": "rushing_yards", "FB": "rushing_yards", "WR": "receiving_yards", "TE": "receiving_yards"},
+    # a back's "yards per attempt" / "attempts" are carries, not throws
+    "ypa": {"RB": "ypc", "FB": "ypc"},
+    "pass_attempts": {"RB": "carries", "FB": "carries"},
 }
 _POS_GROUP = None   # set by parse() for the one question being read
 

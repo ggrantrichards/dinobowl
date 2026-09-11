@@ -125,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g12  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g13  # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -166,6 +166,15 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g13 (2026-09-11) — a back's yards per attempt are carries
+
+"RBs with over 1000 rushing yards in 2025 and over 4.7 yards/carry" read the slash form as
+plain "yards" (so rushing yards > 4.7), and "yards per attempt" went to the passing column,
+which a running back only has when he threw a pass — 19 seasons all-time, none in 2025.
+New aliases (`yards/carry`, `yards/rush`, `yards a carry`, `rushing yards per attempt`, ...)
+and two position swaps: for RB / FB, `yards per attempt` → yards/carry and `attempts` →
+carries. Both engines; parity 61/61.
 
 ### Dino Bowl 2.5 (2026-09-11) — THE KING, a real catch meter, a bigger playbook
 
