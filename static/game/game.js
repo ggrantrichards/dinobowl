@@ -26,7 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
-  const BUILD = "2.3";   // shown on the title; the shells carry the cache-bust token
+  const BUILD = "2.4";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -1079,7 +1079,7 @@
   function netNote(text, status) { if (status) netStatus(status); notify(text); }
   const roomId = () => Array.from(crypto.getRandomValues(new Uint32Array(2))).map((n) => n.toString(36)).join("").slice(0, 10);
   const cleanNet = (v) => JSON.parse(JSON.stringify(v, (key, value) => {
-    if (["engaged", "cover", "controlled", "sheets", "ballSpr", "crowd", "tape", "replay", "deadNext"].includes(key)) return undefined;
+    if (["engaged", "cover", "controlled", "sheets", "ballSpr", "crowd", "tape", "replay", "deadNext", "tracks", "scars", "puddles"].includes(key)) return undefined;
     return typeof value === "function" ? undefined : value;
   }));
   // THE BOX SCORE IS NOT A PER-FRAME QUANTITY. G.gameStats is a per-player
@@ -2474,7 +2474,7 @@
   }
   function kickoffAfterPregame() {
     const wtxt = G.weather.type === "CLEAR" ? "Clear skies in the Cretaceous." :
-      G.weather.type === "RAIN" ? "Rain — slick ball, watch for fumbles!" : "Snow — heavy legs, short passes!";
+      G.weather.type === "RAIN" ? "Rain — slick ball, watch for fumbles!" : "Snow — heavy legs, short passes, and it piles up!";
     banner(TEAMS[G.my][0].toUpperCase() + " vs " + TEAMS[G.opp][0].toUpperCase(), wtxt + "  " + (G.drive === "A" ? "You receive!" : (G.humanB ? "P2 receives!" : "CPU receives!")), 2.4);
     // Kickoffs/returns are removed, so the opening possession is simply spotted
     // at the receiving team's 25 (startKickoff handles the placement). G.drive
@@ -4022,6 +4022,7 @@
     const pull = G.slingPull == null ? 0.7 : G.slingPull;
     T = (0.55 + dist(qb, to) / 470) * (0.8 + 0.28 * pull);
     const read = assessPassWindow(qb, rec, to, T);
+    resetJumpFlags();
     G.ball = { mode: "air", kind: "lob", from: { x: qb.x, y: qb.y }, to, t: 0, T, x: qb.x, y: qb.y, z: 12, holder: null, target: rec, read, pull };
     G.qbImprov = false;   // nobody is improvising once the ball is gone (see the man-coverage rally)
     qb.attCount = (qb.attCount || 0) + 1;
@@ -4072,6 +4073,7 @@
     clampThrowRange(qb, tgt);
     const d = dist(qb, tgt), T = d / 430;
     const read = assessPassWindow(qb, rec, tgt, T);
+    resetJumpFlags();
     G.ball = { mode: "air", kind: "bullet", from: { x: qb.x, y: qb.y }, to: tgt, t: 0, T, x: qb.x, y: qb.y, z: 14, holder: null, target: rec, read };
     G.qbImprov = false;
     G.phase = "air"; G.aim = null; G.slingAnchor = null; qb.state = "idle"; qb.throwT = 0.3; playPose(qb, "throw", 0.32);
@@ -4084,11 +4086,12 @@
 
   // hand the sticks to the receiver the throw is meant for — move him under
   // the ball and TIME THE JUMP (space/click as it arrives)
+  const resetJumpFlags = () => G.players.forEach((p2) => { p2.jumpTimed = false; p2.jumpMistimed = false; p2.autoJumped = false; p2.jumpAt = null; });
   function controlIntendedReceiver(to, intended) {
     if (!offenseIsUser() || G.ball.away) return;
     const rec = intended || pickPassTarget(to);
     if (rec && dist(rec, to) < 320) {
-      G.players.forEach((p2) => { p2.jumpTimed = false; p2.jumpMistimed = false; p2.autoJumped = false; });
+      resetJumpFlags();
       setControlled(rec);
     }
   }
@@ -4097,6 +4100,7 @@
     if (G.ball.mode !== "air") { e.jumpT = 0.45; sfx.juke(); return; }   // plain hop
     e.jumpT = 0.4;
     const untilLanding = G.ball.T - G.ball.t;
+    e.jumpAt = untilLanding;   // the meter freezes here
     if (untilLanding <= 0.35 && untilLanding >= 0.02) e.jumpTimed = true;   // perfect
     else if (untilLanding > 0.6) e.jumpMistimed = true;                     // way early
     sfx.juke();
@@ -4494,6 +4498,7 @@
       if (Math.abs(gained0) >= 1) G.gainTag = { x: G.carrier.x, y: G.carrier.y - 34, text: (gained0 > 0 ? "" : "") + gained0 + "y", t: 0.9 };
     }
     if (G.carrier && ["TACKLED", "SACKED!", "FLATTENED!"].includes(reason)) {
+      markTurf(G.carrier.x, G.carrier.y + 4, "scar", 60, 12, 4);   // the pile tears the turf
       // long enough to read the takedown, short enough that dinos pop back
       // up with football urgency instead of lying around
       G.carrier.proneT = Math.max(G.carrier.proneT || 0, 0.4);
@@ -10410,6 +10415,60 @@
   }
 
   // --------------------------------------------------------------- weather
+  // 2.4 GAMEDAY: the weather has a clock. Everything below is presentation
+  // only — catchMod/speedMod/fumbleMod/kickMod never move during a game — and
+  // it is derived from quarter + clock, which the host already streams, so a
+  // guest's field whites out in step with the host's.
+  function gameFrac() {
+    const q = G.qlen || QUARTER_LEN;
+    if (G.ot || (G.quarter || 1) > 4) return 1;
+    const clock = G.clock == null ? q : G.clock;
+    return clamp(((G.quarter || 1) - 1 + (1 - clock / q)) / 4, 0, 1);
+  }
+  // snow starts as a dusting and the field is white by the fourth quarter
+  const snowCover = () => (G.weather && G.weather.type === "SNOW") ? 0.25 + 0.75 * gameFrac() : 0;
+  // a dusk kickoff ends under the lights
+  function nightPhase() {
+    const st = G.stadium;
+    if (!st || st.dome) return 0;
+    return st.time === "night" ? 1 : st.time === "dusk" ? gameFrac() : 0;
+  }
+  // rain comes in bands: 0.4x to 1.5x of the base rate, minutes apart
+  function rainI() { const t = performance.now() / 1000; return 0.95 + 0.4 * Math.sin(t / 11) + 0.15 * Math.sin(t / 3.7); }
+  function mixHex(a, b, t) {
+    const ca = parseInt(a.slice(1), 16), cb = parseInt(b.slice(1), 16);
+    let out = "#";
+    for (const sh of [16, 8, 0]) out += Math.round(lerpD((ca >> sh) & 255, (cb >> sh) & 255, t)).toString(16).padStart(2, "0");
+    return out;
+  }
+  // puddles grow while the rain keeps falling; inPuddle and drawField share the list
+  function puddleRects() {
+    const step = Math.round(gameFrac() * 20);
+    if (G.puddles && G.puddlesKey === step) return G.puddles;
+    const f = step / 20, n = 14 + Math.round(f * 6), out = [];
+    for (let i = 0; i < n; i++) out.push({ x: (i * 397) % FIELD_LEN, y: TOP + 40 + ((i * 233) % 380), w: 44 + f * 28, h: 8 + f * 4 });
+    G.puddles = out; G.puddlesKey = step;
+    return out;
+  }
+  // marks on the turf: cleat prints in snow and mud, scars where cleats bit.
+  // Timers are keyed by roster index, not object identity: an online guest
+  // gets fresh player objects every net frame.
+  // Prints churn (22 players, six a second each) and scars live a minute, so
+  // they keep separate lists: one buffer and the prints evicted every scar.
+  const TRACKS_MAX = 220, SCARS_MAX = 60;
+  const trackT = [], breathT = [];
+  function markTurf(x, y, k, life, w, h) {
+    const scar = k === "scar";
+    const t = scar ? (G.scars || (G.scars = [])) : (G.tracks || (G.tracks = []));
+    if (t.length >= (scar ? SCARS_MAX : TRACKS_MAX)) t.shift();
+    t.push({ x, y, k, t: life, life, w, h });
+  }
+  function ageMarks(list, dt) {
+    if (!list || !list.length) return;
+    let k = 0;
+    for (const m of list) { m.t -= dt; if (m.t > 0) list[k++] = m; }
+    list.length = k;
+  }
   // ---------------------------------------------------------- particle pool
   // Every grain used to be a fresh object literal carrying its own boolean tag
   // (`rain: true` / `puff: true` / ...). In weather that is 2-6 brand-new
@@ -10448,6 +10507,7 @@
   // ---- payoff particle vocabulary (AA pass) — same G.parts system, new
   // typed grains. Every emitter is an event, never a per-frame roll (LESSON #15).
   function fxDust(x, y, n) {
+    markTurf(x, y + 2, "scar", 45, 8, 3);   // cleats bit here; the turf remembers
     for (let i = 0; i < (n || 5); i++) spawnPart("dust",
       x + rnd(-5, 5), y + rnd(-2, 3), 1,
       rnd(-35, 35), rnd(-16, 12), rnd(15, 45),
@@ -10505,7 +10565,7 @@
     if (G.partAccW !== w.type) { G.partAccW = w.type; G.partAcc = 0; }
     const room = Math.max(0, MAX_PARTS - G.parts.length);
     if (w.type === "RAIN") {
-      G.partAcc += dt * 360;
+      G.partAcc += dt * 360 * rainI();
       const want = G.partAcc | 0; G.partAcc -= want;
       const n = Math.min(want, room);
       for (let i = 0; i < n; i++) spawnPart("rain", G.camX + rnd(-40, W + 40), rnd(-20, H), 0, w.wind.x * 2 - 60, 540, null, rnd(0.25, 0.5));
@@ -10534,6 +10594,23 @@
           rnd(1.4, 2.0), 160);
       }
     }
+    // GAMEDAY 2.4: cleat prints in snow and mud, frozen breath below 35°F
+    const wet = w.type === "SNOW" || w.type === "RAIN";
+    const cold = w.temp != null && w.temp <= 35 && G.stadium && !G.stadium.dome;
+    if (wet || cold) (G.players || []).forEach((e, i) => {
+      if (wet && Math.hypot(e.vx || 0, e.vy || 0) > 20) {
+        trackT[i] = (trackT[i] || 0) - dt;
+        if (trackT[i] <= 0) { trackT[i] = 0.16; markTurf(e.x + rnd(-2, 2), e.y + 5, w.type === "SNOW" ? "print" : "mud", w.type === "SNOW" ? 9 : 14, 3, 2); }
+      }
+      if (cold) {
+        breathT[i] = (breathT[i] == null ? rnd(0, 2.4) : breathT[i]) - dt;
+        if (breathT[i] <= 0) {
+          breathT[i] = rnd(1.6, 2.8);
+          for (let j = 0; j < 2; j++) spawnPart("breath", e.x + (e.dir || 1) * (5 + j * 3), e.y - 14 + j, 0, (e.dir || 1) * 8 + w.wind.x * 0.3, -14 - j * 4, null, 0.55 - j * 0.1);
+        }
+      }
+    });
+    ageMarks(G.scars, dt); ageMarks(G.tracks, dt);
     for (const p of G.parts) {
       p.x += p.vx * dt; p.y += p.vy * dt; p.t -= dt;
       if (p.vz != null) { p.z = (p.z || 0) + p.vz * dt; p.vz -= (p.g || 220) * dt; }
@@ -10562,11 +10639,7 @@
     G.parts.length = keep;
   }
   function inPuddle(e) {
-    // puddles live on a fixed deterministic grid (mirrors drawField's rects)
-    for (let i = 0; i < 14; i++) {
-      const px = (i * 397) % FIELD_LEN, py = TOP + 40 + ((i * 233) % 380);
-      if (e.x > px && e.x < px + 44 && e.y > py - 4 && e.y < py + 12) return true;
-    }
+    for (const p of puddleRects()) if (e.x > p.x && e.x < p.x + p.w && e.y > p.y - 4 && e.y < p.y + p.h + 4) return true;
     return false;
   }
 
@@ -10690,6 +10763,7 @@
     drawGoalpostTop(xAtYd(-8) - G.camX, false);
     drawGoalpostTop(xAtYd(108) - G.camX, G.fgFlashT > 0);
     drawBall();
+    drawJumpMeter();
     drawWeatherFX();
     if (zoomed) cx.restore();
     if (S === "presnap") drawPresnapUI();
@@ -10883,7 +10957,7 @@
     const home = (G.stadium && G.stadium.home) || G.homeAbbr || G.my || "-";
     const wx = (G.weather && G.weather.type) || "CLEAR";
     return wx + "|" + ezA + "|" + ezB + "|" + (G.drive || "-") + "|" + home +
-      "|" + (TEAMS[ezA] && TEAMS[ezB] ? "T" : "-");
+      "|" + (TEAMS[ezA] && TEAMS[ezB] ? "T" : "-") + "|" + Math.round(snowCover() * 12);
   }
   function ensureFieldCache() {
     const key = fieldCacheKey();
@@ -10911,17 +10985,17 @@
 
   function paintFieldStatic() {
     const cam = G.camX;
+    const cover = snowCover();
     // grass stripes every five yards.  Keep their geometry tied to xAtYd so
     // the visual field stays truthful when the presentation scale changes.
     for (let seg = 0; seg < 24; seg++) {
       const x = xAtYd(-10 + seg * 5) - cam;
       if (x + 5 * YPX < 0 || x > VW) continue;
-      const snow = G.weather && G.weather.type === "SNOW";
-      const base = seg % 2 ? (snow ? "#c9d4cf" : "#1e6b35") : (snow ? "#bcc9c3" : "#1a5e2e");
+      const base = mixHex(seg % 2 ? "#1e6b35" : "#1a5e2e", seg % 2 ? "#c9d4cf" : "#bcc9c3", cover);
       cx.fillStyle = G.weather && G.weather.type === "RAIN" ? shade(base, -14) : base;
       cx.fillRect(x, TOP, 5 * YPX, BOT - TOP);
       // fine mow-grain dots (deterministic per column so they don't shimmer)
-      cx.fillStyle = "rgba(0,0,0,.08)";
+      cx.fillStyle = "rgba(0,0,0," + 0.08 * (1 - cover) + ")";
       const wx0 = xAtYd(-10 + seg * 5);
       for (let dy = TOP + 10; dy < BOT - 6; dy += 24) {
         for (let dxp = 6 + ((seg * 13) % 12); dxp < 5 * YPX; dxp += 22) {
@@ -10936,27 +11010,29 @@
     // midfield logo: the home team's mark painted at the 50, real-stadium style
     drawMidfieldLogo(cam);
     // yard lines
-    cx.strokeStyle = "rgba(244,246,241,.55)"; cx.lineWidth = 2;
+    // paint fades under the snow, but never past the point of reading the field
+    const ink = "rgba(244,246,241," + 0.64 * (1 - 0.6 * cover) + ")", inkShadow = "rgba(6,35,18," + 0.44 * (1 - 0.7 * cover) + ")";
+    cx.strokeStyle = "rgba(244,246,241," + 0.55 * (1 - 0.55 * cover) + ")"; cx.lineWidth = 2;
     // Big, high-contrast numbers make every five-yard gain visibly matter.
     // They are drawn into the turf, not floated as HUD text, so drives feel
     // longer without lying about the actual spot.
-    cx.font = PF(16); cx.fillStyle = "rgba(244,246,241,.64)"; cx.textAlign = "center";
+    cx.font = PF(16); cx.fillStyle = ink; cx.textAlign = "center";
     for (let yd = 0; yd <= 100; yd += 5) {
       const x = xAtYd(yd) - cam;
       if (x < -20 || x > VW + 20) continue;
       cx.beginPath(); cx.moveTo(x, TOP); cx.lineTo(x, BOT); cx.stroke();
       if (yd % 10 === 0 && yd > 0 && yd < 100) {
         const num = yd <= 50 ? yd : 100 - yd;
-        cx.fillStyle = "rgba(6,35,18,.44)";
+        cx.fillStyle = inkShadow;
         cx.fillText(String(num), x + 2, TOP + 50 + 2);
         cx.fillText(String(num), x + 2, BOT - 34 + 2);
-        cx.fillStyle = "rgba(244,246,241,.64)";
+        cx.fillStyle = ink;
         cx.fillText(String(num), x, TOP + 50);
         cx.fillText(String(num), x, BOT - 34);
       }
     }
     // hashes
-    cx.fillStyle = "rgba(244,246,241,.35)";
+    cx.fillStyle = "rgba(244,246,241," + 0.35 * (1 - 0.6 * cover) + ")";
     for (let yd = 0; yd <= 100; yd++) {
       const x = xAtYd(yd) - cam;
       if (x < -4 || x > VW + 4) continue;
@@ -10965,6 +11041,15 @@
     // sidelines
     cx.fillStyle = "#f4f6f1";
     cx.fillRect(-cam, TOP - 5, FIELD_LEN, 5); cx.fillRect(-cam, BOT, FIELD_LEN, 5);
+    // snow banks build along the sidelines as the game goes on
+    if (cover > 0.3) {
+      const bank = (cover - 0.3) / 0.7;
+      cx.fillStyle = "#eef2ee";
+      for (let i = 0; i < FIELD_LEN / 48; i++) {
+        const bx = i * 48 - cam, bh = 2 + Math.round(bank * (5 + (i * 7) % 6));
+        cx.fillRect(bx, TOP, 48, bh); cx.fillRect(bx, BOT - bh, 48, bh);
+      }
+    }
   }
 
   function drawField() {
@@ -10996,7 +11081,9 @@
       cx.fillStyle = "#ff9e4a"; cx.fillRect(m.x - 4, m.y - 1, 2, 3);
     }
     // night: stadium light masts above the stands
-    if (G.stadium && !G.stadium.dome && G.stadium.time === "night") {
+    const lights = G.stadium && !G.stadium.dome ? clamp((nightPhase() - 0.3) * 3, 0, 1) : 0;
+    if (lights > 0) {
+      cx.globalAlpha = lights;
       for (let i = 0; i < 8; i++) {
         const lx = 140 + i * 300 - cam * 0.55;
         if (lx < -40 || lx > W + 40) continue;
@@ -11005,6 +11092,7 @@
         cx.fillStyle = "rgba(255,247,207,.15)";
         cx.beginPath(); cx.moveTo(lx - 9, 5); cx.lineTo(lx - 30, 60); cx.lineTo(lx + 30, 60); cx.lineTo(lx + 9, 5); cx.fill();
       }
+      cx.globalAlpha = 1;
     }
     // goalposts
     drawGoalpost(xAtYd(-8) - cam); drawGoalpost(xAtYd(108) - cam);
@@ -11032,14 +11120,30 @@
         cx.fillRect(fdX - 5, TOP, 11, BOT - TOP);
       }
     }
-    // rain puddles / snow drifts
+    // rain puddles (they grow), then cleat prints and turf scars under the players
     if (G.weather && G.weather.type === "RAIN") {
       cx.fillStyle = "rgba(30,60,90,.25)";
-      for (let i = 0; i < 14; i++) {
-        const px = ((i * 397) % FIELD_LEN) - cam;
-        if (px > -60 && px < W) cx.fillRect(px, TOP + 40 + ((i * 233) % 380), 44, 8);
+      for (const p of puddleRects()) {
+        const px = p.x - cam;
+        if (px > -80 && px < W) cx.fillRect(px, p.y, p.w, p.h);
       }
     }
+    drawTurfMarks(cam);
+  }
+  function drawTurfMarks(cam) {
+    const marks = (G.scars || []).concat(G.tracks || []); if (!marks.length) return;
+    const snow = G.weather && G.weather.type === "SNOW", rain = G.weather && G.weather.type === "RAIN";
+    const cover = snowCover();
+    for (const m of marks) {
+      const x = m.x - cam; if (x < -20 || x > W + 20) continue;
+      let a = Math.min(1, m.t / m.life * 1.6);
+      if (m.k === "print") { a *= 0.6 * (0.45 + 0.55 * cover); cx.fillStyle = mixHex("#173f26", "#7f95a3", cover); }
+      else if (m.k === "mud") { a *= 0.5; cx.fillStyle = "#3a2c18"; }
+      else { a *= snow ? 0.5 : rain ? 0.6 : 0.4; cx.fillStyle = snow ? mixHex("#173f26", "#6e848e", cover) : rain ? "#342614" : "#5c4828"; }
+      cx.globalAlpha = a;
+      cx.fillRect(Math.round(x - m.w / 2), Math.round(m.y - m.h / 2), m.w, m.h);
+    }
+    cx.globalAlpha = 1;
   }
 
   function drawBackdrop(cam) {
@@ -11059,33 +11163,41 @@
     const skies = {
       day: ["#7db6e8", "#a9d0f0"], dusk: ["#d98a4a", "#7a4a6e"], night: ["#0c1426", "#1a2540"],
     };
-    const [top2, bot2] = skies[st.time] || skies.day;
-    // The sky only depends on the time of day, so build the gradient once
-    // and hold it. createLinearGradient was minting a fresh CanvasGradient
-    // on every frame of every outdoor game.
-    if (!G.skyGrad || G.skyGradKey !== st.time) {
+    // a dusk kickoff slides into a night game: sky, sun, stars, skyline and
+    // windows all follow nightPhase() (0 at kickoff, 1 by the fourth quarter).
+    // The gradient is cached per 1/16th of that slide, not minted per frame.
+    const ph = nightPhase(), dusk = st.time === "dusk";
+    let [top2, bot2] = skies[st.time] || skies.day;
+    if (dusk) { top2 = mixHex(top2, skies.night[0], ph); bot2 = mixHex(bot2, skies.night[1], ph); }
+    const skyKey = st.time + "|" + Math.round(ph * 16);
+    if (!G.skyGrad || G.skyGradKey !== skyKey) {
       const grad = cx.createLinearGradient(0, 0, 0, 70);
       grad.addColorStop(0, top2); grad.addColorStop(1, bot2);
-      G.skyGrad = grad; G.skyGradKey = st.time;
+      G.skyGrad = grad; G.skyGradKey = skyKey;
     }
     cx.fillStyle = G.skyGrad; cx.fillRect(0, 0, W, 70);
-    if (st.time === "night") {
+    if (dusk && ph < 0.95) { cx.fillStyle = "#f4c95d"; cx.fillRect(120, 16 + ph * 44, 16, 16); } // the sun sets behind the skyline
+    const stars = st.time === "night" ? 1 : dusk ? clamp((ph - 0.5) * 2, 0, 1) : 0;
+    if (stars > 0) {
+      cx.globalAlpha = stars;
       cx.fillStyle = "#e8ecf4";
       for (let i = 0; i < 40; i++) cx.fillRect(((i * 197 + 31) % W), (i * 53) % 40, 2, 2); // stars
       cx.fillStyle = "#f4e9c0"; cx.fillRect(W - 130, 12, 14, 14); // moon
+      cx.globalAlpha = 1;
     }
-    if (st.time === "dusk") { cx.fillStyle = "#f4c95d"; cx.fillRect(120, 16, 16, 16); } // low sun
     // city skyline silhouette (seeded per stadium)
-    cx.fillStyle = st.time === "night" ? "#141c2e" : st.time === "dusk" ? "#4a3050" : "#5a7ba0";
+    const sky = st.time === "night" ? "#141c2e" : dusk ? mixHex("#4a3050", "#141c2e", ph) : "#5a7ba0";
+    const lit = st.time === "night" || (dusk && ph > 0.4);
+    cx.fillStyle = sky;
     let sx = -((cam * 0.4) % 240) - 240;
     let i2 = 0;
     while (sx < W + 40) {
       const b = st.skyline[i2 % st.skyline.length];
       cx.fillRect(sx, 62 - b.h, b.w, b.h + 8);
-      if (st.time === "night") { // lit windows
+      if (lit) { // lit windows
         cx.fillStyle = "#f4d98a";
         for (let wy = 62 - b.h + 3; wy < 58; wy += 7) cx.fillRect(sx + 3 + ((wy * 13) % (b.w - 6)), wy, 2, 3);
-        cx.fillStyle = "#141c2e";
+        cx.fillStyle = sky;
       }
       sx += b.w + b.gap; i2++;
     }
@@ -11190,6 +11302,17 @@
       cx.fillRect(bx - 2 + s * 2, barY - 64, 5, 32);
       cx.fillRect(bx - 2 + s * 4, upTop, 5, (barY - 64) - upTop);
       cx.fillStyle = "#b58f31"; cx.fillRect(bx + 2, barY - 32, 1, 32);
+    }
+    // wind pennants on the upright tips: which way, and how hard, before a kick
+    if (G.weather && G.stadium && !G.stadium.dome) {
+      const wnd = G.weather.wind.x, dir = wnd >= 0 ? 1 : -1;
+      const len = clamp(4 + Math.abs(wnd) * 0.3, 4, 14), flut = Math.sin(performance.now() / 110 + x) * (0.5 + Math.abs(wnd) * 0.03);
+      cx.fillStyle = "#ff5533";
+      for (const s of [-1, 1]) {
+        const px = x + s * 34 + (dir > 0 ? 3 : -2);
+        cx.fillRect(px, upTop + 1, dir * len, 2);
+        cx.fillRect(px + dir * len, upTop + 1 + flut, dir * 3, 2);
+      }
     }
     // the MADE-kick moment: the window between the uprights lights up as the
     // ball sails through, so a good kick is unmistakable
@@ -11506,11 +11629,44 @@
     drawFootballAt(b.x - G.camX, b.y - b.z);
   }
 
+  // ------------------------------------------------- jump timing meter (2.4)
+  // Madden-style read-out for the timed catch/defend jump, under the player
+  // you control while the ball is up. The zones are timedJump's own numbers:
+  // green = the ball lands within 0.35s, yellow = 0.35-0.6s out, red = more
+  // than 0.6s early. The cursor runs with the flight and freezes where you
+  // jumped; the verdict is read off the entity flags, which are streamed, so
+  // an online guest sees the host's call. Held 0.7s after the ball comes down.
+  let meterHold = null;
+  function drawJumpMeter() {
+    const e = G.controlled, b = G.ball;
+    const up = G.state === "live" && b && b.mode === "air" && !b.away && b.kind !== "lateral" && b.T > 0.25 &&
+      e && (e.routeEligible || e.team === "def");
+    if (up) {
+      const p = (u) => clamp(1 - u / b.T, 0, 1);
+      const jumped = e.jumpAt != null;
+      const grade = !jumped ? null : e.jumpTimed ? "PERFECT!" : e.jumpMistimed ? "EARLY!" : "GOOD";
+      meterHold = { x: e.x, y: e.y + 9, red: p(0.6), yel: p(0.35), cur: jumped ? p(e.jumpAt) : p(b.T - b.t), grade, until: performance.now() + 700 };
+    } else if (!meterHold || !meterHold.grade || performance.now() > meterHold.until) { meterHold = null; return; }
+    const m = meterHold, x0 = Math.round(m.x - G.camX - 20), y0 = Math.round(m.y), wd = 40;
+    const rw = Math.round(wd * m.red), yw = Math.round(wd * m.yel) - rw;
+    cx.fillStyle = "rgba(4,10,7,.75)"; cx.fillRect(x0 - 1, y0 - 1, wd + 2, 6);
+    cx.fillStyle = "#ff5533"; cx.fillRect(x0, y0, rw, 4);
+    cx.fillStyle = "#ffd23f"; cx.fillRect(x0 + rw, y0, yw, 4);
+    cx.fillStyle = "#4ee36b"; cx.fillRect(x0 + rw + yw, y0, wd - rw - yw, 4);
+    cx.fillStyle = "#f4f6f1"; cx.fillRect(x0 + Math.round(wd * m.cur) - 1, y0 - 2, 2, 8);
+    if (m.grade) {
+      cx.font = PF(7); cx.textAlign = "center";
+      cx.fillStyle = m.grade === "PERFECT!" ? "#4ee36b" : m.grade === "GOOD" ? "#ffd23f" : "#ff5533";
+      cx.fillText(m.grade, m.x - G.camX, y0 + 13);
+    }
+  }
+
   function drawWeatherFX() {
     // time-of-day tint over the field
     if (G.stadium && !G.stadium.dome) {
-      if (G.stadium.time === "night") { cx.fillStyle = "rgba(8,12,40,.16)"; cx.fillRect(0, 0, W, H); }
-      if (G.stadium.time === "dusk") { cx.fillStyle = "rgba(80,40,10,.09)"; cx.fillRect(0, 0, W, H); }
+      const ph = nightPhase();
+      if (G.stadium.time === "dusk" && ph < 1) { cx.fillStyle = "rgba(80,40,10," + 0.09 * (1 - ph) + ")"; cx.fillRect(0, 0, W, H); }
+      if (ph > 0) { cx.fillStyle = "rgba(8,12,40," + 0.16 * ph + ")"; cx.fillRect(0, 0, W, H); }
     }
     // splash + snowball particles
     for (const p of G.parts) {
@@ -11521,6 +11677,12 @@
       // function another batch owns. For a pooled grain `p.k` is a non-empty
       // string, so this is one truthiness test and nothing else.
       switch (p.k || (p.puff ? "puff" : "")) {
+        case "breath": {
+          const sz = 3 + (0.55 - p.t) * 7;
+          cx.fillStyle = "rgba(236,244,255," + Math.min(0.55, p.t * 1.0) + ")";
+          cx.fillRect(p.x - G.camX - sz / 2, p.y - sz / 2, sz, sz);
+          break;
+        }
         case "splash":
           cx.fillStyle = "rgba(150,200,255," + Math.min(0.8, p.t * 2) + ")";
           cx.fillRect(p.x - G.camX, p.y - p.z, 3, 3);
@@ -11562,11 +11724,11 @@
     }
     const w = G.weather; if (!w) return;
     if (w.type === "RAIN") {
-      cx.strokeStyle = "rgba(160,200,255,.4)"; cx.lineWidth = 1;
+      cx.strokeStyle = "rgba(160,200,255," + clamp(0.25 + 0.15 * rainI(), 0.2, 0.5) + ")"; cx.lineWidth = 1;
       cx.beginPath();
       for (const p of G.parts) if (p.k === "rain") { const x = p.x - G.camX; cx.moveTo(x, p.y); cx.lineTo(x + p.vx * 0.02, p.y + 11); }
       cx.stroke();
-      cx.fillStyle = "rgba(10,20,40,.12)"; cx.fillRect(0, 0, W, H);
+      cx.fillStyle = "rgba(10,20,40," + (0.07 + 0.05 * rainI()) + ")"; cx.fillRect(0, 0, W, H);
     } else if (w.type === "SNOW") {
       cx.fillStyle = "rgba(255,255,255,.85)";
       for (const p of G.parts) if (p.k === "snow") cx.fillRect(p.x - G.camX, p.y, 3, 3);
@@ -14284,6 +14446,7 @@
     bodyRadius, bodyContactRange, stageHighlight, updateHighlight, qaExportFrame, beginTackleImpact,
     spriteFrameFor: selectGameplaySpriteFrame,
     loop,   // headless browser pumping (rAF never fires in hidden panes)
+    jumpMeter: () => meterHold,
     bumpDynamicLadder, refreshDynamicDiff, diffScalar, ballSecurityScore,
     irandom, irandomRange, fumbleImmuneSpot, diffTable: DIFFS,
     // ---- UI text seams. tests/test_textfit.js measures copy against these

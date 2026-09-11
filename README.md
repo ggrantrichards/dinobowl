@@ -167,6 +167,36 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
+### Dino Bowl 2.4 (2026-09-11) — GAMEDAY: weather with a clock, a catch meter
+
+Presentation only; no weather modifier, speed, catch or kick number moves during a game.
+Everything is derived from quarter + clock (already streamed online), so a guest's field
+matches the host's.
+
+- **Dynamic snow.** A snow game starts as a dusting and the field is white by the fourth
+  quarter: turf colour, yard-line/number/hash paint and the mow grain all fade under the cover,
+  snow banks build along the sidelines. The field sheet repaints twelve times a game, not per frame.
+- **Cleat prints and turf scars.** Moving players leave prints in snow (slush early, packed grey
+  late) and mud in rain; every whistle on a tackle/sack/flatten, and every cut, catch and juke,
+  leaves a scar for a minute. Two bounded lists (220 prints, 60 scars), never streamed.
+- **Frozen breath** below 35°F outdoors; drifts with the wind.
+- **Dusk games end under the lights.** Sky, sun, stars, skyline and windows slide from dusk to
+  night over the four quarters; the light masts fade in from the second quarter.
+- **Rain in bands** (0.4x–1.5x, minutes apart) and puddles that grow and multiply (14 → 20) as
+  the game goes on; splashes use the same puddle list the field draws.
+- **Wind pennants** on both uprights: direction and strength at a glance before a kick.
+- **Catch meter.** When the ball is up and you control the receiver (or a defender), a bar under
+  him shows the jump window in Madden's colours — red = more than 0.6 s early, yellow = 0.35–0.6 s,
+  green = inside 0.35 s — with a cursor running with the flight. Jump and it freezes where you
+  pressed and calls it: PERFECT! / GOOD / EARLY!. The zones are `timedJump`'s own numbers; the
+  verdict is read off the player's flags, which are streamed, so an online guest sees the host's
+  call. Every throw now clears the last throw's flags for every player (defenders kept stale ones
+  across plays before).
+
+Cache-bust token `dinobowl-2-4-20260911`; title reads V2.4. Node suites all green plus a
+26-check GAMEDAY scenario (snow steps 3 → 12, sky dusk|0 → dusk|16, puddles 14 → 20, modifiers
+pinned, meter grades at 0.78 / 0.5 / 0.2 s).
+
 ### Dino Bowl 2.0 (2026-09-09)
 
 A presentation and UX release; gameplay is untouched. New season hub (team colours,

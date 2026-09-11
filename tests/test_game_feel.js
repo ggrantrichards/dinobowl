@@ -277,7 +277,7 @@ const LIVE_DRAW_CODE = GAME.slice(GAME.indexOf("function drawPlayers"), GAME.ind
     !GAME.includes("G.parts = G.parts.filter(") && GAME.includes("recyclePart(p)") &&
       GAME.includes("PART_POOL"));
   check("BATCH G: the field is blitted from a cache and the sky gradient is kept",
-    GAME.includes("cx.drawImage(ensureFieldCache(), -cam, 0)") && GAME.includes("G.skyGradKey !== st.time"));
+    GAME.includes("cx.drawImage(ensureFieldCache(), -cam, 0)") && GAME.includes("G.skyGradKey !== skyKey"));
   console.log("\n======================");
   console.log("PASS " + pass + "  FAIL " + fail);
   process.exitCode = fail ? 1 : 0;

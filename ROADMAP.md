@@ -52,6 +52,32 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## DINO BOWL 2.4 — 2026-09-11 (shipped): GAMEDAY — the weather has a clock
+
+Owner: "ideas from Madden 27 like dynamic snow that improve the game without adding bugs",
+then the catch meter. Rule for the whole batch: presentation only. `catchMod / speedMod /
+fumbleMod / kickMod / wind` never change during a game; every new effect is a pure function of
+`quarter + clock` (`gameFrac()`, streamed) or of positions the guest already has, and nothing
+new rides in a net frame (`tracks`, `scars`, `puddles` are on the cleanNet skip list).
+
+| What | How | Bounded by |
+|---|---|---|
+| Dynamic snow | `snowCover() = 0.25 + 0.75·gameFrac()`; field sheet key carries `round(cover·12)`; stripes `mixHex(green, snow, cover)`; paint alpha × (1 − 0.55…0.7·cover); banks from cover 0.3 | 12 repaints a game |
+| Prints + scars | `markTurf()` → `G.tracks` (prints/mud, 0.16 s per moving player) and `G.scars` (whistle on TACKLED/SACKED!/FLATTENED! in `playDead`, plus `fxDust` cuts/catches/jukes); drawn under the players in `drawTurfMarks` | 220 + 60, per-index timers so a guest's fresh objects don't reset them |
+| Frozen breath | `breath` grains ≤35°F outdoors, 1.6–2.8 s per player, no budget gate (the compactor evicts weather grains first) | particle pool |
+| Dusk → night | `nightPhase()`; sky gradient cached per 1/16; sun sinks, stars/windows fade in after 0.5/0.4, light masts from 0.3 | one gradient per 1/16 |
+| Rain bands, puddles | `rainI()` 0.4–1.5× on spawn rate, streak alpha, overlay; `puddleRects()` cached per 1/20 of the game, shared with `inPuddle` | 20 rects |
+| Wind pennants | `drawGoalpostTop`: length 4–14 px from `wind.x`, direction by sign, flutter | — |
+| Catch meter | `drawJumpMeter()` in world space after `drawBall` (inside the punch-zoom wrap); zones from `timedJump`'s 0.35/0.6 s; `e.jumpAt` stamped on the jump; verdict from `jumpTimed/jumpMistimed`; held 0.7 s after landing | one small object |
+
+Gameplay side effect, deliberate: `resetJumpFlags()` runs on every throw (lob and bullet), not
+only when the user's receiver takes control, so a defender's PERFECT from the last play no
+longer counts in this play's jump ball.
+
+Verified: 12 Node suites green; GAMEDAY scenario 26/26; live in Chrome — Q1 dusting (key
+`…|3`, sky `dusk|0`), Q4 whiteout with banks and night tint (`…|12`, `dusk|16`), prints under
+the dinos in the 3× closeup, meter grades PERFECT! on a 0.2 s jump.
+
 ## DINO BOWL 2.3 — 2026-09-10 (shipped): YAC fade + safety chase flight
 
 Owner play-test: receivers never slowed after the catch, and the CPU quetzalcoatlus
