@@ -52,6 +52,23 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## DINO BOWL 2.5.1 — 2026-09-11 (shipped): THE KING over the wall; Gridiron total yards + contracts
+
+Owner on the first King: "the perspective isn't right" — a more detailed, different T-rex,
+only its head in frame (body outside the wall), the dino ON the wall facing it, claws and
+a bite. Rewritten as such: `KING_SKULL` / `KING_JAW` / `KING_CLAW` / `KING_DINO` pixel maps
+rendered once to offscreen canvases (`kingArt()`, jersey in team colour), `kingZones(h)`
+gives head / eyes / mouth / jaw rectangles for the frame (the head sways, tracks your lane
+before a bite, and lunges 150 px down during the strike), `WALL_Y = H − 100` is the
+parapet. Attacks: bite (jaw opens through the 0.9 s telegraph, strike window 0.12–0.34 s,
+lane 120) and claw (rises at the wall edge, slides to your lane, slams; lane 170). Rise
+1.3 s → roar 1.1 s before the first throw counts. Scenario: eye shot 2, plain head 1, bite
+costs a heart, sidestepped claw does not, HP 0 wins with +70 meter.
+
+Gridiron g14: `any_yards` sentinel for the bare word (position swap, `*` → total_yards) so
+"total yards" is always the sum; contracts from OTC via nflverse (`load_contracts`, cached),
+six columns, money in millions parsed by both engines; parity 68/68.
+
 ## DINO BOWL 2.5 — 2026-09-11 (shipped): THE KING, the CPU's own catch meter, a sampled playbook
 
 Owner list after 2.4, in his order of priority. Gridiron first: `data.json` was 404 because

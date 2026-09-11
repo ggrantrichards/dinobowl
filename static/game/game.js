@@ -26,7 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
-  const BUILD = "2.5";   // shown on the title; the shells carry the cache-bust token
+  const BUILD = "2.5.1";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -5112,7 +5112,8 @@
     } else if (kind === "snack") {
       Object.assign(h, { spawnT: 0.3, combo: 0 });
     } else if (kind === "trex") {
-      Object.assign(h, { t: 30, hp: 14, hpMax: 14, hearts: 3, px: W / 2, aimX: W / 2, aimY: 140, balls: [], sparks: [], atk: null, atkT: 2.6, roar: 1.4, flash: 0, heads: 0, thrown: 0, won: false });
+      Object.assign(h, { t: 32, hp: 16, hpMax: 16, hearts: 3, px: W / 2, aimX: W / 2, aimY: 150, balls: [], sparks: [], atk: null, atkT: 3.0,
+        rise: 0, roar: 0, jaw: 0, sway: 0, lunge: 0, flash: 0, throwPose: 0, hits: 0, crits: 0, thrown: 0, won: false, tag: null });
     }
     G.state = "halftime";
   }
@@ -5141,104 +5142,243 @@
     }
   }
   // ---------------------------------------------------- halftime: THE KING
-  // A giant T-rex looms top-left and roars. You are one small dino with a bag
-  // of footballs: mouse aims, click/space throws (headshots count double),
-  // A/D slides you out of the chomp lane he telegraphs in red. Three hearts,
-  // thirty seconds. Scare him off and the rampage meter is FED.
-  const KING = { x: 30, y: 30, w: 400, h: 330 };
-  const kingHead = () => ({ x: KING.x + KING.w * 0.52, y: KING.y + 10, w: KING.w * 0.46, h: KING.h * 0.42 });
+  // Colossal-Titan framing. You stand on top of the stadium wall with your
+  // back to the camera; only the King's head and neck clear the parapet, the
+  // rest of him is outside. Mouse aims, click/space throws a football up at
+  // the face (open mouth or an eye = double), A/D sidestep along the wall.
+  // He BITES (the head drops onto your lane) and SWIPES (a claw comes over the
+  // wall and slams your lane). Three hearts, 16 HP, 32 seconds.
+  const KS = 8;   // pixels per cell of the head art
+  const KING_PAL = { K: "#1a120c", B: "#7a4a22", D: "#4a2c12", L: "#a86a36", W: "#f4f0e0", R: "#ff2a1a", Y: "#ffd23f", N: "#2a1608", G: "#8a2a2a" };
+  const KING_SKULL = [
+    "..........KK..KKKKKKKKKKKK..KK..........",
+    "..........KDKKKBBBBBBBBBBBBKKKDK........",
+    ".........KKDBBBBBBBBBBBBBBBBBBDKK.......",
+    "........KBDBBBBLLLLLLLLLLBBBBBDBK.......",
+    ".......KBBBBBLLLLLLLLLLLLLLBBBBBK.......",
+    "......KBBBBBLLLLLLLLLLLLLLLLBBBBBK......",
+    "......KBKDDDDBLLLLLLLLLLLLBDDDDBBBK.....",
+    ".....KBBKDDKKKKDBLLLLLLBDKKKKDDDBBK.....",
+    ".....KBBDDKYYRRKDBLLLLBDKRRYYKDDBBK.....",
+    ".....KBBDDKYRRRKDBBLLBBDKRRRYKDDBBK.....",
+    ".....KBBBDDKKKKDBBBBBBBBDKKKKDDBBBK.....",
+    ".....KBBBBBDDDBBBBBBBBBBBBDDDBBBBBK.....",
+    "......KBDBDBBBBBBBBBBBBBBBBBBDBDBK......",
+    "......KDBDBBBBBBBBLLLLBBBBBBBBDBDK......",
+    ".......KBDBBBBBBBBLLLLBBBBBBBBDBK.......",
+    ".......KBBBBBBBBBBNNBBNNBBBBBBBBK.......",
+    "........KBBBBBBBBBNNBBNNBBBBBBBK........",
+    "........KBBBBBBBBBBBBBBBBBBBBBBK........",
+    ".........KBBBBBBBBBBBBBBBBBBBBK.........",
+    ".........KDDDDDDDDDDDDDDDDDDDDK.........",
+    ".........KWKWKWKWKWKWKWKWKWKWKK.........",
+    ".........KWKWKWKWKWKWKWKWKWKWKK.........",
+  ];
+  const KING_JAW = [
+    ".........KKWKWKWKWKWKWKWKWKWKK..........",
+    ".........KGWGWGWGWGWGWGWGWGWGK..........",
+    ".........KDDDDDDDDDDDDDDDDDDDDK.........",
+    "..........KDDDDDDDDDDDDDDDDDDK..........",
+    "..........KBBBBBBBBBBBBBBBBBBK..........",
+    "...........KBBBBBBBBBBBBBBBBK...........",
+    "............KBBBBBBBBBBBBBBK............",
+    ".............KKKKKKKKKKKKKK.............",
+  ];
+  const KING_CLAW = [
+    "..KKK.....KKK.",
+    ".KWWK....KWWK.",
+    ".KWWKKKKKKWWK.",
+    "KKBBBBBBBBBBKK",
+    "KBBBBBBBBBBBBK",
+    "KBBBBDDBBBBBBK",
+    ".KBBBBBBBBBBK.",
+    ".KBBBBBBBBBBK.",
+    "..KBBBBBBBBK..",
+    "..KBBBBBBBBK..",
+    "...KBBBBBBK...",
+    "...KKKKKKKK...",
+  ];
+  // you, from behind: back of the head, jersey, tail toward the camera, feet on the wall
+  const KING_DINO = [
+    "....KKKK....", "...KGGGGK...", "...KGGGGK...", "....KGGK....", "..KKJJJJKK..", ".KJJJJJJJJK.",
+    ".KJJJJJJJJK.", ".KJJJJJJJJK.", "..KGGGGGGK..", "..KGGDDGGK..", "...KGDDGK...", "....KDDK....",
+    "...KGK.KGK..", "...KGK.KGK..", "...KGK.KGK..", "..KKK...KKK.",
+  ];
+  const KING_DINO_THROW = KING_DINO.map((r, y) => (y >= 1 && y <= 4) ? r.slice(0, 10) + (y === 1 ? "OO" : "JJ") : r);
+  function pixCanvas(rows, pal, sc) {
+    const c = document.createElement("canvas");
+    c.width = Math.max(...rows.map((r) => r.length)) * sc; c.height = rows.length * sc;
+    const g = c.getContext("2d");
+    rows.forEach((r, y) => { for (let x = 0; x < r.length; x++) { const ch = r[x]; if (pal[ch]) { g.fillStyle = pal[ch]; g.fillRect(x * sc, y * sc, sc, sc); } } });
+    return c;
+  }
+  let KING_ART = null;
+  function kingArt() {
+    const jersey = (TEAMS[G.my] && TEAMS[G.my][1]) || "#2d6a4f";
+    if (KING_ART && KING_ART.jersey === jersey) return KING_ART;
+    const dp = { K: "#1a120c", G: "#3f8f4a", D: "#2b6a35", J: jersey, O: "#c8742a" };
+    KING_ART = { jersey, skull: pixCanvas(KING_SKULL, KING_PAL, KS), jaw: pixCanvas(KING_JAW, KING_PAL, KS),
+      claw: pixCanvas(KING_CLAW, KING_PAL, 7), dino: pixCanvas(KING_DINO, dp, 4), dinoThrow: pixCanvas(KING_DINO_THROW, dp, 4) };
+    return KING_ART;
+  }
+  const WALL_Y = H - 100;   // top of the parapet you stand on
+  // where the head is this frame, and the rectangles a football can land in
+  function kingZones(h) {
+    const a = h.atk;
+    let hx = W / 2 - 20 * KS + Math.sin(h.sway * 0.7) * 30;
+    if (a && a.kind === "bite") hx += ((a.x - 20 * KS) - hx) * (a.tele > 0 ? 1 - a.tele / 0.9 : 1);
+    const hy = 92 + (1 - h.rise) * 460 + h.lunge * 150;
+    const open = h.jaw * 46;
+    return {
+      headX: hx, headY: hy, open,
+      head: { x: hx + 5 * KS, y: hy + KS, w: 30 * KS, h: 21 * KS },
+      eyes: [{ x: hx + 10 * KS, y: hy + 7 * KS, w: 5 * KS, h: 3 * KS }, { x: hx + 24 * KS, y: hy + 7 * KS, w: 5 * KS, h: 3 * KS }],
+      mouth: { x: hx + 9 * KS, y: hy + 21 * KS, w: 22 * KS, h: open + 2 * KS },
+      jaw: { x: hx + 9 * KS, y: hy + 22 * KS + open, w: 22 * KS, h: 8 * KS },
+    };
+  }
   function trexThrow(h) {
-    if (h.stun > 0 || h.roar > 0) return;
-    h.balls.push({ x: h.px, y: H - 78, fx: h.px, fy: H - 78, tx: h.aimX, ty: h.aimY, t: 0, T: 0.42 });
-    h.thrown++; sfx.juke();
+    if (h.stun > 0 || h.rise < 1 || h.roar > 0) return;
+    h.balls.push({ x: h.px + 18, y: WALL_Y - 52, fx: h.px + 18, fy: WALL_Y - 52, tx: h.aimX, ty: h.aimY, t: 0, T: 0.45 });
+    h.thrown++; h.throwPose = 0.22; sfx.juke();
   }
   function updateHalfTrex(dt) {
     const h = G.half;
-    if (h.roar > 0) { h.roar -= dt; G.shake = Math.max(G.shake || 0, 0.3); }
+    h.sway += dt;
+    if (h.rise < 1) {   // the head comes up over the wall, then he roars
+      h.rise = Math.min(1, h.rise + dt / 1.3);
+      if (h.rise >= 1) { h.roar = 1.1; crowdAww(1); }
+      return;
+    }
+    if (h.roar > 0) { h.roar -= dt; G.shake = Math.max(G.shake || 0, 0.35); h.jaw = Math.min(1, h.jaw + dt * 4); }
+    else if (!h.atk) h.jaw = Math.max(0, h.jaw - dt * 3);
     if (h.stun > 0) h.stun -= dt;
     if (h.flash > 0) h.flash -= dt;
+    if (h.throwPose > 0) h.throwPose -= dt;
+    if (h.tag && (h.tag.t -= dt) <= 0) h.tag = null;
     const kd = kdir();
-    if (h.stun <= 0) h.px = clamp(h.px + kd.x * 300 * dt, 50, W - 50);
-    if (mouse.x || mouse.y) { h.aimX = clamp(mouse.x, 0, W); h.aimY = clamp(mouse.y, 0, H - 100); }
-    const head = kingHead();
+    if (h.stun <= 0) h.px = clamp(h.px + kd.x * 320 * dt, 70, W - 70);
+    if (mouse.x || mouse.y) { h.aimX = clamp(mouse.x, 0, W); h.aimY = clamp(mouse.y, 0, WALL_Y - 30); }
+    const Z = kingZones(h);
+    const inR = (b, r) => r && b.tx > r.x && b.tx < r.x + r.w && b.ty > r.y && b.ty < r.y + r.h;
     for (const b of h.balls) {
       b.t += dt; const q = Math.min(1, b.t / b.T);
-      b.x = b.fx + (b.tx - b.fx) * q; b.y = b.fy + (b.ty - b.fy) * q - Math.sin(q * Math.PI) * 60;
+      b.x = b.fx + (b.tx - b.fx) * q; b.y = b.fy + (b.ty - b.fy) * q - Math.sin(q * Math.PI) * 40; b.q = q;
       if (q >= 1 && !b.done) {
         b.done = true;
-        const inHead = b.tx > head.x && b.tx < head.x + head.w && b.ty > head.y && b.ty < head.y + head.h;
-        const inBody = b.tx > KING.x && b.tx < KING.x + KING.w && b.ty > KING.y && b.ty < KING.y + KING.h;
-        if (inHead || inBody) {
-          h.hp -= inHead ? 2 : 1; h.hits++; if (inHead) h.heads++;
-          h.flash = 0.18; G.shake = Math.max(G.shake || 0, inHead ? 0.22 : 0.1); sfx.tackle();
-          for (let i = 0; i < 7; i++) h.sparks.push({ x: b.tx, y: b.ty, vx: rnd(-110, 110), vy: rnd(-120, 20), t: rnd(0.25, 0.5), c: inHead ? "#ffd23f" : "#f4f6f1" });
+        let dmg = 0, tag = null;
+        if (h.jaw > 0.55 && inR(b, Z.mouth)) { dmg = 2; tag = "DOWN THE HATCH!"; }
+        else if (Z.eyes.some((r) => inR(b, r))) { dmg = 2; tag = "RIGHT IN THE EYE!"; }
+        else if (inR(b, Z.head) || inR(b, Z.jaw)) dmg = 1;
+        if (dmg) {
+          h.hp -= dmg; h.hits++; if (dmg > 1) { h.crits++; h.tag = { text: tag, t: 0.9 }; }
+          h.flash = 0.18; G.shake = Math.max(G.shake || 0, dmg > 1 ? 0.25 : 0.1); sfx.tackle();
+          for (let i = 0; i < 7; i++) h.sparks.push({ x: b.tx, y: b.ty, vx: rnd(-110, 110), vy: rnd(-120, 20), t: rnd(0.25, 0.5), c: dmg > 1 ? "#ffd23f" : "#f4f6f1" });
         }
       }
     }
     h.balls = h.balls.filter((b) => !b.done);
     for (const sp of h.sparks) { sp.x += sp.vx * dt; sp.y += sp.vy * dt; sp.vy += 260 * dt; sp.t -= dt; }
     h.sparks = h.sparks.filter((sp) => sp.t > 0);
-    // the chomp: a telegraphed lane at your feet, then the bite
+    // attacks: a telegraphed lane on the wall, then the strike
     if (!h.atk) {
       h.atkT -= dt;
-      if (h.atkT <= 0 && h.roar <= 0) h.atk = { x: h.px, w: h.hits >= 6 ? 150 : 120, tele: 0.85, bite: 0, hit: false };
+      if (h.atkT <= 0 && h.roar <= 0) {
+        h.atk = Math.random() < 0.45
+          ? { kind: "claw", side: Math.random() < 0.5 ? -1 : 1, x: h.px, w: 170, tele: 0.85, strike: 0, hit: false }
+          : { kind: "bite", x: h.px, w: 120, tele: 0.9, strike: 0, hit: false };
+      }
     } else {
       const a = h.atk;
-      if (a.tele > 0) a.tele -= dt;
+      if (a.tele > 0) { a.tele -= dt; if (a.kind === "bite") h.jaw = Math.min(1, h.jaw + dt * 3); }
       else {
-        a.bite += dt;
-        if (a.bite < 0.3 && !a.hit && Math.abs(h.px - a.x) < a.w / 2) {
-          a.hit = true; h.hearts--; h.stun = 0.7; G.shake = Math.max(G.shake || 0, 0.4); sfx.tackle(); crowdAww(0.8);
+        a.strike += dt;
+        if (a.strike > 0.12 && a.strike < 0.34 && !a.hit && Math.abs(h.px - a.x) < a.w / 2) {
+          a.hit = true; h.hearts--; h.stun = 0.7; G.shake = Math.max(G.shake || 0, 0.45); sfx.tackle(); crowdAww(0.8);
         }
-        if (a.bite >= 0.5) { h.atk = null; h.atkT = rnd(1.4, 2.2) - Math.min(0.6, (30 - h.t) * 0.02); }
+        if (a.kind === "bite" && a.strike > 0.3) h.jaw = Math.max(0, h.jaw - dt * 6);
+        if (a.strike >= 0.75) { h.atk = null; h.atkT = rnd(1.5, 2.4) - Math.min(0.7, h.hits * 0.06); }
       }
     }
+    h.lunge = h.atk && h.atk.kind === "bite" && h.atk.tele <= 0 ? Math.sin(Math.min(1, h.atk.strike / 0.75) * Math.PI) : 0;
     if (h.hp <= 0 && !h.won) { h.won = true; halfReward(70); sfx.td(); crowdCheer(1); endHalftime(); return; }
     if (h.hearts <= 0 || h.t <= 0) { halfReward(10 + h.hits * 3); endHalftime(); }
   }
   function drawHalfTrex() {
-    const h = G.half;
-    G.camX = h.camX; drawField();
-    cx.fillStyle = "rgba(4,10,7,.55)"; cx.fillRect(0, 0, W, H);
-    const sheet = G.sheets.B || G.sheets.A, spr = sheet && sheet.rampage;
-    const breathe = Math.sin(performance.now() / 400) * 6;
-    const shakeX = h.roar > 0 ? rnd(-6, 6) : 0;
-    if (spr && spr.R && spr.R.length) {
-      const fi = ((performance.now() / (h.roar > 0 ? 80 : 220)) | 0) % spr.R.length;
-      cx.save(); cx.imageSmoothingEnabled = false;
-      if (h.flash > 0) cx.globalAlpha = 0.55;
-      cx.drawImage(spr.R[fi], KING.x + shakeX, KING.y + breathe, KING.w, KING.h);
-      cx.restore();
-    } else { cx.fillStyle = "#6d4520"; cx.fillRect(KING.x, KING.y, KING.w, KING.h); }
-    const head = kingHead(), pulse = 0.6 + 0.4 * Math.sin(performance.now() / 90);
-    cx.fillStyle = "rgba(255,40,30," + pulse + ")";
-    cx.fillRect(Math.round(head.x + head.w * 0.62 + shakeX), Math.round(head.y + head.h * 0.3 + breathe), 14, 8);
-    if (h.roar > 0) { cx.font = PF(22); cx.textAlign = "left"; cx.fillStyle = "#ff5533"; cx.fillText("ROAAAAR!", KING.x + KING.w + 20, 120); }
-    const hy = KING.y + KING.h + 14;
-    cx.fillStyle = "#0d2519"; cx.fillRect(KING.x, hy, 300, 12);
-    cx.fillStyle = "#ff4444"; cx.fillRect(KING.x, hy, 300 * clamp(h.hp / h.hpMax, 0, 1), 12);
-    cx.strokeStyle = "#f4f6f1"; cx.strokeRect(KING.x, hy, 300, 12);
-    cx.font = PF(8); cx.textAlign = "left"; cx.fillStyle = "#f4f6f1"; cx.fillText("THE KING  " + Math.max(0, h.hp) + "/" + h.hpMax, KING.x + 306, hy + 10);
-    if (h.atk) {
-      const a = h.atk;
-      cx.fillStyle = a.tele > 0 ? "rgba(255,60,40," + (0.18 + 0.22 * Math.abs(Math.sin(performance.now() / 70))) + ")" : "rgba(255,240,200,.35)";
-      cx.fillRect(a.x - a.w / 2, H - 150, a.w, 110);
-      if (a.tele <= 0) { cx.fillStyle = "#f4f6f1"; for (let i = 0; i < 6; i++) cx.fillRect(Math.round(a.x - a.w / 2 + 8 + i * (a.w / 6)), H - 150 + (i % 2) * 40, 10, 26); }
+    const h = G.half, art = kingArt(), Z = kingZones(h), now = performance.now();
+    // night over the rim of the stadium
+    cx.fillStyle = "#070d1c"; cx.fillRect(0, 0, W, H);
+    cx.fillStyle = "#e8ecf4";
+    for (let i = 0; i < 46; i++) cx.fillRect(((i * 197 + 31) % W), (i * 53) % (WALL_Y - 40), 2, 2);
+    cx.fillStyle = "#f4e9c0"; cx.fillRect(W - 110, 30, 18, 18);
+    // the neck comes up from behind the wall, widening toward the shoulders you cannot see
+    for (let y = Z.headY + 20 * KS; y < WALL_Y; y += KS) {
+      const q = (y - (Z.headY + 20 * KS)) / Math.max(1, WALL_Y - (Z.headY + 20 * KS));
+      const w = 22 * KS + q * 14 * KS;
+      cx.fillStyle = "#4a2c12"; cx.fillRect(Math.round(Z.headX + 20 * KS - w / 2), y, Math.round(w), KS);
+      cx.fillStyle = "#3a2010"; cx.fillRect(Math.round(Z.headX + 20 * KS - w / 2), y, Math.round(w * 0.18), KS);
     }
-    const me = G.sheets.A && G.sheets.A.troodon;
-    if (me && me.L && !(h.stun > 0 && ((performance.now() / 90) | 0) % 2)) {
-      const fi = ((performance.now() / 140) | 0) % me.L.length;
+    // the head: skull, open mouth, jaw
+    cx.save(); cx.imageSmoothingEnabled = false;
+    if (h.flash > 0) cx.globalAlpha = 0.6;
+    cx.drawImage(art.skull, Math.round(Z.headX), Math.round(Z.headY));
+    if (Z.open > 0) { cx.fillStyle = "#3a0a0e"; cx.fillRect(Math.round(Z.headX + 9 * KS), Math.round(Z.headY + 22 * KS), 22 * KS, Math.round(Z.open)); }
+    cx.drawImage(art.jaw, Math.round(Z.headX), Math.round(Z.headY + 22 * KS + Z.open));
+    cx.restore();
+    // eyes burn; brighter while he winds up a bite
+    const pulse = 0.35 + 0.35 * Math.sin(now / 90) + (h.atk && h.atk.kind === "bite" ? 0.3 : 0);
+    cx.fillStyle = "rgba(255,40,20," + Math.min(0.85, pulse) + ")";
+    for (const e of Z.eyes) cx.fillRect(Math.round(e.x) - 4, Math.round(e.y) - 4, e.w + 8, e.h + 8);
+    if (h.roar > 0) { cx.font = PF(22); cx.textAlign = "center"; cx.fillStyle = "#ff5533"; cx.fillText("ROAAAAR!", W / 2 + rnd(-4, 4), Z.headY - 6); }
+    // the lane he is about to hit, painted on the wall
+    const a = h.atk;
+    if (a) {
+      cx.fillStyle = a.tele > 0 ? "rgba(255,60,40," + (0.2 + 0.25 * Math.abs(Math.sin(now / 70))) + ")" : "rgba(255,240,200,.35)";
+      cx.fillRect(Math.round(a.x - a.w / 2), WALL_Y - 4, a.w, 64);
+    }
+    // the claw comes over the wall on one side, then slams your lane
+    if (a && a.kind === "claw") {
+      const up = a.tele > 0 ? 1 - a.tele / 0.85 : 1;
+      const edgeX = a.side < 0 ? 30 : W - 30 - art.claw.width;
+      const cxp = a.tele > 0 ? edgeX : edgeX + ((a.x - art.claw.width / 2) - edgeX) * Math.min(1, a.strike / 0.12);
+      const cyp = a.tele > 0 ? WALL_Y - up * (art.claw.height - 10) : WALL_Y - art.claw.height + 10 + Math.sin(Math.min(1, a.strike / 0.34) * Math.PI) * 30;
+      cx.save(); cx.imageSmoothingEnabled = false; cx.drawImage(art.claw, Math.round(cxp), Math.round(cyp)); cx.restore();
+    }
+    // the parapet: concrete cap, brick courses, the stands in shadow below and behind you
+    cx.fillStyle = "#9aa3a8"; cx.fillRect(0, WALL_Y, W, 10);
+    cx.fillStyle = "#6f7a80"; cx.fillRect(0, WALL_Y + 10, W, 50);
+    cx.fillStyle = "#5a646a";
+    for (let r = 0; r < 4; r++) for (let x = (r % 2) * 24 - 24; x < W; x += 48) cx.fillRect(x, WALL_Y + 12 + r * 12, 46, 10);
+    cx.fillStyle = "#0b1410"; cx.fillRect(0, WALL_Y + 60, W, H - WALL_Y - 60);
+    if (G.crowd) { cx.save(); cx.globalAlpha = 0.5; cx.drawImage(G.crowd, 0, 6, W, 40, 0, WALL_Y + 62, W, 40); cx.restore(); }
+    // you, on the wall
+    const me = h.throwPose > 0 ? art.dinoThrow : art.dino;
+    if (!(h.stun > 0 && ((now / 90) | 0) % 2)) {
       cx.save(); cx.imageSmoothingEnabled = false;
-      cx.drawImage(me.L[fi], Math.round(h.px - me.w), H - 60 - me.h * 2, me.w * 2, me.h * 2);
+      cx.drawImage(me, Math.round(h.px - art.dino.width / 2), WALL_Y - art.dino.height + 2);
       cx.restore();
     }
-    for (const b of h.balls) drawFootballAt(b.x, b.y);
+    cx.fillStyle = "rgba(0,0,0,.35)"; cx.fillRect(Math.round(h.px - 16), WALL_Y - 1, 32, 4);
+    // footballs shrink as they climb toward the face
+    for (const b of h.balls) {
+      const sz = Math.max(3, Math.round(9 * (1 - 0.55 * (b.q || 0))));
+      cx.fillStyle = "#b5651d"; cx.fillRect(Math.round(b.x - sz / 2), Math.round(b.y - sz * 0.35), sz, Math.round(sz * 0.7));
+      cx.fillStyle = "#f4f6f1"; cx.fillRect(Math.round(b.x - 1), Math.round(b.y - sz * 0.35), 2, Math.round(sz * 0.7));
+    }
     for (const sp of h.sparks) { cx.fillStyle = sp.c; cx.fillRect(Math.round(sp.x), Math.round(sp.y), 3, 3); }
+    // aim, hearts, HP, the crit tag
     cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(h.aimX - 8, h.aimY - 8, 16, 16); cx.lineWidth = 1;
     cx.fillStyle = "#ffd23f"; cx.fillRect(h.aimX - 1, h.aimY - 1, 3, 3);
     cx.font = PF(12); cx.textAlign = "left"; cx.fillStyle = "#ff5533";
-    cx.fillText("♥".repeat(Math.max(0, h.hearts)) + "♡".repeat(Math.max(0, 3 - h.hearts)), 20, H - 26);
-    drawHalfFrame("🦖 THE KING — " + Math.ceil(Math.max(0, h.t)) + "s", "MOUSE AIM · CLICK/SPACE THROW (HEAD = x2) · A/D DODGE THE RED CHOMP LANE");
+    cx.fillText("♥".repeat(Math.max(0, h.hearts)) + "♡".repeat(Math.max(0, 3 - h.hearts)), 20, H - 14);
+    const bx = W - 250, by = 96;
+    cx.fillStyle = "rgba(4,10,7,.8)"; cx.fillRect(bx - 6, by - 6, 232, 40);
+    cx.font = PF(8); cx.textAlign = "left"; cx.fillStyle = "#ff5533"; cx.fillText("THE KING  " + Math.max(0, h.hp) + "/" + h.hpMax, bx, by + 6);
+    cx.fillStyle = "#3a1010"; cx.fillRect(bx, by + 14, 220, 12);
+    cx.fillStyle = "#ff4444"; cx.fillRect(bx, by + 14, Math.round(220 * clamp(h.hp / h.hpMax, 0, 1)), 12);
+    cx.strokeStyle = "#f4f6f1"; cx.strokeRect(bx, by + 14, 220, 12);
+    if (h.tag) { cx.font = PF(11); cx.textAlign = "center"; cx.fillStyle = "#ffd23f"; cx.fillText(h.tag.text, W / 2, WALL_Y - 120); }
+    drawHalfFrame("🦖 THE KING — " + Math.ceil(Math.max(0, h.t)) + "s", "MOUSE AIM · CLICK/SPACE THROW · A/D SIDESTEP THE RED LANE · MOUTH OR EYE = x2");
   }
   function updateHalftime(dt) {
     const h = G.half;
@@ -5358,8 +5498,8 @@
     fg: (h) => ["FIELD GOAL FRENZY: " + h.score + "/" + h.kicks + "!", (h.score >= 4 ? "ICE IN THE VEINS — " : "") + "every make fed the rampage meter!"],
     dash: (h) => ["DINO DASH: " + Math.max(0, Math.round(ydAtX(h.px))) + " YARDS!", h.stumbles ? h.stumbles + " faceplant" + (h.stumbles > 1 ? "s" : "") + " — hurdles are undefeated" : "CLEAN RUN! The crowd is losing it!"],
     snack: (h) => ["SNACK SCRAMBLE: " + h.score + " SNACKS!", "golden drumsticks are 3 · the rampage meter thanks you"],
-    trex: (h) => [h.won ? "THE KING FLEES! " + h.hits + " HITS" : (h.hearts <= 0 ? "SQUISHED BY THE KING" : "THE KING GOT BORED"),
-      h.won ? (h.heads ? h.heads + " headshot" + (h.heads > 1 ? "s" : "") + " · " : "") + "the whole stadium is shaking · rampage meter FED" : "he'll be back · a little meter for trying"],
+    trex: (h) => [h.won ? "THE KING BACKS OFF! " + h.hits + " HITS" : (h.hearts <= 0 ? "EATEN OFF THE WALL" : "THE KING GOT BORED"),
+      h.won ? (h.crits ? h.crits + " down the hatch / in the eye · " : "") + "the whole stadium is shaking · rampage meter FED" : "he'll be back · a little meter for trying"],
   };
   function endHalftime() {
     const h = G.half; G.half = null;
@@ -12884,7 +13024,8 @@
       "One rampage per half.",
       "",
       "Halftime: mascot minigames feed the meter. Once in a while",
-      "THE KING shows up instead. Throw footballs. Dodge the chomp."]],
+      "THE KING shows up over the wall. Footballs at the face —",
+      "open mouth or an eye counts double. Sidestep the red lane."]],
     ["PLAYBOOK GLOSSARY — OFFENSE", [
       "FOUR VERTS ..... everyone sprints deep. Beats teams with few",
       "                 deep defenders; risky vs Cover 4.",
@@ -14674,6 +14815,7 @@
     spriteFrameFor: selectGameplaySpriteFrame,
     loop,   // headless browser pumping (rAF never fires in hidden panes)
     startHalftimeShow,
+    kingZones: () => G.half && G.half.kind === "trex" ? kingZones(G.half) : null,
     jumpMeter: () => meterMe,
     aiMeter: () => meterAi,
     bumpDynamicLadder, refreshDynamicDiff, diffScalar, ballSecurityScore,

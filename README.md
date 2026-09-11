@@ -125,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g13  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g14  # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -167,6 +167,22 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
+### Gridiron g14 (2026-09-11) — total yards is the sum, and contracts
+
+- **Total yards.** "total yards", "all-purpose yards", "yards from scrimmage" always mean
+  passing + rushing + receiving (a back's rushing + receiving, a QB's passing + rushing). The
+  bare word "yards" still means the position's own yards ("RBs with 1500 yards" = rushing),
+  and without a position it means the sum. Before, "total yards" was hijacked by that swap.
+- **Contracts.** Over The Cap data via nflverse, spread over the seasons each deal covers (an
+  extension replaces the old deal from its first season): `contract_apy` ($M per year),
+  `contract_value`, `contract_guaranteed`, `contract_cap_pct`, `contract_years`,
+  `contract_signed`. Ask "QBs making over $40 million a year in 2024", "the highest paid RBs
+  in 2025", "WRs with a contract over 25 million per year since 2020". Money reads in
+  millions ("$40M", "40 million", "40 mil"). Complete from 2011; `contract_apy` is in every
+  position's default columns. 27,732 contract-seasons.
+- Parity 68/68 (seven new questions). Pipeline: fetch_data (contracts cached at
+  `data/cache/contracts.parquet`) → export → page g14.
+
 ### Gridiron g13 (2026-09-11) — a back's yards per attempt are carries
 
 "RBs with over 1000 rushing yards in 2025 and over 4.7 yards/carry" read the slash form as
@@ -195,7 +211,13 @@ carries. Both engines; parity 61/61.
   the engine already runs. The sheet is **sampled** by score instead of sliced: the same
   down-and-distance no longer hands you the same four cards, plays on the last few sheets are
   penalised, and a sheet always mixes run and pass (short yardage included).
-- **THE KING.** One halftime in ten, instead of a mascot game, a giant T-rex looms top-left
+- **THE KING, second cut (owner: the perspective).** You stand on top of the stadium wall with
+  your back to the camera; only the King's head and neck clear the parapet, the body is outside.
+  Detailed pixel head (brow spikes, burning eyes, two rows of teeth, a jaw that opens), the
+  football shrinks as it climbs to the face, open mouth or an eye counts double. He BITES (the
+  head drops onto your lane) and SWIPES (a claw comes over the wall on one side and slams your
+  lane); both telegraph a red lane on the wall for ~0.9 s. 16 HP, 3 hearts, 32 s.
+- **THE KING, first cut.** One halftime in ten, instead of a mascot game, a giant T-rex looms top-left
   and roars. Mouse aims, click / space throws footballs (head = double damage), A / D slides
   you out of the red chomp lane. Three hearts, thirty seconds, 14 HP. Scare him off and the
   rampage meter is fed.

@@ -384,6 +384,17 @@ STAT_ALIASES = [
     ("yards per reception", "ypr"), ("yards per catch", "ypr"), ("y/r", "ypr"), ("ypr", "ypr"),
     ("catch percentage", "catch_pct"), ("catch rate", "catch_pct"), ("catch pct", "catch_pct"), ("catch %", "catch_pct"),
     ("touchdown percentage", "td_pct"), ("td percentage", "td_pct"), ("td rate", "td_pct"), ("td%", "td_pct"), ("td %", "td_pct"),
+    ("contract value", "contract_value"), ("total contract", "contract_value"), ("contract total", "contract_value"),
+    ("guaranteed money", "contract_guaranteed"), ("guaranteed", "contract_guaranteed"),
+    ("percent of the cap", "contract_cap_pct"), ("percentage of the cap", "contract_cap_pct"), ("cap percentage", "contract_cap_pct"),
+    ("cap hit", "contract_cap_pct"), ("cap %", "contract_cap_pct"),
+    ("contract years", "contract_years"), ("contract length", "contract_years"), ("year deal", "contract_years"), ("year contract", "contract_years"),
+    ("contract signed", "contract_signed"), ("signed in", "contract_signed"),
+    ("average per year", "contract_apy"), ("average annual value", "contract_apy"), ("annual value", "contract_apy"),
+    ("annual salary", "contract_apy"), ("salary per year", "contract_apy"), ("per year salary", "contract_apy"),
+    ("contract per year", "contract_apy"), ("contract apy", "contract_apy"), ("apy", "contract_apy"), ("aav", "contract_apy"),
+    ("salary", "contract_apy"), ("paid", "contract_apy"), ("making", "contract_apy"), ("earning", "contract_apy"), ("earns", "contract_apy"),
+    ("a year", "contract_apy"), ("per year", "contract_apy"), ("contract", "contract_apy"),
     ("total yards", "total_yards"), ("yards from scrimmage", "total_yards"), ("scrimmage yards", "total_yards"),
     ("all-purpose yards", "total_yards"),
     # ---- sacks, ball security
@@ -506,7 +517,7 @@ STAT_ALIASES = [
     ("forced fumbles", "forced_fumbles"), ("fumbles forced", "forced_fumbles"),
     ("defensive touchdowns", "def_tds"), ("defensive tds", "def_tds"),
     # ---- generic words, resolved by position in _find_stat (POS_SWAP)
-    ("touchdowns", "total_tds"), ("tds", "total_tds"), ("yards", "total_yards"),
+    ("touchdowns", "total_tds"), ("tds", "total_tds"), ("yards", "any_yards"),
 ]
 
 # word/phrase -> (list of raw position codes in the data, friendly label)
@@ -581,6 +592,8 @@ DISPLAY = {
     "rec_epa_per_target": "receiving EPA per target", "pass_epa": "passing EPA", "rush_epa": "rushing EPA", "rec_epa": "receiving EPA",
     "cpoe": "CPOE", "cpoe_ngs": "CPOE (NGS)", "xcomp_pct": "expected completion %", "qbr": "Total QBR",
     "qbr_raw": "raw QBR", "qbr_pts_added": "QBR points added", "qbr_plays": "QBR plays",
+    "contract_apy": "contract $M/yr", "contract_value": "contract total $M", "contract_guaranteed": "guaranteed $M",
+    "contract_cap_pct": "% of cap", "contract_years": "contract years", "contract_signed": "signed",
     "passer_rating": "passer rating", "td_pct": "TD %", "ypa": "yards/attempt", "ypc": "yards/carry", "ypr": "yards/reception",
     "catch_pct": "catch %", "pass_ypg": "passing yards/game", "rush_ypg": "rushing yards/game", "rec_ypg": "receiving yards/game",
     "total_ypg": "yards/game", "total_yards": "total yards", "touches": "touches",
@@ -644,7 +657,7 @@ ASCENDING_GOOD = {"interceptions", "int_rate", "sacks_taken", "sack_pct", "sack_
                   "cov_cmp_pct", "cov_yards", "cov_tds", "cov_rating", "cov_completions", "penalties", "penalty_yards",
                   "time_to_throw", "rush_efficiency", "draft_round", "draft_pick", "deep_int"}
 # fractions shown as percentages
-PCT_STATS = {"completion_pct", "int_rate", "td_pct", "sack_pct", "turnover_pct", "catch_pct", "pressure_rate", "blitz_pct",
+PCT_STATS = {"contract_cap_pct", "completion_pct", "int_rate", "td_pct", "sack_pct", "turnover_pct", "catch_pct", "pressure_rate", "blitz_pct",
              "qb_hit_rate", "missed_tackle_pct", "cov_cmp_pct", "pressured_pct", "drop_pct", "drop_pct_suffered",
              "bad_throw_pct", "on_target_pct", "aggressiveness", "stacked_box_pct", "iay_share", "xcomp_pct",
              "target_share", "air_yards_share", "fg_pct", "rush_pct_oe", "deep_cmp_pct"}
@@ -657,13 +670,13 @@ PP_STATS = {"cpoe", "cpoe_ngs"}
 ALWAYS_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games", "made_playoffs", "age"]
 POS_DEFAULTS = {
     "QB": ["pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "interceptions", "int_rate",
-           "passer_rating", "qbr", "epa_per_play", "cpoe", "ypa", "sacks_taken", "sack_pct", "turnover_pct", "rushing_yards", "rushing_tds"],
+           "passer_rating", "qbr", "epa_per_play", "cpoe", "ypa", "sacks_taken", "sack_pct", "turnover_pct", "rushing_yards", "rushing_tds", "total_yards", "contract_apy"],
     "RB": ["carries", "rushing_yards", "ypc", "rushing_tds", "receptions", "receiving_yards", "receiving_tds", "total_yards",
-           "total_ypg", "fumbles_lost", "epa_per_play", "ryoe_per_att", "fantasy_ppr"],
+           "total_ypg", "fumbles_lost", "epa_per_play", "ryoe_per_att", "fantasy_ppr", "contract_apy"],
     "WR": ["targets", "receptions", "catch_pct", "receiving_yards", "ypr", "receiving_tds", "rec_ypg", "rec_yac", "drops",
-           "target_share", "separation", "rec_epa_per_target", "fantasy_ppr"],
+           "target_share", "separation", "rec_epa_per_target", "fantasy_ppr", "contract_apy"],
     "DEF": ["tackles", "tackles_for_loss", "sacks", "qb_hits", "pressures", "pressure_rate", "forced_fumbles", "fumble_recoveries",
-            "def_interceptions", "passes_defended", "def_tds", "int_tds", "fumble_rec_tds", "missed_tackle_pct", "cov_cmp_pct"],
+            "def_interceptions", "passes_defended", "def_tds", "int_tds", "fumble_rec_tds", "missed_tackle_pct", "cov_cmp_pct", "contract_apy"],
     "K": ["fg_made", "fg_att", "fg_pct", "fg_long", "pat_made", "pat_att"],
     "P": ["punts", "punt_yards", "punts_inside_20"],
 }
@@ -699,7 +712,8 @@ POS_SWAP = {
     "sacks": {"QB": "sacks_taken"},
     "fumbles": {"DEF": "forced_fumbles"},
     "total_tds": {"QB": "passing_tds", "RB": "rushing_tds", "FB": "rushing_tds", "WR": "receiving_tds", "TE": "receiving_tds", "DEF": "def_tds"},
-    "total_yards": {"QB": "passing_yards", "RB": "rushing_yards", "FB": "rushing_yards", "WR": "receiving_yards", "TE": "receiving_yards"},
+    # bare "yards": the position's own yards; without a position, the sum. "total yards" is always the sum.
+    "any_yards": {"QB": "passing_yards", "RB": "rushing_yards", "FB": "rushing_yards", "WR": "receiving_yards", "TE": "receiving_yards", "*": "total_yards"},
     # a back's "yards per attempt" / "attempts" are carries, not throws
     "ypa": {"RB": "ypc", "FB": "ypc"},
     "pass_attempts": {"RB": "carries", "FB": "carries"},
@@ -713,8 +727,11 @@ def _pos_group(codes):
 
 def _find_stat(text, start=0):
     r = _find_stat_raw(text, start)
-    if r and _POS_GROUP and _POS_GROUP in POS_SWAP.get(r[0], {}):
-        return (POS_SWAP[r[0]][_POS_GROUP], r[1], r[2])
+    swap = POS_SWAP.get(r[0]) if r else None
+    if swap:
+        col = swap.get(_POS_GROUP) if _POS_GROUP else None
+        col = col or swap.get("*")
+        if col: return (col, r[1], r[2])
     return r
 
 def _find_stat_raw(text, start=0):
@@ -840,6 +857,9 @@ def parse(query):
     global _POS_GROUP
     _POS_GROUP = None
     q = " " + query.lower().strip() + " "
+    # money is in millions: "$40 million", "$40m", "40 million", "40 mil" -> 40
+    q = re.sub(r"\$\s*(\d[\d,\.]*)\s*(million|mil|m)\b", r"\1", q)
+    q = re.sub(r"(\d[\d,\.]*)\s*(million|mil)\b", r"\1", q)
     # 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
     q = re.sub(r"(\d)['\u2019-](\d{1,2})(?:\"|''|\u201d| in\b|\b)", lambda m: str(int(m.group(1)) * 12 + int(m.group(2))), q)
     # A parenthetical that is only a length — "deep pass TDs (20+ yards)" — is

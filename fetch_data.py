@@ -32,6 +32,7 @@ import numpy as np
 import pandas as pd
 
 START_YEAR = 2000
+CONTRACTS_FROM = 2011   # Over The Cap's history is complete from here
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
 CACHE_DIR = os.path.join(DATA_DIR, "cache")
 OUT_FILE = os.path.join(DATA_DIR, "players.parquet")
@@ -241,7 +242,13 @@ DERIVED = {
     "ypr": "receiving_yards / receptions",
     "catch_pct": "receptions / targets",
     "rec_ypg": "receiving_yards / games",
-    "total_yards": "passing_yards + rushing_yards + receiving_yards",
+    "total_yards": "passing_yards + rushing_yards + receiving_yards (a back's rushing + receiving; a QB's passing + rushing)",
+    "contract_apy": "average $ per year, in millions, of the contract in force that season (Over The Cap via nflverse); an extension replaces the old deal from its first season",
+    "contract_value": "total value of that contract, $ millions",
+    "contract_guaranteed": "guaranteed money on that contract, $ millions",
+    "contract_cap_pct": "contract_apy as a percentage of the salary cap the year it was signed",
+    "contract_years": "length of that contract in seasons",
+    "contract_signed": "the season that contract was signed",
     "total_ypg": "total_yards / games",
     "total_tds": "rushing_tds + receiving_tds + special_teams_tds — touchdowns the player SCORED (a QB's TD passes are passing_tds)",
     "touches": "pass_attempts + carries + receptions + sacks_taken",
@@ -533,6 +540,34 @@ def load_snaps(years, pfr_to_gsis, rebuild=False):
     snaps = snaps[snaps["player_id"].notna()].drop(columns=["pfr_player_id"])
     return snaps.rename(columns={"offense_snaps": "off_snaps", "defense_snaps": "def_snaps"})
 
+def load_contracts():
+    """Over The Cap contracts via nflverse, spread over the seasons each deal covers."""
+    cache = os.path.join(CACHE_DIR, "contracts.parquet")
+    if os.path.exists(cache):
+        c = pd.read_parquet(cache)
+    else:
+        c = pd.read_parquet(BASE + "contracts/historical_contracts.parquet")
+        keep = [k for k in ["gsis_id", "year_signed", "years", "value", "apy", "guaranteed", "apy_cap_pct"] if k in c.columns]
+        c = c[keep]
+        os.makedirs(CACHE_DIR, exist_ok=True)
+        c.to_parquet(cache, index=False)
+    c = c.dropna(subset=["gsis_id", "year_signed"]).copy()
+    c["years"] = pd.to_numeric(c["years"], errors="coerce").fillna(1).clip(lower=1, upper=10).astype(int)
+    c["year_signed"] = c["year_signed"].astype(int)
+    rows = []
+    for r in c.itertuples(index=False):
+        for k in range(r.years):
+            rows.append((r.gsis_id, r.year_signed + k, r.year_signed, r.years, r.value, r.apy, r.guaranteed, r.apy_cap_pct))
+    out = pd.DataFrame(rows, columns=["player_id", "season", "contract_signed", "contract_years", "contract_value",
+                                      "contract_apy", "contract_guaranteed", "contract_cap_pct"])
+    # an extension signed mid-deal replaces the old one from its first season on
+    out = out.sort_values(["player_id", "season", "contract_signed"]).drop_duplicates(["player_id", "season"], keep="last")
+    pct = pd.to_numeric(out["contract_cap_pct"], errors="coerce")
+    out["contract_cap_pct"] = (pct * 100 if pct.max() <= 1.5 else pct).round(2)
+    for col in ["contract_value", "contract_apy", "contract_guaranteed"]:
+        out[col] = pd.to_numeric(out[col], errors="coerce").round(3)
+    return out
+
 def load_qbr(espn_to_gsis):
     """ESPN Total QBR season totals (regular season), keyed back to gsis ids."""
     try:
@@ -691,6 +726,11 @@ def main():
     ngs = load_ngs()
     if ngs is not None:
         df = df.merge(ngs, on=["player_id", "season"], how="left")
+    print("Contracts (Over The Cap via nflverse)...")
+    try:
+        df = df.merge(load_contracts(), on=["player_id", "season"], how="left")
+    except Exception as e:
+        print(f"  contracts skipped: {e}")
 
     # nflverse divides by zero in a few share columns; an infinite share is NA
     fcols = df.select_dtypes(include="float").columns

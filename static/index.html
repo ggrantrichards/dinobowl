@@ -795,9 +795,9 @@
     <iframe id="dinoFrame" title="Dino Bowl"></iframe>
   </div>
 
-  <script src="/gridiron/engine.js?v=g13"></script>
+  <script src="/gridiron/engine.js?v=g14"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g13';
+    const DATA_URL = '/gridiron/data.json?v=g14';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -909,6 +909,7 @@
       if (DEEP_RE.test(c)) return { text: "counted from nflverse play-by-play, regular season", from: /^deep_/.test(c) ? 2006 : cov.box_score };
       if (["height", "weight", "college", "draft_year", "draft_round", "draft_pick", "rookie_season", "age", "headshot_url"].includes(c)) return { text: "nflverse players database", from: null };
       if (["playoff_wins", "super_bowl_wins"].includes(c)) return { text: "postseason results from nflverse play-by-play", from: cov.box_score };
+      if (/^contract_/.test(c)) return { text: "Over The Cap contracts via nflverse — the deal in force that season, $ in millions", from: cov.contracts };
       return { text: "nflverse player stats, regular season", from: cov.box_score };
     }
     function renderGlossary() {

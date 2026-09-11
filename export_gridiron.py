@@ -77,7 +77,7 @@ def main():
         "rank_desc": fd.RANK_DESC,
         "rate_ranks": [list(r) for r in fd.RATE_RANKS],
         "derived": fd.DERIVED,
-        "coverage": {"box_score": fd.START_YEAR, "pfr": fd.PFR_FROM, "snaps": fd.SNAPS_FROM, "qbr": fd.QBR_FROM, "ngs": fd.NGS_FROM},
+        "coverage": {"box_score": fd.START_YEAR, "pfr": fd.PFR_FROM, "snaps": fd.SNAPS_FROM, "qbr": fd.QBR_FROM, "ngs": fd.NGS_FROM, "contracts": fd.CONTRACTS_FROM},
     }
     os.makedirs(OUT_DIR, exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:

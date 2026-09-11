@@ -56,7 +56,7 @@
       sacks: { QB: "sacks_taken" },
       fumbles: { DEF: "forced_fumbles" },
       total_tds: { QB: "passing_tds", RB: "rushing_tds", FB: "rushing_tds", WR: "receiving_tds", TE: "receiving_tds", DEF: "def_tds" },
-      total_yards: { QB: "passing_yards", RB: "rushing_yards", FB: "rushing_yards", WR: "receiving_yards", TE: "receiving_yards" },
+      any_yards: { QB: "passing_yards", RB: "rushing_yards", FB: "rushing_yards", WR: "receiving_yards", TE: "receiving_yards", "*": "total_yards" },
       ypa: { RB: "ypc", FB: "ypc" },                 // a back's yards per attempt are carries
       pass_attempts: { RB: "carries", FB: "carries" },
     };
@@ -64,7 +64,8 @@
     const posGroupOf = (codes) => !codes ? null : (codes.some((c) => DEF_CODES.has(c)) ? "DEF" : codes[0]);
     function findStat(text, start) {
       const r = findStatRaw(text, start);
-      if (r && posGroup && POS_SWAP[r[0]] && POS_SWAP[r[0]][posGroup]) return [POS_SWAP[r[0]][posGroup], r[1], r[2]];
+      const swap = r && POS_SWAP[r[0]];
+      if (swap) { const col = (posGroup && swap[posGroup]) || swap["*"]; if (col) return [col, r[1], r[2]]; }
       return r;
     }
     function findStatRaw(text, start) {
@@ -176,6 +177,9 @@
       posGroup = null;
       let q = " " + String(query).toLowerCase().trim() + " ";
       // 6'2 / 6-2" style heights become inches so "taller than 6'2" just works
+      // money is in millions: "$40 million", "$40m", "40 million", "40 mil" -> 40
+      q = q.replace(/\$\s*(\d[\d,\.]*)\s*(million|mil|m)\b/g, "$1");
+      q = q.replace(/(\d[\d,\.]*)\s*(million|mil)\b/g, "$1");
       q = q.replace(/(\d)['’-](\d{1,2})(?:"|''|”| in\b|\b)/g, (m, f, i) => String(parseInt(f, 10) * 12 + parseInt(i, 10)));
       // A parenthetical that is only a length — "deep pass TDs (20+ yards)" — is
       // restating what the stat already means, not asking for a second filter.

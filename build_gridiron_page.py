@@ -227,6 +227,7 @@ BODY = r"""
       if (DEEP_RE.test(c)) return { text: "counted from nflverse play-by-play, regular season", from: /^deep_/.test(c) ? 2006 : cov.box_score };
       if (["height", "weight", "college", "draft_year", "draft_round", "draft_pick", "rookie_season", "age", "headshot_url"].includes(c)) return { text: "nflverse players database", from: null };
       if (["playoff_wins", "super_bowl_wins"].includes(c)) return { text: "postseason results from nflverse play-by-play", from: cov.box_score };
+      if (/^contract_/.test(c)) return { text: "Over The Cap contracts via nflverse — the deal in force that season, $ in millions", from: cov.contracts };
       return { text: "nflverse player stats, regular season", from: cov.box_score };
     }
     function renderGlossary() {
