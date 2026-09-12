@@ -76,6 +76,9 @@ def main():
         "def_stat_cols": sorted(qe.DEF_STAT_COLS),
         "rank_desc": fd.RANK_DESC,
         "rate_ranks": [list(r) for r in fd.RATE_RANKS],
+        "rate_parts": fd.RATE_PARTS,
+        "max_cols": fd.MAX_COLS,
+        "sum_cols": qe.sum_cols(df, fd.RANK_DESC, fd.RATE_PARTS, fd.NEVER_SUM, fd.MAX_COLS),
         "derived": fd.DERIVED,
         "coverage": {"box_score": fd.START_YEAR, "pfr": fd.PFR_FROM, "snaps": fd.SNAPS_FROM, "qbr": fd.QBR_FROM, "ngs": fd.NGS_FROM, "contracts": fd.CONTRACTS_FROM},
     }

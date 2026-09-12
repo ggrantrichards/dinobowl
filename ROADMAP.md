@@ -52,6 +52,35 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## GRIDIRON g16 — 2026-09-12 (shipped): season or career, decided by the span
+
+Owner: "most deep pass TDs since 2021" answered with one season. "How should we figure out
+if its in one season or adding up all seasons since then?" The rule, in both engines:
+
+- `career_scope(conds, res, sums, rate_parts, rate_ranks)` / `careerScope(idx, conds)`:
+  a `scope: season` condition (parsed from "in a season", "single season", "best season",
+  "per season") or a `rank` condition forces season lines; fewer than two distinct seasons in
+  the result forces season lines; otherwise a `sort` on a summable column, or on a rebuildable
+  rate, is a CAREER question. Thresholds never sum.
+- `sum_cols(df, ...)` is the one source of truth for what a career value adds up, computed
+  from the whole table and shipped in `meta.sum_cols`; `games` is an identity column on a
+  season line and a total on a career line. `MAX_COLS` (`fg_long`) takes the max, `NEVER_SUM`
+  (years, salaries) is dropped.
+- `RATE_PARTS` in fetch_data: auto-read from `DERIVED` for every `a / b` formula, hand-written
+  for sack%, EPA/play, the PFR rates, FG% and passer rating (`"rating"` sentinel, the
+  four-part NFL formula). `rate_value` rebuilds; `r4` rounds identically in both engines.
+- Qualifiers: `rate_floor` returns (qualifier column, minimum, per-game?), and a career floor
+  scales by scheduled games (17 from 2021, 16 before) summed over the player's matched
+  seasons, exactly the season rule extended. Season-mode rate sorts tier unqualified seasons
+  below qualified ones (`sort_result` / `sortIdx`), which fixed "best QBR since 2021" opening
+  on a two-game backup.
+- `readNotes`: present() returns the reading notes separately from the clause notes, because
+  the page's `#conds` list is index-aligned with `S.conds` and a × on a prose note would have
+  dropped the wrong clause. The page merges them into `#readnotes`, and `sortRows` now returns
+  the engine's order untouched when the requested sort IS the engine's sort.
+
+Parity 83/83, comparing notes, readNotes, ignored, keys, first-10 order and the career rows.
+
 ## DINO BOWL 2.5.2 + GRIDIRON g15 — 2026-09-11 (shipped)
 
 - Forward pass past the LOS: `e.canPass = false` the frame `x > xAtYd(losYd) + 2` (any

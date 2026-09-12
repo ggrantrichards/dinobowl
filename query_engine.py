@@ -313,6 +313,7 @@
 """
 Gridiron — query engine.
 """
+import math
 import re
 import pandas as pd
 from rapidfuzz import process, fuzz, utils
@@ -1043,6 +1044,9 @@ def parse(query):
         notes.append(f"{DISPLAY.get(col, col)} {_SIGN['>=']} {shown}")
         spans.append((mm.start(), end))
 
+    # the escape hatch that keeps a multi-season question on season lines
+    if re.search(r"\bin a (?:single )?season\b|\bsingle[- ]season\b|\bbest season\b|\bper season\b|\bseason with the\b", q):
+        conds.append({"kind": "scope", "value": "season"})
     if not conds:
         raise QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.")
     # "5 rings" is a career count; a season holds one at most. Keep the season
@@ -1055,50 +1059,154 @@ def parse(query):
                 conds.append({"kind": "sort", "col": "super_bowl_wins", "asc": False})
     return conds, notes, ignored
 
-# ---- career totals: "most Super Bowl wins" / "most playoff wins" / "N rings" are
-# questions about players, not seasons. One row per player, counting stats summed,
-# identity from the latest matched season, the season column showing the span.
+# ---- CAREER OR SEASON: which question is being asked -----------------------
+# A row in this table is one season, so "most X" needs a reading. The span
+# decides it and the word "season" overrides it:
+#   "most X in 2024"                 one season, nothing to decide
+#   "most X since 2021"              CAREER — the matched seasons added up
+#   "most X in a season since 2021"  the best single line
+#   "over 4000 X since 2021"         a THRESHOLD is always per season
+#   "top 10 by X since 2021"         a RANK is always per season
+# Rates are rebuilt from the totals (yards/attempt = total yards / total
+# attempts) and keep their qualifying minimum, scaled to the span. A rate with
+# no parts to rebuild from (QBR, CPOE, Next Gen) stays on season lines and says
+# so, instead of averaging four numbers and calling that a career.
 CAREER_TRIGGERS = {"super_bowl_wins", "playoff_wins"}
 CAREER_NOTE = "career totals — one row per player, the matched seasons added up; the season column shows the span"
+def r4(x): return math.floor(x * 10000 + 0.5) / 10000   # one rounding, shared with the browser engine
 
-def is_career(conds):
-    return any((c["kind"] == "sort" and c["col"] in CAREER_TRIGGERS) or (c["kind"] == "threshold" and c.get("career")) for c in conds)
+def sum_cols(df, rank_desc, rate_parts, never_sum, max_cols):
+    """Columns whose career value is their sum. Computed once from the whole table
+    and shipped to the browser engine, so both read the identical list."""
+    # games is an identity column on a season line and a total on a career line
+    skip = (set(ALWAYS_COLS) - {"games"}) | PCT_STATS | PP_STATS | set(rate_parts) | set(never_sum) | set(max_cols)
+    out = []
+    for c in df.columns:
+        if c in skip or c.endswith("_rank") or c == "made_playoffs":
+            continue
+        if c in rank_desc or c in CAREER_TRIGGERS:
+            out.append(c); continue
+        v = pd.to_numeric(df[c], errors="coerce").dropna()
+        if len(v) and float(v.mod(1).abs().max()) == 0:
+            out.append(c)
+    return sorted(out)
 
-def career_rows(res, conds, rank_desc):
-    counting = set(rank_desc) | CAREER_TRIGGERS | {"games"}
-    keep = [c for c in res.columns if (c in ALWAYS_COLS and c != "made_playoffs") or c in counting]
+RATING_PARTS = ("completions", "pass_attempts", "passing_yards", "passing_tds", "interceptions")
+
+def rate_ok(parts, cols):
+    return all(c in cols for c in (RATING_PARTS if parts == "rating" else parts[0] + parts[1]))
+
+def rate_value(get, parts):
+    """Rebuild one rate from career totals. `get(col)` returns the summed total."""
+    if parts == "rating":
+        att = get("pass_attempts")
+        if not att: return None
+        cap = lambda x: max(0.0, min(2.375, x))
+        a = cap((get("completions") / att - 0.3) * 5)
+        b = cap((get("passing_yards") / att - 3) * 0.25)
+        c = cap(get("passing_tds") / att * 20)
+        d = cap(2.375 - get("interceptions") / att * 25)
+        return r4((a + b + c + d) / 6 * 100)
+    den = sum(get(x) for x in parts[1])
+    if not den: return None
+    return r4(sum(get(x) for x in parts[0]) / den)
+
+def rate_floor(col, rate_ranks):
+    """(qualifier column, minimum, is that minimum per game?) for a rate, or None."""
+    for c, _asc, qual, minimum, per_game in rate_ranks:
+        if c == col: return qual, minimum, bool(per_game)
+    return None
+
+def rate_notes(col, rate_ranks):
+    out = [f"{DISPLAY.get(col, col)} is rebuilt from the career totals, not averaged"]
+    fl = rate_floor(col, rate_ranks)
+    if fl:
+        out.append(f"ranked only for a player with at least {fl[1]:g} {DISPLAY.get(fl[0], fl[0])} per {'scheduled game' if fl[2] else 'season'} over the span")
+    return out
+
+def career_scope(conds, res, sums, rate_parts, rate_ranks):
+    """(career?, extra notes) — the reading this question gets."""
+    if any(c["kind"] == "scope" and c["value"] == "season" for c in conds): return False, []
+    if any(c["kind"] == "rank" for c in conds): return False, []
+    if res["season"].nunique() < 2: return False, []
+    sort = next((c for c in conds if c["kind"] == "sort"), None)
+    if sort is None:
+        return any(c["kind"] == "threshold" and c.get("career") for c in conds), []
+    col = sort["col"]
+    if col in sums: return True, []
+    if col in rate_parts and rate_ok(rate_parts[col], res.columns):
+        return True, rate_notes(col, rate_ranks)
+    if col in rate_parts or col in PCT_STATS or col in PP_STATS:
+        return False, [f"{DISPLAY.get(col, col)} is a per-season rate I can't rebuild across seasons — these are season lines"]
+    return False, []
+
+def career_rows(res, conds, sums, rate_parts, rate_ranks, max_cols):
+    cols = set(res.columns)
+    rates = [c for c in res.columns if c in rate_parts and rate_ok(rate_parts[c], cols)]
+    maxes = [c for c in max_cols if c in cols]
+    ident = [c for c in ALWAYS_COLS if c in cols and c != "made_playoffs"]
+    base = result_columns(res, conds)
+    keep = ident + [c for c in base if c not in ident and (c in sums or c in maxes or c in rates)]
     for extra in ("playoff_wins", "super_bowl_wins"):   # always carried: they break ties
-        if extra in res.columns and extra not in keep: keep.append(extra)
+        if extra in cols and extra not in keep: keep.append(extra)
     if res.empty:
-        return res[keep]
+        return res.reindex(columns=keep)
+    sort = next((c for c in conds if c["kind"] == "sort" and c["col"] in keep), None) or {"col": "super_bowl_wins", "asc": False}
+    fl = rate_floor(sort["col"], rate_ranks) if sort["col"] in rates else None
+    # every column a kept rate is made of, plus the sorted rate's qualifier
+    need = {c for r in rates for c in (RATING_PARTS if rate_parts[r] == "rating" else rate_parts[r][0] + rate_parts[r][1])}
+    need |= {"games"} | ({fl[0]} if fl else set())
+    want = [c for c in (set(keep) | need) if c in cols]
     rows = []
-    for pid, g in res.groupby("player_id", sort=False):
+    for _pid, g in res.groupby("player_id", sort=False):
         g = g.sort_values("season")
         last = g.iloc[-1]
-        r = {c: last[c] for c in keep if c not in counting}
+        tot, seen = {}, {}
+        for c in want:
+            v = pd.to_numeric(g[c], errors="coerce")
+            seen[c] = bool(v.notna().any())
+            tot[c] = float(v.sum()) if seen[c] else 0.0
+        r = {c: last[c] for c in ident if c != "season"}
         lo, hi = int(g["season"].min()), int(g["season"].max())
         r["season"] = str(lo) if lo == hi else f"{lo}–{hi}"
         for c in keep:
-            if c in counting:
+            if c in rates: r[c] = rate_value(lambda x: tot.get(x, 0.0), rate_parts[c])
+            elif c in maxes:
                 v = pd.to_numeric(g[c], errors="coerce")
-                r[c] = float(v.sum()) if v.notna().any() else None
+                r[c] = float(v.max()) if v.notna().any() else None
+            elif c in sums: r[c] = tot[c] if seen.get(c) else None
+        r["_qual"] = tot.get(fl[0], 0.0) if fl else 0.0
+        sched = float(sum(17 if int(y) >= 2021 else 16 for y in g["season"]))
+        r["_floor"] = (sched if fl and fl[2] else float(len(g))) * (fl[1] if fl else 0)
         rows.append(r)
-    out = pd.DataFrame(rows, columns=keep)
+    out = pd.DataFrame(rows, columns=keep + ["_qual", "_floor"])
     th = next((c for c in conds if c["kind"] == "threshold" and c.get("career")), None)
-    if th is not None:
+    if th is not None and th["col"] in out.columns:
         out = out[out[th["col"]].fillna(0) >= th["career"]]
-    s = next((c for c in conds if c["kind"] == "sort" and c["col"] in counting), None) or {"col": "super_bowl_wins", "asc": False}
-    by = [s["col"]] + [c for c in ("playoff_wins", "player_display_name", "player_id") if c != s["col"] and c in out.columns]
-    asc = [bool(s["asc"])] + [c != "playoff_wins" for c in by[1:]]
+    if fl:   # a rate ranks only a player who cleared the bar over the whole span
+        out = out[out["_qual"] >= out["_floor"]]
+    out = out.drop(columns=["_qual", "_floor"])
+    by = [sort["col"]] + [c for c in ("playoff_wins", "player_display_name", "player_id") if c != sort["col"] and c in out.columns]
+    asc = [bool(sort["asc"])] + [c != "playoff_wins" for c in by[1:]]
     return out.sort_values(by, ascending=asc, na_position="last").reset_index(drop=True)
 
-def sort_result(res, conds):
-    """Result order: an explicit "most/fewest X" first, otherwise newest season."""
+def sort_result(res, conds, rate_ranks=None):
+    """Result order: an explicit "most/fewest X" first, otherwise newest season.
+    A rate leaderboard is only meaningful among players with the volume to qualify,
+    so unqualified seasons sink to the bottom instead of topping the table."""
     s = next((c for c in conds if c["kind"] == "sort" and c["col"] in res.columns), None)
-    if s is not None:
-        return res.sort_values([s["col"], "season", "player_display_name"],
-                               ascending=[s["asc"], False, True], na_position="last")
-    return res.sort_values(["season", "player_display_name"], ascending=[False, True])
+    if s is None:
+        return res.sort_values(["season", "player_display_name"], ascending=[False, True])
+    fl = rate_floor(s["col"], rate_ranks) if rate_ranks else None
+    if fl and fl[0] in res.columns:
+        sched = res["season"].map(lambda y: 17 if int(y) >= 2021 else 16)
+        need = fl[1] * sched if fl[2] else fl[1]
+        res = res.assign(_unq=(pd.to_numeric(res[fl[0]], errors="coerce").fillna(0) < need).astype(int))
+        out = res.sort_values(["_unq", s["col"], "season", "player_display_name"],
+                              ascending=[True, s["asc"], False, True], na_position="last")
+        return out.drop(columns=["_unq"])
+    return res.sort_values([s["col"], "season", "player_display_name"],
+                           ascending=[s["asc"], False, True], na_position="last")
 
 def run(df, query):
     res, notes, _conds, _ignored = run_full(df, query)
@@ -1142,8 +1250,6 @@ def run_full(df, query):
                 mask &= aligned_rank.notna() & (aligned_rank <= c["n"])
 
     res = df[mask].copy()
-    if is_career(conds):
-        notes = notes + [CAREER_NOTE]
     return res, notes, conds, ignored
 
 RESULT_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games",

@@ -125,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g15  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g16  # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -166,6 +166,38 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g16 (2026-09-12) — season or career, decided by the span
+
+"The most deep pass TDs since 2021" was answering with the best single season. A row in this
+table is one season, so "most X" needs a reading, and the span decides it:
+
+| Question | Reading |
+|---|---|
+| most X **in 2024** | that season — nothing to decide |
+| most X **since 2021** | **career** — the matched seasons added up |
+| most X **in a season** since 2021 | the best single line ("single season", "best season", "per season" all work) |
+| **over 4000** X since 2021 | a threshold is always per season |
+| **top 10** by X since 2021 | a rank is always per season |
+
+Rates are **rebuilt from the totals**, never averaged: yards per attempt over four years is
+total yards / total attempts, passer rating is recomputed from the summed attempts,
+completions, yards, touchdowns and interceptions. `fetch_data.RATE_PARTS` says what each rate
+is made of (read out of `DERIVED` where the formula is `a / b`, hand-written for the rest); a
+rate with no parts to rebuild from — QBR, CPOE, Next Gen — stays on season lines and says so
+rather than averaging four numbers and calling it a career. Rebuilt rates keep their
+qualifying minimum, scaled to the span (14 attempts per scheduled game, so 2021-2025 needs
+1,190). Career rows sum counting stats, take the longest for `fg_long`, drop what cannot be
+added (a salary, a year), show the span in the season column, and count "players".
+
+Also: **rate leaderboards now qualify**. Sorting by a rate on season lines used to put a
+two-game backup on top of "best QBR since 2021"; seasons under the minimum now sit below the
+ones above it, and the page keeps the engine's order instead of re-sorting it away. And the
+engine's reading notes (career totals, rebuilt rate, qualifier) finally **render** — they ride
+in their own `readNotes` field so the clause pills stay index-aligned with their × buttons.
+
+Parity 83/83 (ten new questions). The summable-column list and the rate parts are computed
+once and shipped in `meta`, so both engines read the identical lists.
 
 ### Gridiron g15 (2026-09-11) — rings go to the men who played, and "most" means a career
 

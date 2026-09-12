@@ -795,9 +795,9 @@
     <iframe id="dinoFrame" title="Dino Bowl"></iframe>
   </div>
 
-  <script src="/gridiron/engine.js?v=g15"></script>
+  <script src="/gridiron/engine.js?v=g16"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g15';
+    const DATA_URL = '/gridiron/data.json?v=g16';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -1052,6 +1052,8 @@
     }
     function present(d, keepSort) {
       S.d = d;
+      S.readNotes = d.readNotes || [];   // how the engine read the question: career vs season, rebuilt rates
+      S.engineSort = d.sort ? { col: d.sort.col, dir: d.sort.asc ? 'asc' : 'desc' } : null;
       // keep the sort if that column is still on screen (#15)
       S.sort = keepSort && d.columns.includes(keepSort.col) ? keepSort : (d.sort ? { col: d.sort.col, dir: d.sort.asc ? 'asc' : 'desc' } : null);
       renderRead();
@@ -1082,7 +1084,7 @@
       // coverage notes (#4): a stat that starts in 2018 cannot match earlier seasons
       const range = S.conds.find(c => c.kind === 'season_range');
       const from = range && range.min != null ? range.min : META.seasons[0];
-      const notes = [];
+      const notes = (S.readNotes || []).map(esc);
       for (const c of S.conds) {
         if (!c.col) continue;
         const s = sourceOf(c.col);
@@ -1195,6 +1197,11 @@
 
     function sortRows(rows, sort) {
       if (!sort) return rows;
+      // The engine already ordered these, and its order carries things a plain
+      // column sort cannot see: a rate leaderboard keeps seasons below the
+      // qualifying minimum underneath the ones above it. Re-sorting the same
+      // column here would flatten that and put a two-game backup on top.
+      if (S.engineSort && sort.col === S.engineSort.col && sort.dir === S.engineSort.dir) return rows;
       const dir = sort.dir === 'desc' ? -1 : 1, col = sort.col;
       return rows.slice().sort((a, b) => {
         const va = a[col], vb = b[col];

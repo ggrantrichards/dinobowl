@@ -25,6 +25,7 @@ formula named in DERIVED below. Nothing is estimated. Where a source does not
 cover a season the column is NA and the UI shows a dash.
 """
 import argparse
+import re
 import datetime as dt
 import json, os
 import sys
@@ -296,6 +297,39 @@ DERIVED = {
     "deep_targets": "targets with 20+ air yards", "deep_recs": "catches with 20+ air yards",
     "deep_rec_yards": "yards on catches with 20+ air yards", "deep_rec_td": "TDs on catches with 20+ air yards",
 }
+
+# A rate over several seasons is REBUILT from the totals, never averaged: yards
+# per attempt across four years is total yards / total attempts. This says which
+# columns a rate is made of. Everything of the form "a / b" is read straight out
+# of DERIVED; the rest name their parts in prose and are written out here.
+def _rate_parts():
+    parts = {}
+    for col, formula in DERIVED.items():
+        m = re.fullmatch(r"([a-z_0-9]+) / ([a-z_0-9]+)", formula.strip())
+        if m: parts[col] = [[m.group(1)], [m.group(2)]]
+    parts.update({
+        "sack_pct": [["sacks_taken"], ["pass_attempts", "sacks_taken"]],
+        "epa_per_play": [["pass_epa", "rush_epa", "rec_epa"], ["touches"]],
+        "pass_epa_per_play": [["pass_epa"], ["pass_attempts"]],
+        "pressure_rate": [["pressures"], ["def_snaps"]],
+        "blitz_pct": [["blitzes"], ["def_snaps"]],
+        "qb_hit_rate": [["qb_hits"], ["def_snaps"]],
+        "drop_pct": [["drops"], ["targets"]],
+        "missed_tackle_pct": [["missed_tackles"], ["pfr_comb_tackles", "missed_tackles"]],
+        "cov_cmp_pct": [["cov_completions"], ["cov_targets"]],
+        "sack_per_blitz": [["sacks"], ["blitzes"]],
+        "pressured_pct": [["times_pressured"], ["pass_attempts"]],
+        "bad_throw_pct": [["bad_throws"], ["pass_attempts"]],
+        "fg_pct": [["fg_made"], ["fg_att"]],
+        "passer_rating": "rating",      # the four-part NFL formula, rebuilt from the totals
+    })
+    return parts
+RATE_PARTS = _rate_parts()
+MAX_COLS = ["fg_long"]          # a career "long" is the longest one, not the sum
+# never added up: a year is not a quantity, and a salary belongs to one contract
+NEVER_SUM = ["season", "age", "height", "weight", "draft_year", "draft_round", "draft_pick",
+             "rookie_season", "experience", "contract_apy", "contract_value", "contract_guaranteed",
+             "contract_cap_pct", "contract_years", "contract_signed"]
 
 def current_year():
     today = dt.date.today()

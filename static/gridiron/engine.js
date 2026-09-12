@@ -28,6 +28,8 @@
     }
     return prev[n];
   }
+  const RATING_PARTS = ["completions", "pass_attempts", "passing_yards", "passing_tds", "interceptions"];
+  const r4 = (x) => Math.floor(x * 10000 + 0.5) / 10000;   // one rounding, shared with the Python engine
   function ratio(a, b) {
     const tot = a.length + b.length;
     if (!tot) return 100;
@@ -361,6 +363,8 @@
         spans.push([mm.index, end]);
       }
 
+      // the escape hatch that keeps a multi-season question on season lines
+      if (/\bin a (?:single )?season\b|\bsingle[- ]season\b|\bbest season\b|\bper season\b|\bseason with the\b/.test(q)) conds.push({ kind: "scope", value: "season" });
       if (!conds.length) throw new QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.");
       // "5 rings" is a career count; a season holds one at most. Keep the season
       // filter at >= 1 and carry the real number for the career-totals pass.
@@ -537,8 +541,20 @@
       };
       const so = (conds || []).find((c) => c.kind === "sort" && this.has(c.col));
       if (!so) return idx.slice().sort(byName);
+      // A rate leaderboard is only meaningful among players who threw (ran,
+      // caught) enough: a two-game backup is not the best passer in the league.
+      // Unqualified seasons keep their place at the bottom rather than vanishing.
+      const fl = this.rateFloor(so.col);
+      const q = fl && this.has(fl.qual) ? this.cols[fl.qual] : null;
+      const unq = (i) => {
+        if (!q) return 0;
+        const need = fl.perGame ? fl.min * (this.cols.season[i] >= 2021 ? 17 : 16) : fl.min;
+        return (q[i] || 0) >= need ? 0 : 1;
+      };
       const v = this.cols[so.col], dir = so.asc ? 1 : -1;
       return idx.slice().sort((a, b) => {
+        const ua = unq(a), ub = unq(b);
+        if (ua !== ub) return ua - ub;
         const va = v[a], vb = v[b];
         if (va == null && vb == null) return byName(a, b);
         if (va == null) return 1;
@@ -554,51 +570,130 @@
     queryConds(conds, notes, ignored, limit) {
       return this.present(this.apply(conds), conds, notes, ignored, limit);
     }
-    // "most Super Bowl wins" / "most playoff wins" / "N rings" are questions about
-    // players, not seasons: one row per player, counting stats summed, identity
-    // from the latest matched season, the season column showing the span.
-    careerMode(conds) {
-      return conds.some((c) => (c.kind === "sort" && (c.col === "super_bowl_wins" || c.col === "playoff_wins")) || (c.kind === "threshold" && c.career));
+    // ---- CAREER OR SEASON ---------------------------------------------------
+    // A row here is one season, so "most X" needs a reading. The span decides it
+    // and the word "season" overrides it. Mirrors query_engine.py exactly:
+    //   "most X in 2024" one season · "most X since 2021" CAREER ·
+    //   "most X in a season since 2021" the best single line ·
+    //   a THRESHOLD or a "top N" RANK is always per season.
+    rateOk(parts) {
+      return (parts === "rating" ? RATING_PARTS : parts[0].concat(parts[1])).every((c) => this.has(c));
     }
-    presentCareer(idx, conds, notes, ignored, limit) {
+    rateValue(get, parts) {
+      if (parts === "rating") {
+        const att = get("pass_attempts");
+        if (!att) return null;
+        const cap = (x) => Math.max(0, Math.min(2.375, x));
+        const a = cap((get("completions") / att - 0.3) * 5);
+        const b = cap((get("passing_yards") / att - 3) * 0.25);
+        const c = cap(get("passing_tds") / att * 20);
+        const d = cap(2.375 - get("interceptions") / att * 25);
+        return r4((a + b + c + d) / 6 * 100);
+      }
+      const den = parts[1].reduce((t, x) => t + get(x), 0);
+      if (!den) return null;
+      return r4(parts[0].reduce((t, x) => t + get(x), 0) / den);
+    }
+    rateFloor(col) {
+      for (const r of this.meta.rate_ranks) if (r[0] === col) return { qual: r[2], min: r[3], perGame: !!r[4] };
+      return null;
+    }
+    rateNotes(col) {
+      const D = (c) => this.engine.DISPLAY[c] || c;
+      const out = [D(col) + " is rebuilt from the career totals, not averaged"];
+      const fl = this.rateFloor(col);
+      if (fl) out.push("ranked only for a player with at least " + fl.min + " " + D(fl.qual) + " per " + (fl.perGame ? "scheduled game" : "season") + " over the span");
+      return out;
+    }
+    careerScope(idx, conds) {
+      const M = this.meta, D = (c) => this.engine.DISPLAY[c] || c;
+      if (conds.some((c) => c.kind === "scope" && c.value === "season")) return { career: false, notes: [] };
+      if (conds.some((c) => c.kind === "rank")) return { career: false, notes: [] };
+      const seasons = new Set();
+      for (const i of idx) seasons.add(this.cols.season[i]);
+      if (seasons.size < 2) return { career: false, notes: [] };
+      const sort = conds.find((c) => c.kind === "sort");
+      if (!sort) return { career: conds.some((c) => c.kind === "threshold" && c.career), notes: [] };
+      const col = sort.col, parts = (M.rate_parts || {})[col];
+      if ((M.sum_cols || []).includes(col)) return { career: true, notes: [] };
+      if (parts && this.rateOk(parts)) return { career: true, notes: this.rateNotes(col) };
+      if (parts || M.pct_stats.includes(col) || (M.pp_stats || []).includes(col))
+        return { career: false, notes: [D(col) + " is a per-season rate I can't rebuild across seasons \u2014 these are season lines"] };
+      return { career: false, notes: [] };
+    }
+    presentCareer(idx, conds, notes, ignored, limit, extra) {
       const M = this.meta;
-      const counting = new Set([...M.rank_desc, "playoff_wins", "super_bowl_wins", "games"]);
-      const cols = this.resultColumns(idx, conds).filter((c) => (M.always_cols.includes(c) && c !== "made_playoffs") || counting.has(c));
-      for (const extra of ["playoff_wins", "super_bowl_wins"]) if (this.has(extra) && !cols.includes(extra)) cols.push(extra);   // always carried: they break ties
+      const sums = M.sum_cols || [], rateParts = M.rate_parts || {}, maxCols = (M.max_cols || []).filter((c) => this.has(c));
+      const rates = Object.keys(rateParts).filter((c) => this.has(c) && this.rateOk(rateParts[c]));
+      const ident = M.always_cols.filter((c) => this.has(c) && c !== "made_playoffs");
+      const base = this.resultColumns(idx, conds);
+      const cols = ident.concat(base.filter((c) => !ident.includes(c) && (sums.includes(c) || maxCols.includes(c) || rates.includes(c))));
+      for (const e of ["playoff_wins", "super_bowl_wins"]) if (this.has(e) && !cols.includes(e)) cols.push(e);   // always carried: they break ties
+      const s = conds.find((c) => c.kind === "sort" && cols.includes(c.col)) || { col: "super_bowl_wins", asc: false };
+      const fl = rates.includes(s.col) ? this.rateFloor(s.col) : null;
+      const need = new Set(["games"]);
+      for (const c of rates) for (const x of (rateParts[c] === "rating" ? RATING_PARTS : rateParts[c][0].concat(rateParts[c][1]))) need.add(x);
+      if (fl) need.add(fl.qual);
+      const want = [...new Set([...cols, ...need])].filter((c) => this.has(c));
       const by = new Map();
       for (const i of idx) {
         const id = this.cols.player_id[i], season = this.cols.season[i];
         let r = by.get(id);
-        if (!r) { r = { player_id: id, _lo: season, _hi: season, _last: i }; by.set(id, r); }
+        if (!r) { r = { _id: id, _lo: season, _hi: season, _last: i, _n: 0, _sched: 0, _tot: {}, _seen: {}, _max: {} }; by.set(id, r); }
         if (season < r._lo) r._lo = season;
         if (season >= r._hi) { r._hi = season; r._last = i; }
-        for (const c of cols) if (counting.has(c)) { const v = this.cols[c][i]; if (v != null) r[c] = (r[c] || 0) + v; }
+        r._n++; r._sched += season >= 2021 ? 17 : 16;
+        for (const c of want) {
+          const v = this.cols[c][i];
+          if (v != null && typeof v === "number") { r._tot[c] = (r._tot[c] || 0) + v; r._seen[c] = true; }
+        }
+        for (const c of maxCols) { const v = this.cols[c][i]; if (v != null && (r._max[c] == null || v > r._max[c])) r._max[c] = v; }
       }
       let rows = [...by.values()].map((r) => {
-        for (const c of cols) if (!counting.has(c)) r[c] = this.cols[c][r._last];
-        r.season = r._lo === r._hi ? String(r._lo) : r._lo + "\u2013" + r._hi;
-        for (const c of cols) if (counting.has(c) && r[c] == null) r[c] = null;
-        delete r._lo; delete r._hi; delete r._last;
-        return r;
+        const get = (x) => r._tot[x] || 0;
+        const o = {};
+        for (const c of ident) if (c !== "season") o[c] = this.cols[c][r._last];
+        o.season = r._lo === r._hi ? String(r._lo) : r._lo + "\u2013" + r._hi;
+        for (const c of cols) {
+          if (rates.includes(c)) o[c] = this.rateValue(get, rateParts[c]);
+          else if (maxCols.includes(c)) o[c] = r._max[c] == null ? null : r._max[c];
+          else if (sums.includes(c)) o[c] = r._seen[c] ? get(c) : null;
+        }
+        o._qual = fl ? get(fl.qual) : 0;
+        o._floor = (fl && fl.perGame ? r._sched : r._n) * (fl ? fl.min : 0);
+        return o;
       });
       const th = conds.find((c) => c.kind === "threshold" && c.career);
-      if (th) rows = rows.filter((r) => (r[th.col] || 0) >= th.career);
-      const s = conds.find((c) => c.kind === "sort" && counting.has(c.col)) || { col: "super_bowl_wins", asc: false };
-      const dir = s.asc ? 1 : -1;
+      if (th && cols.includes(th.col)) rows = rows.filter((r) => (r[th.col] || 0) >= th.career);
+      if (fl) rows = rows.filter((r) => r._qual >= r._floor);   // a rate ranks only a player who cleared the bar over the span
+      rows.forEach((r) => { delete r._qual; delete r._floor; });
+      const cmp = (a, b, asc) => {
+        const an = a == null || Number.isNaN(a), bn = b == null || Number.isNaN(b);
+        if (an && bn) return 0;
+        if (an) return 1;
+        if (bn) return -1;
+        return asc ? a - b : b - a;
+      };
       const str = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
-      rows.sort((a, b) => dir * ((a[s.col] || 0) - (b[s.col] || 0)) ||
-        (s.col !== "playoff_wins" ? (b.playoff_wins || 0) - (a.playoff_wins || 0) : 0) ||
+      rows.sort((a, b) => cmp(a[s.col], b[s.col], !!s.asc) ||
+        (s.col !== "playoff_wins" && cols.includes("playoff_wins") ? cmp(a.playoff_wins, b.playoff_wins, false) : 0) ||
         str(a.player_display_name, b.player_display_name) || str(a.player_id, b.player_id));
-      return { conds, notes: [...notes, "career totals \u2014 one row per player, the matched seasons added up; the season column shows the span"], ignored, sort: s, count: rows.length, columns: cols,
-               rows: rows.slice(0, limit || 2000), idx, truncated: rows.length > (limit || 2000), totals: null, career: true };
+      return { conds, notes, readNotes: [...(extra || []), "career totals \u2014 one row per player, the matched seasons added up; the season column shows the span"],
+               ignored, sort: s, count: rows.length, columns: cols, rows: rows.slice(0, limit || 2000), idx,
+               truncated: rows.length > (limit || 2000), totals: null, career: true };
     }
     present(idx, conds, notes, ignored, limit) {
-      if (this.careerMode(conds)) return this.presentCareer(idx, conds, notes, ignored, limit);
+      const scope = this.careerScope(idx, conds);
+      if (scope.career) return this.presentCareer(idx, conds, notes, ignored, limit, scope.notes);
       const cols = this.resultColumns(idx, conds);
+      const readNotes = [...scope.notes];
+      const rs = conds.find((c) => c.kind === "sort" && this.has(c.col));
+      const rfl = rs ? this.rateFloor(rs.col) : null;
+      if (rfl && this.has(rfl.qual)) readNotes.push("ranked only among seasons with at least " + rfl.min + " " + (this.engine.DISPLAY[rfl.qual] || rfl.qual) + " per " + (rfl.perGame ? "scheduled game" : "season") + "; the rest sit below them");
       const sorted = this.sortIdx(idx, conds);
       const rows = sorted.slice(0, limit || 2000).map((i) => this.row(i, [...cols, "player_id"]));
       const sort = conds.find((c) => c.kind === "sort" && this.has(c.col)) || null;
-      return { conds, notes, ignored, sort, count: idx.length, columns: cols, rows, idx,
+      return { conds, notes, readNotes, ignored, sort, count: idx.length, columns: cols, rows, idx,
                truncated: idx.length > (limit || 2000), totals: sort ? this.totals(idx, sort.col) : null };
     }
     // "who has the most X since 2021" is a question about a SPAN, but every row

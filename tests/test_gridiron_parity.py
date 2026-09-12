@@ -83,6 +83,16 @@ QUERIES = [
     "players with the most playoff wins since 2010",
     "QBs who won the Super Bowl in 2017",
     "RBs with the most rings",
+    "What QB has had the most deep pass TDs (20+ yards) since 2021",
+    "QBs with the most passing yards since 2015",
+    "the most passing yards in a season since 2021",
+    "most rushing yards in a single season since 2015",
+    "QBs with the best yards per attempt since 2021",
+    "QBs with the best passer rating since 2021",
+    "QBs with the best QBR since 2021",
+    "WRs with the most receiving yards since 2020",
+    "RBs with the best yards per carry since 2018",
+    "kickers with the best field goal percentage since 2015",
     "safeties with the most interceptions since 2015",
     "QBs with fewer than 20 sacks and 4000 yards in 2023",
     "edge rushers with 50+ sacks",
@@ -104,8 +114,9 @@ for (const q of qs) {
     const r = T.run(q);
     const ordered = T.sortIdx(r.idx, r.conds).slice(0, 10).map(i => T.cols.season[i] + "|" + T.cols.player_id[i]);
     const p = T.present(r.idx, r.conds, r.notes, r.ignored, 5000);
-    const career = p.career ? p.rows.slice(0, 10).map(x => x.player_id + "|" + x.season + "|" + (x[p.sort.col] == null ? "" : x[p.sort.col])) : null;
-    out.push({ notes: p.notes, ignored: r.ignored, first10: ordered, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort(),
+    const num = (v) => v == null ? "" : (Number.isInteger(v) ? String(v) : v.toFixed(4));
+    const career = p.career ? p.rows.slice(0, 10).map(x => x.player_id + "|" + x.season + "|" + num(x[p.sort.col])) : null;
+    out.push({ notes: p.notes, readNotes: p.readNotes || [], ignored: r.ignored, first10: ordered, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort(),
                career, careerKeys: p.career ? p.rows.map(x => x.player_id).sort() : null });
   }
   catch (e) { out.push({ error: e.message }); }
@@ -113,8 +124,12 @@ for (const q of qs) {
 process.stdout.write(JSON.stringify(out));
 """
 
+SUMS = None
+
 def main():
     df = pd.read_parquet(os.path.join(ROOT, "data", "players.parquet"))
+    global SUMS
+    SUMS = qe.sum_cols(df, fd.RANK_DESC, fd.RATE_PARTS, fd.NEVER_SUM, fd.MAX_COLS)
     with tempfile.TemporaryDirectory() as td:
         runner = os.path.join(td, "run.js"); qfile = os.path.join(td, "q.json")
         open(runner, "w", encoding="utf-8").write(NODE_RUNNER)
@@ -125,26 +140,36 @@ def main():
     for q, j in zip(QUERIES, js):
         try:
             res, notes, conds, ignored = qe.run_full(df, q)
-            ordered = qe.sort_result(res, conds).head(10)
-            py = {"notes": notes, "ignored": ignored,
+            ordered = qe.sort_result(res, conds, fd.RATE_RANKS).head(10)
+            career, extra = qe.career_scope(conds, res, SUMS, fd.RATE_PARTS, fd.RATE_RANKS)
+            read = list(extra)
+            if career:
+                read.append(qe.CAREER_NOTE)
+            else:
+                rs = next((c for c in conds if c["kind"] == "sort" and c["col"] in res.columns), None)
+                rfl = qe.rate_floor(rs["col"], fd.RATE_RANKS) if rs else None
+                if rfl and rfl[0] in res.columns:
+                    read.append(f"ranked only among seasons with at least {rfl[1]:g} {qe.DISPLAY.get(rfl[0], rfl[0])} per {'scheduled game' if rfl[2] else 'season'}; the rest sit below them")
+            py = {"notes": notes, "readNotes": read, "ignored": ignored,
                   "first10": [f"{int(s)}|{p}" for s, p in zip(ordered["season"], ordered["player_id"])],
                   "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"])),
                   "career": None, "careerKeys": None}
-            if qe.is_career(conds):
-                cr = qe.career_rows(res, conds, fd.RANK_DESC)
-                s = next((c for c in conds if c["kind"] == "sort" and c["col"] in set(fd.RANK_DESC) | {"playoff_wins", "super_bowl_wins", "games"}), None) or {"col": "super_bowl_wins"}
-                num = lambda v: "" if v is None or v != v else (str(int(v)) if float(v).is_integer() else str(v))
+            if career:
+                cr = qe.career_rows(res, conds, SUMS, fd.RATE_PARTS, fd.RATE_RANKS, fd.MAX_COLS)
+                s = next((c for c in conds if c["kind"] == "sort" and c["col"] in cr.columns), None) or {"col": "super_bowl_wins"}
+                num = lambda v: "" if v is None or v != v else (str(int(v)) if float(v).is_integer() else f"{float(v):.4f}")
                 py["career"] = [f"{p}|{sp}|{num(v)}" for p, sp, v in zip(cr["player_id"].head(10), cr["season"].head(10), cr[s["col"]].head(10))]
                 py["careerKeys"] = sorted(cr["player_id"])
         except qe.QueryError as e:
             py = {"error": str(e)}
-        ok = py == j and py.get("career") == j.get("career") and py.get("careerKeys") == j.get("careerKeys")
+        ok = py == j and py.get("career") == j.get("career") and py.get("careerKeys") == j.get("careerKeys") and py.get("readNotes") == j.get("readNotes")
         fails += 0 if ok else 1
         tag = "PASS" if ok else "FAIL"
         n = len(py.get("keys", [])) if "keys" in py else "err"
         print(f"{tag}  {q}  [py={n} js={len(j.get('keys', [])) if 'keys' in j else 'err'}]")
         if not ok:
             if py.get("notes") != j.get("notes"): print("      notes py:", py.get("notes"), "\n      notes js:", j.get("notes"))
+            if py.get("readNotes") != j.get("readNotes"): print("      read py:", py.get("readNotes"), "\n      read js:", j.get("readNotes"))
             if "keys" in py and "keys" in j:
                 a, b = set(py["keys"]), set(j["keys"])
                 print("      only py:", sorted(a - b)[:5], " only js:", sorted(b - a)[:5])
