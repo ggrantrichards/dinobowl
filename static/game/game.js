@@ -26,7 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
-  const BUILD = "2.5.1";   // shown on the title; the shells carry the cache-bust token
+  const BUILD = "2.5.2";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -4044,8 +4044,16 @@
       label: risk < 0.24 ? "OPEN WINDOW" : risk < 0.56 ? "TIGHT WINDOW" : "DANGER — DEFENDER"
     };
   }
+  // belt and braces for the rule above: no forward pass from past the line, ever
+  function pastTheLine(qb) {
+    if (!qb || qb.team !== "off" || qb.x <= xAtYd(G.losYd) + 1) return false;
+    G.aim = null; G.slingAnchor = null;
+    G.gainTag = { x: qb.x, y: qb.y - 34, text: "PAST THE LINE — NO PASS", t: 0.9 };
+    return true;
+  }
   function throwLob(forceRec) {
     const qb = G.ball.holder; if (!qb || !G.aim) return;
+    if (pastTheLine(qb)) return;
     const to = { x: G.aim.x, y: G.aim.y };
     // Retro Bowl convention (owner ask 2026-08-07): a "throw" aimed BEHIND
     // the quarterback isn't a throw — he tucks it and takes off
@@ -4093,6 +4101,7 @@
   }
   function throwBullet(forceRec) {
     const qb = G.ball.holder; if (!qb || !G.aim) return;
+    if (pastTheLine(qb)) return;
     // bullet locks onto the receiver nearest the aim point.
     // QA balance: lead by the ball's ACTUAL flight time (was a flat 0.35s) so
     // the receiver catches in stride instead of arriving early and idling at
@@ -5113,7 +5122,7 @@
       Object.assign(h, { spawnT: 0.3, combo: 0 });
     } else if (kind === "trex") {
       Object.assign(h, { t: 32, hp: 16, hpMax: 16, hearts: 3, px: W / 2, aimX: W / 2, aimY: 150, balls: [], sparks: [], atk: null, atkT: 3.0,
-        rise: 0, roar: 0, jaw: 0, sway: 0, lunge: 0, flash: 0, throwPose: 0, hits: 0, crits: 0, thrown: 0, won: false, tag: null });
+        rise: 0, riseT: 0, roar: 0, jaw: 0, sway: 0, lunge: 0, flash: 0, throwPose: 0, hits: 0, crits: 0, thrown: 0, won: false, tag: null, cracks: [], hpGhost: 16 });
     }
     G.state = "halftime";
   }
@@ -5146,57 +5155,62 @@
   // back to the camera; only the King's head and neck clear the parapet, the
   // rest of him is outside. Mouse aims, click/space throws a football up at
   // the face (open mouth or an eye = double), A/D sidestep along the wall.
-  // He BITES (the head drops onto your lane) and SWIPES (a claw comes over the
-  // wall and slams your lane). Three hearts, 16 HP, 32 seconds.
+  // He BITES (rears back, then the head drops onto your lane) and SWIPES (a
+  // claw comes over the wall and slams your lane). Three hearts, 16 HP, 32 s.
   const KS = 8;   // pixels per cell of the head art
-  const KING_PAL = { K: "#1a120c", B: "#7a4a22", D: "#4a2c12", L: "#a86a36", W: "#f4f0e0", R: "#ff2a1a", Y: "#ffd23f", N: "#2a1608", G: "#8a2a2a" };
+  const KING_PAL = { K: "#1a120c", B: "#7a4a22", D: "#4a2c12", S: "#5e3818", L: "#a86a36", H: "#c88a4a", W: "#f4f0e0", E: "#d9d2bc",
+    R: "#ff2a1a", Y: "#ffd23f", N: "#2a1608", G: "#8a2a2a" };
   const KING_SKULL = [
     "..........KK..KKKKKKKKKKKK..KK..........",
-    "..........KDKKKBBBBBBBBBBBBKKKDK........",
-    ".........KKDBBBBBBBBBBBBBBBBBBDKK.......",
-    "........KBDBBBBLLLLLLLLLLBBBBBDBK.......",
-    ".......KBBBBBLLLLLLLLLLLLLLBBBBBK.......",
+    "..........KDKKKBBHHHHHHBBBKKKDK.........",
+    ".........KKDBBBHHHHHHHHHHBBBDKK.........",
+    "........KBDBBBHHLLLLLLLLHHBBBDBK........",
+    ".......KBBBBBHLLLLLLLLLLLLHBBBBBK.......",
     "......KBBBBBLLLLLLLLLLLLLLLLBBBBBK......",
-    "......KBKDDDDBLLLLLLLLLLLLBDDDDBBBK.....",
-    ".....KBBKDDKKKKDBLLLLLLBDKKKKDDDBBK.....",
+    "......KBKDDDDBLLLLLLLLLLLLBDDDDKBBK.....",
+    ".....KBBKDDKKKKDBLLLLLLBDKKKKDDKBBK.....",
     ".....KBBDDKYYRRKDBLLLLBDKRRYYKDDBBK.....",
     ".....KBBDDKYRRRKDBBLLBBDKRRRYKDDBBK.....",
     ".....KBBBDDKKKKDBBBBBBBBDKKKKDDBBBK.....",
     ".....KBBBBBDDDBBBBBBBBBBBBDDDBBBBBK.....",
     "......KBDBDBBBBBBBBBBBBBBBBBBDBDBK......",
     "......KDBDBBBBBBBBLLLLBBBBBBBBDBDK......",
-    ".......KBDBBBBBBBBLLLLBBBBBBBBDBK.......",
-    ".......KBBBBBBBBBBNNBBNNBBBBBBBBK.......",
-    "........KBBBBBBBBBNNBBNNBBBBBBBK........",
-    "........KBBBBBBBBBBBBBBBBBBBBBBK........",
-    ".........KBBBBBBBBBBBBBBBBBBBBK.........",
+    ".......KSDBBBBBBBBLLLLBBBBBBBBDSK.......",
+    ".......KSSBBBBBBBBNNBBNNBBBBBBSSK.......",
+    "........KSSBBBBBBBNNBBNNBBBBBSSK........",
+    "........KSSSBBBBBBBBBBBBBBBSSSK.........",
+    ".........KSSSSBBBBBBBBBBBSSSSK..........",
     ".........KDDDDDDDDDDDDDDDDDDDDK.........",
-    ".........KWKWKWKWKWKWKWKWKWKWKK.........",
-    ".........KWKWKWKWKWKWKWKWKWKWKK.........",
+    ".........KWKEKWKEKWKEKWKEKWKEKK.........",
+    ".........KWKEKWKEKWKEKWKEKWKEKK.........",
   ];
   const KING_JAW = [
-    ".........KKWKWKWKWKWKWKWKWKWKK..........",
-    ".........KGWGWGWGWGWGWGWGWGWGK..........",
+    ".........KKWKEKWKEKWKEKWKEKWKK..........",
+    ".........KGWGEGWGEGWGEGWGEGWGK..........",
     ".........KDDDDDDDDDDDDDDDDDDDDK.........",
-    "..........KDDDDDDDDDDDDDDDDDDK..........",
-    "..........KBBBBBBBBBBBBBBBBBBK..........",
-    "...........KBBBBBBBBBBBBBBBBK...........",
-    "............KBBBBBBBBBBBBBBK............",
+    "..........KSDDDDDDDDDDDDDDDDSK..........",
+    "..........KSBBBBBBBBBBBBBBBBSK..........",
+    "...........KSBBBBBBBBBBBBBBSK...........",
+    "............KSSBBBBBBBBBBSSK............",
     ".............KKKKKKKKKKKKKK.............",
   ];
   const KING_CLAW = [
-    "..KKK.....KKK.",
-    ".KWWK....KWWK.",
-    ".KWWKKKKKKWWK.",
-    "KKBBBBBBBBBBKK",
-    "KBBBBBBBBBBBBK",
-    "KBBBBDDBBBBBBK",
-    ".KBBBBBBBBBBK.",
-    ".KBBBBBBBBBBK.",
-    "..KBBBBBBBBK..",
-    "..KBBBBBBBBK..",
-    "...KBBBBBBK...",
-    "...KKKKKKKK...",
+    "...KKK....KKK...",
+    "..KWWEK..KWWEK..",
+    "..KWWEKKKKWWEK..",
+    "..KEEBBBBBBEEK..",
+    ".KKBBBBBBBBBBKK.",
+    ".KBBBBBDDBBBBBK.",
+    ".KBBBBBBBBBBBBK.",
+    "..KBBBBBBBBBBK..",
+    "..KSBBBBBBBBSK..",
+    "..KSSBBBBBBSSK..",
+    "...KSBBBBBBSK...",
+    "...KSBBBBBBSK...",
+    "...KSSBBBBSSK...",
+    "...KSSBBBBSSK...",
+    "....KSBBBBSK....",
+    "....KKKKKKKK....",
   ];
   // you, from behind: back of the head, jersey, tail toward the camera, feet on the wall
   const KING_DINO = [
@@ -5218,16 +5232,23 @@
     if (KING_ART && KING_ART.jersey === jersey) return KING_ART;
     const dp = { K: "#1a120c", G: "#3f8f4a", D: "#2b6a35", J: jersey, O: "#c8742a" };
     KING_ART = { jersey, skull: pixCanvas(KING_SKULL, KING_PAL, KS), jaw: pixCanvas(KING_JAW, KING_PAL, KS),
-      claw: pixCanvas(KING_CLAW, KING_PAL, 7), dino: pixCanvas(KING_DINO, dp, 4), dinoThrow: pixCanvas(KING_DINO_THROW, dp, 4) };
+      claw: pixCanvas(KING_CLAW, KING_PAL, 8), dino: pixCanvas(KING_DINO, dp, 4), dinoThrow: pixCanvas(KING_DINO_THROW, dp, 4) };
     return KING_ART;
   }
   const WALL_Y = H - 100;   // top of the parapet you stand on
+  const easeOut = (t) => 1 - Math.pow(1 - clamp(t, 0, 1), 3);
+  const smooth = (t) => { t = clamp(t, 0, 1); return t * t * (3 - 2 * t); };
   // where the head is this frame, and the rectangles a football can land in
   function kingZones(h) {
     const a = h.atk;
-    let hx = W / 2 - 20 * KS + Math.sin(h.sway * 0.7) * 30;
-    if (a && a.kind === "bite") hx += ((a.x - 20 * KS) - hx) * (a.tele > 0 ? 1 - a.tele / 0.9 : 1);
-    const hy = 92 + (1 - h.rise) * 460 + h.lunge * 150;
+    let hx = W / 2 - 20 * KS + Math.sin(h.sway * 0.7) * 30 + Math.sin(h.sway * 1.9) * 6;
+    let rear = 0;
+    if (a && a.kind === "bite") {
+      const q = a.tele > 0 ? smooth(1 - a.tele / 0.9) : 1;
+      hx += ((a.x - 20 * KS) - hx) * q;
+      rear = a.tele > 0 ? -34 * q : 0;   // he rears back before the drop
+    }
+    const hy = 92 + (1 - h.rise) * 460 + rear + h.lunge * 180 + Math.sin(h.sway * 1.3) * 4;
     const open = h.jaw * 46;
     return {
       headX: hx, headY: hy, open,
@@ -5239,29 +5260,39 @@
   }
   function trexThrow(h) {
     if (h.stun > 0 || h.rise < 1 || h.roar > 0) return;
-    h.balls.push({ x: h.px + 18, y: WALL_Y - 52, fx: h.px + 18, fy: WALL_Y - 52, tx: h.aimX, ty: h.aimY, t: 0, T: 0.45 });
+    h.balls.push({ x: h.px + 18, y: WALL_Y - 52, fx: h.px + 18, fy: WALL_Y - 52, tx: h.aimX, ty: h.aimY, t: 0, T: 0.45, trail: [] });
     h.thrown++; h.throwPose = 0.22; sfx.juke();
+  }
+  // a strike lands on the wall: dust, a shake, and a crack that stays
+  function kingSlam(h, a) {
+    G.shake = Math.max(G.shake || 0, a.kind === "claw" ? 0.4 : 0.32);
+    for (let i = 0; i < 14; i++) h.sparks.push({ x: a.x + rnd(-a.w / 2, a.w / 2), y: WALL_Y + rnd(0, 6), vx: rnd(-90, 90), vy: rnd(-160, -30), t: rnd(0.3, 0.6), c: i % 3 ? "#9aa3a8" : "#d9d2bc" });
+    h.cracks.push({ x: a.x, w: a.w });
+    if (h.cracks.length > 6) h.cracks.shift();
+    sfx.tackle();
   }
   function updateHalfTrex(dt) {
     const h = G.half;
     h.sway += dt;
-    if (h.rise < 1) {   // the head comes up over the wall, then he roars
-      h.rise = Math.min(1, h.rise + dt / 1.3);
-      if (h.rise >= 1) { h.roar = 1.1; crowdAww(1); }
+    if (h.riseT < 1) {   // the head comes up over the wall (eased), then he roars
+      h.riseT = Math.min(1, h.riseT + dt / 1.4); h.rise = easeOut(h.riseT);
+      if (h.riseT >= 1) { h.roar = 1.1; crowdAww(1); G.shake = Math.max(G.shake || 0, 0.5); }
       return;
     }
-    if (h.roar > 0) { h.roar -= dt; G.shake = Math.max(G.shake || 0, 0.35); h.jaw = Math.min(1, h.jaw + dt * 4); }
+    if (h.roar > 0) { h.roar -= dt; G.shake = Math.max(G.shake || 0, 0.3); h.jaw = Math.min(1, h.jaw + dt * 4); }
     else if (!h.atk) h.jaw = Math.max(0, h.jaw - dt * 3);
     if (h.stun > 0) h.stun -= dt;
     if (h.flash > 0) h.flash -= dt;
     if (h.throwPose > 0) h.throwPose -= dt;
     if (h.tag && (h.tag.t -= dt) <= 0) h.tag = null;
+    h.hpGhost += (h.hp - h.hpGhost) * Math.min(1, dt * 4);
     const kd = kdir();
     if (h.stun <= 0) h.px = clamp(h.px + kd.x * 320 * dt, 70, W - 70);
     if (mouse.x || mouse.y) { h.aimX = clamp(mouse.x, 0, W); h.aimY = clamp(mouse.y, 0, WALL_Y - 30); }
     const Z = kingZones(h);
     const inR = (b, r) => r && b.tx > r.x && b.tx < r.x + r.w && b.ty > r.y && b.ty < r.y + r.h;
     for (const b of h.balls) {
+      b.trail.push({ x: b.x, y: b.y }); if (b.trail.length > 4) b.trail.shift();
       b.t += dt; const q = Math.min(1, b.t / b.T);
       b.x = b.fx + (b.tx - b.fx) * q; b.y = b.fy + (b.ty - b.fy) * q - Math.sin(q * Math.PI) * 40; b.q = q;
       if (q >= 1 && !b.done) {
@@ -5272,9 +5303,9 @@
         else if (inR(b, Z.head) || inR(b, Z.jaw)) dmg = 1;
         if (dmg) {
           h.hp -= dmg; h.hits++; if (dmg > 1) { h.crits++; h.tag = { text: tag, t: 0.9 }; }
-          h.flash = 0.18; G.shake = Math.max(G.shake || 0, dmg > 1 ? 0.25 : 0.1); sfx.tackle();
-          for (let i = 0; i < 7; i++) h.sparks.push({ x: b.tx, y: b.ty, vx: rnd(-110, 110), vy: rnd(-120, 20), t: rnd(0.25, 0.5), c: dmg > 1 ? "#ffd23f" : "#f4f6f1" });
-        }
+          h.flash = 0.16; G.shake = Math.max(G.shake || 0, dmg > 1 ? 0.25 : 0.1); sfx.tackle();
+          for (let i = 0; i < 8; i++) h.sparks.push({ x: b.tx, y: b.ty, vx: rnd(-120, 120), vy: rnd(-140, 20), t: rnd(0.25, 0.5), c: dmg > 1 ? "#ffd23f" : "#f4f6f1" });
+        } else for (let i = 0; i < 3; i++) h.sparks.push({ x: b.tx, y: b.ty, vx: rnd(-50, 50), vy: rnd(-60, 10), t: 0.25, c: "#5a646a" });
       }
     }
     h.balls = h.balls.filter((b) => !b.done);
@@ -5285,22 +5316,27 @@
       h.atkT -= dt;
       if (h.atkT <= 0 && h.roar <= 0) {
         h.atk = Math.random() < 0.45
-          ? { kind: "claw", side: Math.random() < 0.5 ? -1 : 1, x: h.px, w: 170, tele: 0.85, strike: 0, hit: false }
-          : { kind: "bite", x: h.px, w: 120, tele: 0.9, strike: 0, hit: false };
+          ? { kind: "claw", side: Math.random() < 0.5 ? -1 : 1, x: h.px, w: 170, tele: 0.85, strike: 0, hit: false, slammed: false }
+          : { kind: "bite", x: h.px, w: 120, tele: 0.9, strike: 0, hit: false, slammed: false };
       }
     } else {
       const a = h.atk;
       if (a.tele > 0) { a.tele -= dt; if (a.kind === "bite") h.jaw = Math.min(1, h.jaw + dt * 3); }
       else {
         a.strike += dt;
+        if (a.strike > 0.12 && !a.slammed) { a.slammed = true; kingSlam(h, a); }
         if (a.strike > 0.12 && a.strike < 0.34 && !a.hit && Math.abs(h.px - a.x) < a.w / 2) {
-          a.hit = true; h.hearts--; h.stun = 0.7; G.shake = Math.max(G.shake || 0, 0.45); sfx.tackle(); crowdAww(0.8);
+          a.hit = true; h.hearts--; h.stun = 0.7; G.shake = Math.max(G.shake || 0, 0.5); crowdAww(0.8);
         }
         if (a.kind === "bite" && a.strike > 0.3) h.jaw = Math.max(0, h.jaw - dt * 6);
-        if (a.strike >= 0.75) { h.atk = null; h.atkT = rnd(1.5, 2.4) - Math.min(0.7, h.hits * 0.06); }
+        if (a.strike >= 0.8) { h.atk = null; h.atkT = rnd(1.5, 2.4) - Math.min(0.7, h.hits * 0.06); }
       }
     }
-    h.lunge = h.atk && h.atk.kind === "bite" && h.atk.tele <= 0 ? Math.sin(Math.min(1, h.atk.strike / 0.75) * Math.PI) : 0;
+    // the bite: a snap down, then a slower recovery
+    if (h.atk && h.atk.kind === "bite" && h.atk.tele <= 0) {
+      const st = h.atk.strike;
+      h.lunge = st < 0.16 ? Math.pow(st / 0.16, 2) : Math.max(0, 1 - smooth((st - 0.16) / 0.6));
+    } else h.lunge = 0;
     if (h.hp <= 0 && !h.won) { h.won = true; halfReward(70); sfx.td(); crowdCheer(1); endHalftime(); return; }
     if (h.hearts <= 0 || h.t <= 0) { halfReward(10 + h.hits * 3); endHalftime(); }
   }
@@ -5312,72 +5348,96 @@
     for (let i = 0; i < 46; i++) cx.fillRect(((i * 197 + 31) % W), (i * 53) % (WALL_Y - 40), 2, 2);
     cx.fillStyle = "#f4e9c0"; cx.fillRect(W - 110, 30, 18, 18);
     // the neck comes up from behind the wall, widening toward the shoulders you cannot see
-    for (let y = Z.headY + 20 * KS; y < WALL_Y; y += KS) {
-      const q = (y - (Z.headY + 20 * KS)) / Math.max(1, WALL_Y - (Z.headY + 20 * KS));
-      const w = 22 * KS + q * 14 * KS;
-      cx.fillStyle = "#4a2c12"; cx.fillRect(Math.round(Z.headX + 20 * KS - w / 2), y, Math.round(w), KS);
-      cx.fillStyle = "#3a2010"; cx.fillRect(Math.round(Z.headX + 20 * KS - w / 2), y, Math.round(w * 0.18), KS);
+    const neckTop = Z.headY + 20 * KS;
+    for (let y = neckTop; y < WALL_Y; y += KS) {
+      const q = (y - neckTop) / Math.max(1, WALL_Y - neckTop);
+      const w = 22 * KS + q * 14 * KS, x0 = Math.round(Z.headX + 20 * KS - w / 2);
+      cx.fillStyle = ((y - neckTop) / KS) % 3 === 2 ? "#3f2510" : "#4a2c12"; cx.fillRect(x0, y, Math.round(w), KS);
+      cx.fillStyle = "#3a2010"; cx.fillRect(x0, y, Math.round(w * 0.18), KS);
+      cx.fillStyle = "#5e3818"; cx.fillRect(x0 + Math.round(w * 0.7), y, Math.round(w * 0.12), KS);
     }
-    // the head: skull, open mouth, jaw
+    // the head: skull, mouth (tongue when open), jaw
     cx.save(); cx.imageSmoothingEnabled = false;
-    if (h.flash > 0) cx.globalAlpha = 0.6;
     cx.drawImage(art.skull, Math.round(Z.headX), Math.round(Z.headY));
-    if (Z.open > 0) { cx.fillStyle = "#3a0a0e"; cx.fillRect(Math.round(Z.headX + 9 * KS), Math.round(Z.headY + 22 * KS), 22 * KS, Math.round(Z.open)); }
+    if (Z.open > 0) {
+      cx.fillStyle = "#3a0a0e"; cx.fillRect(Math.round(Z.headX + 9 * KS), Math.round(Z.headY + 22 * KS), 22 * KS, Math.round(Z.open));
+      cx.fillStyle = "#8a2a2a"; cx.fillRect(Math.round(Z.headX + 14 * KS), Math.round(Z.headY + 22 * KS + Z.open * 0.45), 12 * KS, Math.round(Z.open * 0.55));
+    }
     cx.drawImage(art.jaw, Math.round(Z.headX), Math.round(Z.headY + 22 * KS + Z.open));
+    if (h.flash > 0) { cx.fillStyle = "rgba(255,255,255," + (0.45 * h.flash / 0.16) + ")"; cx.fillRect(Math.round(Z.head.x), Math.round(Z.head.y), Z.head.w, Z.head.h + Z.open + 8 * KS); }
     cx.restore();
-    // eyes burn; brighter while he winds up a bite
-    const pulse = 0.35 + 0.35 * Math.sin(now / 90) + (h.atk && h.atk.kind === "bite" ? 0.3 : 0);
-    cx.fillStyle = "rgba(255,40,20," + Math.min(0.85, pulse) + ")";
-    for (const e of Z.eyes) cx.fillRect(Math.round(e.x) - 4, Math.round(e.y) - 4, e.w + 8, e.h + 8);
+    // eyes burn, and the pupils follow you along the wall
+    const pulse = 0.3 + 0.3 * Math.sin(now / 90) + (h.atk && h.atk.kind === "bite" ? 0.3 : 0);
+    const look = clamp((h.px - (Z.headX + 20 * KS)) / 420, -1, 1);
+    for (const e of Z.eyes) {
+      cx.fillStyle = "rgba(255,40,20," + Math.min(0.8, pulse) + ")"; cx.fillRect(Math.round(e.x) - 5, Math.round(e.y) - 5, e.w + 10, e.h + 10);
+      cx.fillStyle = "#1a0a06"; cx.fillRect(Math.round(e.x + e.w / 2 - 4 + look * 11), Math.round(e.y + 8), 8, 8);
+      cx.fillStyle = "#ffd23f"; cx.fillRect(Math.round(e.x + e.w / 2 - 4 + look * 11), Math.round(e.y + 8), 3, 3);
+    }
     if (h.roar > 0) { cx.font = PF(22); cx.textAlign = "center"; cx.fillStyle = "#ff5533"; cx.fillText("ROAAAAR!", W / 2 + rnd(-4, 4), Z.headY - 6); }
     // the lane he is about to hit, painted on the wall
     const a = h.atk;
     if (a) {
-      cx.fillStyle = a.tele > 0 ? "rgba(255,60,40," + (0.2 + 0.25 * Math.abs(Math.sin(now / 70))) + ")" : "rgba(255,240,200,.35)";
+      const t = a.tele > 0 ? 1 - a.tele / 0.9 : 1;
+      cx.fillStyle = a.tele > 0 ? "rgba(255,60,40," + (0.15 + 0.3 * t * Math.abs(Math.sin(now / (110 - 60 * t)))) + ")" : "rgba(255,240,200,.3)";
       cx.fillRect(Math.round(a.x - a.w / 2), WALL_Y - 4, a.w, 64);
     }
-    // the claw comes over the wall on one side, then slams your lane
+    // the claw comes over the wall on one side, slides to your lane, slams
     if (a && a.kind === "claw") {
-      const up = a.tele > 0 ? 1 - a.tele / 0.85 : 1;
+      const up = a.tele > 0 ? easeOut(1 - a.tele / 0.85) : 1;
       const edgeX = a.side < 0 ? 30 : W - 30 - art.claw.width;
-      const cxp = a.tele > 0 ? edgeX : edgeX + ((a.x - art.claw.width / 2) - edgeX) * Math.min(1, a.strike / 0.12);
-      const cyp = a.tele > 0 ? WALL_Y - up * (art.claw.height - 10) : WALL_Y - art.claw.height + 10 + Math.sin(Math.min(1, a.strike / 0.34) * Math.PI) * 30;
+      const slide = smooth(a.strike / 0.12);
+      const cxp = a.tele > 0 ? edgeX : edgeX + ((a.x - art.claw.width / 2) - edgeX) * slide;
+      const drop = a.strike < 0.12 ? -30 * slide : Math.sin(Math.min(1, (a.strike - 0.12) / 0.4) * Math.PI) * 26;
+      const cyp = a.tele > 0 ? WALL_Y - up * (art.claw.height - 14) : WALL_Y - art.claw.height + 14 + drop;
+      cx.fillStyle = "rgba(0,0,0," + (0.15 + 0.2 * up) + ")"; cx.fillRect(Math.round(cxp + 10), WALL_Y - 2, art.claw.width - 20, 6);
       cx.save(); cx.imageSmoothingEnabled = false; cx.drawImage(art.claw, Math.round(cxp), Math.round(cyp)); cx.restore();
     }
-    // the parapet: concrete cap, brick courses, the stands in shadow below and behind you
+    // the parapet: concrete cap, brick courses, the cracks he has left, the stands in shadow below and behind you
     cx.fillStyle = "#9aa3a8"; cx.fillRect(0, WALL_Y, W, 10);
+    cx.fillStyle = "#b6bec2"; cx.fillRect(0, WALL_Y, W, 3);
     cx.fillStyle = "#6f7a80"; cx.fillRect(0, WALL_Y + 10, W, 50);
     cx.fillStyle = "#5a646a";
     for (let r = 0; r < 4; r++) for (let x = (r % 2) * 24 - 24; x < W; x += 48) cx.fillRect(x, WALL_Y + 12 + r * 12, 46, 10);
+    cx.fillStyle = "#2f3a40";
+    for (const c of h.cracks) for (let k = 0; k < 7; k++) cx.fillRect(Math.round(c.x - c.w / 2 + 10 + k * ((c.w - 20) / 6) + ((k * 13) % 7)), WALL_Y + 2 + (k % 3) * 3, 4, 7 - (k % 2) * 3);
     cx.fillStyle = "#0b1410"; cx.fillRect(0, WALL_Y + 60, W, H - WALL_Y - 60);
     if (G.crowd) { cx.save(); cx.globalAlpha = 0.5; cx.drawImage(G.crowd, 0, 6, W, 40, 0, WALL_Y + 62, W, 40); cx.restore(); }
-    // you, on the wall
+    // you, on the wall (a small idle bob; frozen while stunned)
     const me = h.throwPose > 0 ? art.dinoThrow : art.dino;
+    const bob = h.stun > 0 ? 0 : ((now / 320) | 0) % 2;
+    cx.fillStyle = "rgba(0,0,0,.35)"; cx.fillRect(Math.round(h.px - 18), WALL_Y - 1, 36, 4);
     if (!(h.stun > 0 && ((now / 90) | 0) % 2)) {
       cx.save(); cx.imageSmoothingEnabled = false;
-      cx.drawImage(me, Math.round(h.px - art.dino.width / 2), WALL_Y - art.dino.height + 2);
+      cx.drawImage(me, Math.round(h.px - art.dino.width / 2), WALL_Y - art.dino.height + 2 - bob);
       cx.restore();
     }
-    cx.fillStyle = "rgba(0,0,0,.35)"; cx.fillRect(Math.round(h.px - 16), WALL_Y - 1, 32, 4);
-    // footballs shrink as they climb toward the face
+    // footballs shrink as they climb toward the face, with a short trail
     for (const b of h.balls) {
+      b.trail.forEach((p, k) => { cx.fillStyle = "rgba(200,140,80," + (0.12 + 0.12 * k) + ")"; cx.fillRect(Math.round(p.x - 2), Math.round(p.y - 2), 4, 4); });
       const sz = Math.max(3, Math.round(9 * (1 - 0.55 * (b.q || 0))));
       cx.fillStyle = "#b5651d"; cx.fillRect(Math.round(b.x - sz / 2), Math.round(b.y - sz * 0.35), sz, Math.round(sz * 0.7));
-      cx.fillStyle = "#f4f6f1"; cx.fillRect(Math.round(b.x - 1), Math.round(b.y - sz * 0.35), 2, Math.round(sz * 0.7));
+      cx.fillStyle = "#f4f6f1"; cx.fillRect(Math.round(b.x - 1 + Math.sin(b.t * 30) * (sz / 3)), Math.round(b.y - sz * 0.35), 2, Math.round(sz * 0.7));
     }
     for (const sp of h.sparks) { cx.fillStyle = sp.c; cx.fillRect(Math.round(sp.x), Math.round(sp.y), 3, 3); }
-    // aim, hearts, HP, the crit tag
+    // aim, hearts, HP with a damage ghost, the crit tag popping
     cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(h.aimX - 8, h.aimY - 8, 16, 16); cx.lineWidth = 1;
     cx.fillStyle = "#ffd23f"; cx.fillRect(h.aimX - 1, h.aimY - 1, 3, 3);
     cx.font = PF(12); cx.textAlign = "left"; cx.fillStyle = "#ff5533";
     cx.fillText("♥".repeat(Math.max(0, h.hearts)) + "♡".repeat(Math.max(0, 3 - h.hearts)), 20, H - 14);
-    const bx = W - 250, by = 96;
+    const bx = 30, by = 96;   // top-left: the head can wander to the right lane
     cx.fillStyle = "rgba(4,10,7,.8)"; cx.fillRect(bx - 6, by - 6, 232, 40);
     cx.font = PF(8); cx.textAlign = "left"; cx.fillStyle = "#ff5533"; cx.fillText("THE KING  " + Math.max(0, h.hp) + "/" + h.hpMax, bx, by + 6);
     cx.fillStyle = "#3a1010"; cx.fillRect(bx, by + 14, 220, 12);
+    cx.fillStyle = "#f4f6f1"; cx.fillRect(bx, by + 14, Math.round(220 * clamp(h.hpGhost / h.hpMax, 0, 1)), 12);
     cx.fillStyle = "#ff4444"; cx.fillRect(bx, by + 14, Math.round(220 * clamp(h.hp / h.hpMax, 0, 1)), 12);
     cx.strokeStyle = "#f4f6f1"; cx.strokeRect(bx, by + 14, 220, 12);
-    if (h.tag) { cx.font = PF(11); cx.textAlign = "center"; cx.fillStyle = "#ffd23f"; cx.fillText(h.tag.text, W / 2, WALL_Y - 120); }
+    if (h.tag) {
+      const pop = Math.max(0, h.tag.t - 0.7) / 0.2;
+      cx.save(); cx.globalAlpha = Math.min(1, h.tag.t * 3);
+      cx.font = PF(Math.round(11 + 5 * pop)); cx.textAlign = "center"; cx.fillStyle = "#ffd23f"; cx.fillText(h.tag.text, W / 2, WALL_Y - 120 - pop * 6);
+      cx.restore();
+    }
     drawHalfFrame("🦖 THE KING — " + Math.ceil(Math.max(0, h.t)) + "s", "MOUSE AIM · CLICK/SPACE THROW · A/D SIDESTEP THE RED LANE · MOUTH OR EYE = x2");
   }
   function updateHalftime(dt) {
@@ -8381,6 +8441,12 @@
     const yacFade = clamp((yac - 6) * 0.006, 0, 0.18);
     const carryFade = Math.max(longCarryFade, yacFade);
     const burst = (e === G.carrier && e.role !== "QB" && !G.playPass && (e.carryT || 0) < 1.2) ? 1.12 : 1;   // hitting the hole (backs only)
+    // the line of scrimmage is the last place a forward pass is legal: the frame
+    // a carrier crosses it he loses the throw, and any half-drawn aim is cancelled
+    if (e === G.carrier && e.canPass && e.team === "off" && e.x > xAtYd(G.losYd) + 2) {
+      e.canPass = false;
+      if (G.aim || G.slingAnchor) { G.aim = null; G.slingAnchor = null; G.gainTag = { x: e.x, y: e.y - 34, text: "PAST THE LINE", t: 0.8 }; }
+    }
     let qbRamp = 1;   // a scrambling QB was 90% legs in the pocket, 100% the frame he crossed — now a 1s build
     if (e.qbRampT != null) { e.qbRampT += dt; qbRamp = 0.9 + 0.1 * clamp(e.qbRampT, 0, 1); }
     // CATCH GATHER (owner play-test: "players don't slow down after

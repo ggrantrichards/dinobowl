@@ -52,6 +52,20 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## DINO BOWL 2.5.2 + GRIDIRON g15 — 2026-09-11 (shipped)
+
+- Forward pass past the LOS: `e.canPass = false` the frame `x > xAtYd(losYd) + 2` (any
+  carrier, human or CPU) with aim/sling cancelled and a gain tag; `pastTheLine(qb)` guard at
+  the top of `throwLob` / `throwBullet`.
+- THE KING polish: `KING_PAL` gains S/H/E tones, tongue on open, pupils (`look` from your x),
+  `easeOut` rise, bite rear-back + `lunge` snap/recover, `kingSlam` (dust sparks + `h.cracks`),
+  claw slide/slam easing, ball trail + lace spin, `hpGhost`, tag pop.
+- Gridiron: `load_post_games(year)` (participants per postseason game with passer attempts)
+  → skill players credited by participation, QB ring = primary passer; `is_career` /
+  `career_rows` (Python) and `careerMode` / `presentCareer` (JS) with identical note and sort
+  (total desc, playoff wins desc, name); "N rings" keeps the season filter at ≥1 and carries
+  `career: N` for the totals filter; page count line says players · career totals.
+
 ## DINO BOWL 2.5.1 — 2026-09-11 (shipped): THE KING over the wall; Gridiron total yards + contracts
 
 Owner on the first King: "the perspective isn't right" — a more detailed, different T-rex,

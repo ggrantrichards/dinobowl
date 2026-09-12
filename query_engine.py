@@ -1045,13 +1045,52 @@ def parse(query):
 
     if not conds:
         raise QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.")
+    # "5 rings" is a career count; a season holds one at most. Keep the season
+    # filter at >= 1 and carry the real number for the career-totals pass.
     for c in conds:
         if c["kind"] == "threshold" and c["col"] == "super_bowl_wins" and c["value"] > 1:
-            c["value"] = 1
-            notes[:] = [n if not n.startswith("Super Bowl wins") else "Super Bowl wins ≥ 1 (a season holds one ring at most — the totals below add them up per player)" for n in notes]
+            c["career"] = int(c["value"]); c["value"] = 1
+            notes[:] = [n if not n.startswith("Super Bowl wins") else f"Super Bowl wins ≥ {c['career']} across the matched seasons (career total)" for n in notes]
             if not any(k["kind"] == "sort" for k in conds):
                 conds.append({"kind": "sort", "col": "super_bowl_wins", "asc": False})
     return conds, notes, ignored
+
+# ---- career totals: "most Super Bowl wins" / "most playoff wins" / "N rings" are
+# questions about players, not seasons. One row per player, counting stats summed,
+# identity from the latest matched season, the season column showing the span.
+CAREER_TRIGGERS = {"super_bowl_wins", "playoff_wins"}
+CAREER_NOTE = "career totals — one row per player, the matched seasons added up; the season column shows the span"
+
+def is_career(conds):
+    return any((c["kind"] == "sort" and c["col"] in CAREER_TRIGGERS) or (c["kind"] == "threshold" and c.get("career")) for c in conds)
+
+def career_rows(res, conds, rank_desc):
+    counting = set(rank_desc) | CAREER_TRIGGERS | {"games"}
+    keep = [c for c in res.columns if (c in ALWAYS_COLS and c != "made_playoffs") or c in counting]
+    for extra in ("playoff_wins", "super_bowl_wins"):   # always carried: they break ties
+        if extra in res.columns and extra not in keep: keep.append(extra)
+    if res.empty:
+        return res[keep]
+    rows = []
+    for pid, g in res.groupby("player_id", sort=False):
+        g = g.sort_values("season")
+        last = g.iloc[-1]
+        r = {c: last[c] for c in keep if c not in counting}
+        lo, hi = int(g["season"].min()), int(g["season"].max())
+        r["season"] = str(lo) if lo == hi else f"{lo}–{hi}"
+        for c in keep:
+            if c in counting:
+                v = pd.to_numeric(g[c], errors="coerce")
+                r[c] = float(v.sum()) if v.notna().any() else None
+        rows.append(r)
+    out = pd.DataFrame(rows, columns=keep)
+    th = next((c for c in conds if c["kind"] == "threshold" and c.get("career")), None)
+    if th is not None:
+        out = out[out[th["col"]].fillna(0) >= th["career"]]
+    s = next((c for c in conds if c["kind"] == "sort" and c["col"] in counting), None) or {"col": "super_bowl_wins", "asc": False}
+    by = [s["col"]] + [c for c in ("playoff_wins", "player_display_name", "player_id") if c != s["col"] and c in out.columns]
+    asc = [bool(s["asc"])] + [c != "playoff_wins" for c in by[1:]]
+    return out.sort_values(by, ascending=asc, na_position="last").reset_index(drop=True)
 
 def sort_result(res, conds):
     """Result order: an explicit "most/fewest X" first, otherwise newest season."""
@@ -1103,6 +1142,8 @@ def run_full(df, query):
                 mask &= aligned_rank.notna() & (aligned_rank <= c["n"])
 
     res = df[mask].copy()
+    if is_career(conds):
+        notes = notes + [CAREER_NOTE]
     return res, notes, conds, ignored
 
 RESULT_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games",

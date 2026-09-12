@@ -373,7 +373,7 @@ BODY = r"""
       // keep the sort if that column is still on screen (#15)
       S.sort = keepSort && d.columns.includes(keepSort.col) ? keepSort : (d.sort ? { col: d.sort.col, dir: d.sort.asc ? 'asc' : 'desc' } : null);
       renderRead();
-      $('countline').innerHTML = `<span class="count">${d.count.toLocaleString()}</span> player-season${d.count === 1 ? '' : 's'}` + (d.truncated ? ` · first 2,000 shown` : '');
+      $('countline').innerHTML = `<span class="count">${d.count.toLocaleString()}</span> ` + (d.career ? `player${d.count === 1 ? '' : 's'} · career totals over the matched seasons` : `player-season${d.count === 1 ? '' : 's'}`) + (d.truncated ? ` · first 2,000 shown` : '');
       status.textContent = '';
       renderEmpty(d);
       $('toolbar').hidden = !d.rows.length;

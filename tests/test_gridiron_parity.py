@@ -15,6 +15,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 import pandas as pd
 import query_engine as qe
+import fetch_data as fd
 
 QUERIES = [
     "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
@@ -77,6 +78,11 @@ QUERIES = [
     "QBs making over $40 million a year in 2024",
     "WRs with a contract over 25 million per year since 2020",
     "the highest paid RBs in 2025",
+    "QBs with the most Super Bowl wins since 2000",
+    "QBs with 3+ rings",
+    "players with the most playoff wins since 2010",
+    "QBs who won the Super Bowl in 2017",
+    "RBs with the most rings",
     "safeties with the most interceptions since 2015",
     "QBs with fewer than 20 sacks and 4000 yards in 2023",
     "edge rushers with 50+ sacks",
@@ -97,7 +103,10 @@ for (const q of qs) {
   try {
     const r = T.run(q);
     const ordered = T.sortIdx(r.idx, r.conds).slice(0, 10).map(i => T.cols.season[i] + "|" + T.cols.player_id[i]);
-    out.push({ notes: r.notes, ignored: r.ignored, first10: ordered, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort() });
+    const p = T.present(r.idx, r.conds, r.notes, r.ignored, 5000);
+    const career = p.career ? p.rows.slice(0, 10).map(x => x.player_id + "|" + x.season + "|" + (x[p.sort.col] == null ? "" : x[p.sort.col])) : null;
+    out.push({ notes: p.notes, ignored: r.ignored, first10: ordered, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort(),
+               career, careerKeys: p.career ? p.rows.map(x => x.player_id).sort() : null });
   }
   catch (e) { out.push({ error: e.message }); }
 }
@@ -119,10 +128,17 @@ def main():
             ordered = qe.sort_result(res, conds).head(10)
             py = {"notes": notes, "ignored": ignored,
                   "first10": [f"{int(s)}|{p}" for s, p in zip(ordered["season"], ordered["player_id"])],
-                  "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"]))}
+                  "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"])),
+                  "career": None, "careerKeys": None}
+            if qe.is_career(conds):
+                cr = qe.career_rows(res, conds, fd.RANK_DESC)
+                s = next((c for c in conds if c["kind"] == "sort" and c["col"] in set(fd.RANK_DESC) | {"playoff_wins", "super_bowl_wins", "games"}), None) or {"col": "super_bowl_wins"}
+                num = lambda v: "" if v is None or v != v else (str(int(v)) if float(v).is_integer() else str(v))
+                py["career"] = [f"{p}|{sp}|{num(v)}" for p, sp, v in zip(cr["player_id"].head(10), cr["season"].head(10), cr[s["col"]].head(10))]
+                py["careerKeys"] = sorted(cr["player_id"])
         except qe.QueryError as e:
             py = {"error": str(e)}
-        ok = py == j
+        ok = py == j and py.get("career") == j.get("career") and py.get("careerKeys") == j.get("careerKeys")
         fails += 0 if ok else 1
         tag = "PASS" if ok else "FAIL"
         n = len(py.get("keys", [])) if "keys" in py else "err"
@@ -136,6 +152,8 @@ def main():
             if py.get("first10") != j.get("first10"):
                 print("      order py:", py.get("first10"))
                 print("      order js:", j.get("first10"))
+            if py.get("career") != j.get("career") or py.get("careerKeys") != j.get("careerKeys"):
+                print("      career py:", py.get("career"), "\n      career js:", j.get("career"))
             if "error" in py or "error" in j: print("      py:", py.get("error"), " js:", j.get("error"))
     print(f"\n{len(QUERIES) - fails} of {len(QUERIES)} questions answered identically by both engines")
     sys.exit(1 if fails else 0)

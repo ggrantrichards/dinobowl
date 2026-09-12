@@ -362,11 +362,12 @@
       }
 
       if (!conds.length) throw new QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.");
-      // "5 rings" is a career count; a season has at most one
+      // "5 rings" is a career count; a season holds one at most. Keep the season
+      // filter at >= 1 and carry the real number for the career-totals pass.
       for (const c of conds) {
         if (c.kind === "threshold" && c.col === "super_bowl_wins" && c.value > 1) {
-          c.value = 1;
-          for (let i = 0; i < notes.length; i++) if (notes[i].startsWith("Super Bowl wins")) notes[i] = "Super Bowl wins \u2265 1 (a season holds one ring at most \u2014 the totals below add them up per player)";
+          c.career = Math.round(c.value); c.value = 1;
+          for (let i = 0; i < notes.length; i++) if (notes[i].startsWith("Super Bowl wins")) notes[i] = "Super Bowl wins \u2265 " + c.career + " across the matched seasons (career total)";
           if (!conds.some((k) => k.kind === "sort")) conds.push({ kind: "sort", col: "super_bowl_wins", asc: false });
         }
       }
@@ -553,7 +554,46 @@
     queryConds(conds, notes, ignored, limit) {
       return this.present(this.apply(conds), conds, notes, ignored, limit);
     }
+    // "most Super Bowl wins" / "most playoff wins" / "N rings" are questions about
+    // players, not seasons: one row per player, counting stats summed, identity
+    // from the latest matched season, the season column showing the span.
+    careerMode(conds) {
+      return conds.some((c) => (c.kind === "sort" && (c.col === "super_bowl_wins" || c.col === "playoff_wins")) || (c.kind === "threshold" && c.career));
+    }
+    presentCareer(idx, conds, notes, ignored, limit) {
+      const M = this.meta;
+      const counting = new Set([...M.rank_desc, "playoff_wins", "super_bowl_wins", "games"]);
+      const cols = this.resultColumns(idx, conds).filter((c) => (M.always_cols.includes(c) && c !== "made_playoffs") || counting.has(c));
+      for (const extra of ["playoff_wins", "super_bowl_wins"]) if (this.has(extra) && !cols.includes(extra)) cols.push(extra);   // always carried: they break ties
+      const by = new Map();
+      for (const i of idx) {
+        const id = this.cols.player_id[i], season = this.cols.season[i];
+        let r = by.get(id);
+        if (!r) { r = { player_id: id, _lo: season, _hi: season, _last: i }; by.set(id, r); }
+        if (season < r._lo) r._lo = season;
+        if (season >= r._hi) { r._hi = season; r._last = i; }
+        for (const c of cols) if (counting.has(c)) { const v = this.cols[c][i]; if (v != null) r[c] = (r[c] || 0) + v; }
+      }
+      let rows = [...by.values()].map((r) => {
+        for (const c of cols) if (!counting.has(c)) r[c] = this.cols[c][r._last];
+        r.season = r._lo === r._hi ? String(r._lo) : r._lo + "\u2013" + r._hi;
+        for (const c of cols) if (counting.has(c) && r[c] == null) r[c] = null;
+        delete r._lo; delete r._hi; delete r._last;
+        return r;
+      });
+      const th = conds.find((c) => c.kind === "threshold" && c.career);
+      if (th) rows = rows.filter((r) => (r[th.col] || 0) >= th.career);
+      const s = conds.find((c) => c.kind === "sort" && counting.has(c.col)) || { col: "super_bowl_wins", asc: false };
+      const dir = s.asc ? 1 : -1;
+      const str = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+      rows.sort((a, b) => dir * ((a[s.col] || 0) - (b[s.col] || 0)) ||
+        (s.col !== "playoff_wins" ? (b.playoff_wins || 0) - (a.playoff_wins || 0) : 0) ||
+        str(a.player_display_name, b.player_display_name) || str(a.player_id, b.player_id));
+      return { conds, notes: [...notes, "career totals \u2014 one row per player, the matched seasons added up; the season column shows the span"], ignored, sort: s, count: rows.length, columns: cols,
+               rows: rows.slice(0, limit || 2000), idx, truncated: rows.length > (limit || 2000), totals: null, career: true };
+    }
     present(idx, conds, notes, ignored, limit) {
+      if (this.careerMode(conds)) return this.presentCareer(idx, conds, notes, ignored, limit);
       const cols = this.resultColumns(idx, conds);
       const sorted = this.sortIdx(idx, conds);
       const rows = sorted.slice(0, limit || 2000).map((i) => this.row(i, [...cols, "player_id"]));

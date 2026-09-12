@@ -228,8 +228,8 @@ RATE_RANKS = [
 
 # Formulas, for the glossary and for anyone checking the numbers.
 DERIVED = {
-    "playoff_wins": "postseason games the player's playoff team won that season (0 if the team missed the playoffs)",
-    "super_bowl_wins": "1 in a season the player's team won the Super Bowl; ask for 'most Super Bowl wins' to count rings across seasons",
+    "playoff_wins": "postseason wins the player took part in that season: for QB/RB/FB/WR/TE, games he threw, ran or was targeted in that his team won; for every other position, his playoff team's wins (0 if the team missed the playoffs)",
+    "super_bowl_wins": "1 in a season the player won the Super Bowl: a QB only if he threw the most passes for the winner in that game (the starter, not the backup holding a clipboard), RB/FB/WR/TE if he touched the ball in it, everyone else by roster; 'most Super Bowl wins' adds them up per player",
     "completion_pct": "completions / pass_attempts",
     "int_rate": "interceptions / pass_attempts",
     "td_pct": "passing_tds / pass_attempts",
@@ -472,6 +472,37 @@ def load_pbp(year, rebuild=False):
     out.to_parquet(cache, index=False)
     return out
 
+POST_COLS = ["season_type", "game_id", "week", "home_team", "away_team", "result", "posteam",
+             "passer_player_id", "rusher_player_id", "receiver_player_id", "pass_attempt"]
+def load_post_games(year):
+    """Every postseason game of a season: who won, whether it was the Super Bowl, and
+    which skill players took part (passer attempts, rushers, receivers) for which team."""
+    jcache = os.path.join(CACHE_DIR, f"postgames_{year}.json")
+    if os.path.exists(jcache):
+        return json.load(open(jcache))
+    try:
+        p = pd.read_parquet(PBP_URL.format(year=year), columns=POST_COLS)
+    except Exception as e:
+        print(f"  ! no postseason play-by-play for {year} ({e})")
+        return []
+    p = p[(p["season_type"] == "POST") & p["result"].notna() & p["posteam"].notna()]
+    games = []
+    if len(p):
+        sb_week = int(p["week"].max())
+        for gid, g in p.groupby("game_id"):
+            first = g.iloc[0]
+            winner = first["home_team"] if first["result"] > 0 else first["away_team"]
+            parts = {}
+            for col in ("passer_player_id", "rusher_player_id", "receiver_player_id"):
+                sub = g[g[col].notna()]
+                for pid, team, att in zip(sub[col], sub["posteam"], sub["pass_attempt"].fillna(0)):
+                    cur = parts.setdefault(pid, {"team": team, "att": 0})
+                    if col == "passer_player_id": cur["att"] += int(att)
+            games.append({"winner": winner, "sb": int(first["week"]) == sb_week, "parts": parts})
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    json.dump(games, open(jcache, "w"))
+    return games
+
 def playoff_results(year):
     """{team: playoff wins} and the Super Bowl winner, from load_pbp's cache."""
     jcache = os.path.join(CACHE_DIR, f"post_{year}.json")
@@ -705,13 +736,33 @@ def main():
         da = df["deep_att"]
         df["deep_cmp_pct"] = (df["deep_cmp"] / da.where(da > 0)).round(4)
     print("Playoff wins and Super Bowls...")
+    # Skill players are credited with the games they actually played in (a pass, a
+    # carry or a target), and a QB gets the ring only as the winner's primary passer.
+    # Linemen, defenders and specialists are credited by roster, which is all the
+    # play-by-play can see of them.
+    SKILL = {"QB", "RB", "FB", "WR", "TE"}
     df["playoff_wins"], df["super_bowl_wins"] = 0, 0
     for year in range(START_YEAR, end + 1):
         wins, sb = playoff_results(year)
         yr = (df["season"] == year) & df["made_playoffs"]
-        df.loc[yr, "playoff_wins"] = df.loc[yr, "post_team"].map(wins).fillna(0).astype(int)
+        skill = yr & df["position"].isin(SKILL)
+        df.loc[yr & ~skill, "playoff_wins"] = df.loc[yr & ~skill, "post_team"].map(wins).fillna(0).astype(int)
         if sb:
-            df.loc[yr & (df["post_team"] == sb), "super_bowl_wins"] = 1
+            df.loc[yr & ~skill & (df["post_team"] == sb), "super_bowl_wins"] = 1
+        won_in, sb_touch, sb_qb = {}, set(), None
+        for g in load_post_games(year):
+            for pid, info in g["parts"].items():
+                if info["team"] == g["winner"]:
+                    won_in[pid] = won_in.get(pid, 0) + 1
+                    if g["sb"]: sb_touch.add(pid)
+            if g["sb"]:
+                passers = [(info["att"], pid) for pid, info in g["parts"].items() if info["team"] == g["winner"] and info["att"] > 0]
+                if passers: sb_qb = max(passers)[1]
+        ids = df.loc[skill, "player_id"]
+        df.loc[skill, "playoff_wins"] = ids.map(won_in).fillna(0).astype(int).values
+        qb = skill & (df["position"] == "QB")
+        df.loc[qb, "super_bowl_wins"] = (df.loc[qb, "player_id"] == sb_qb).astype(int).values if sb_qb else 0
+        df.loc[skill & ~qb, "super_bowl_wins"] = df.loc[skill & ~qb, "player_id"].isin(sb_touch).astype(int).values
     df = df.drop(columns=["post_team"])
 
     print("ESPN Total QBR (2006+)...")

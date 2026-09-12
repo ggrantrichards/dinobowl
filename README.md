@@ -125,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g14  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g15  # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -167,6 +167,23 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
+### Gridiron g15 (2026-09-11) — rings go to the men who played, and "most" means a career
+
+Owner: "QBs sorted by Super Bowl wins since 2000" showed Kenny Pickett, Chad Henne and Nate
+Sudfeld with a ring each and every row reading 1. Two faults.
+
+- **Credit.** Postseason wins and Super Bowls were credited by roster. Now a QB / RB / FB / WR /
+  TE is credited with the playoff wins he took part in (a pass, a carry or a target, from
+  play-by-play), and a QB gets the Super Bowl only as the winner's primary passer in that game —
+  Nick Foles has 2017, Nate Sudfeld does not. Backs and receivers need a touch in the game.
+  Linemen, defenders and specialists stay by roster, which is all the play-by-play can see of
+  them. Cached per season in `data/cache/postgames_<year>.json`.
+- **Career totals.** "most Super Bowl wins", "most playoff wins", "3+ rings" now answer with one
+  row per player: the matched seasons added up, identity from the latest one, the season column
+  showing the span (`2001–2019`), counting stats summed and rate columns dropped. The count line
+  says "players · career totals". Both engines; the parity test compares the career rows too.
+- Parity 73/73 (five new questions).
+
 ### Gridiron g14 (2026-09-11) — total yards is the sum, and contracts
 
 - **Total yards.** "total yards", "all-purpose yards", "yards from scrimmage" always mean
@@ -191,6 +208,18 @@ which a running back only has when he threw a pass — 19 seasons all-time, none
 New aliases (`yards/carry`, `yards/rush`, `yards a carry`, `rushing yards per attempt`, ...)
 and two position swaps: for RB / FB, `yards per attempt` → yards/carry and `attempts` →
 carries. Both engines; parity 61/61.
+
+### Dino Bowl 2.5.2 (2026-09-11) — no forward pass past the line; THE KING, AA pass
+
+- **Rule.** The frame a carrier crosses the line of scrimmage he loses the throw and any
+  half-drawn aim is cancelled ("PAST THE LINE"); both throw functions refuse a forward pass
+  from past the line even if something else slipped through. Scenario: crossing clears
+  `canPass` and the aim; a forced bullet never leaves his hands.
+- **THE KING.** Shaded skull (highlights on the crown, shadow under the cheeks, two-tone teeth,
+  a tongue when the mouth opens), pupils that follow you along the wall, eased rise, a rear-back
+  before the bite and a snap-down / slow recovery, the claw slides then slams, every strike
+  kicks dust off the parapet and leaves a crack, footballs spin and trail, a damage ghost on the
+  HP bar, the crit tag pops. All dt-based.
 
 ### Dino Bowl 2.5 (2026-09-11) — THE KING, a real catch meter, a bigger playbook
 
