@@ -125,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g16  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g17  # -> static/index.html (bump the version token so browsers refetch)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -166,6 +166,30 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g17 (2026-09-12) — an edge rusher is a usage, not a label
+
+"Edge rushers with 10+ sacks in 2025" returned 8 of the real 16, missing Brian Burns, Micah
+Parsons, Nik Bonitto, Tuli Tuipulotu, Byron Young, Josh Sweat, Al-Quadin Muhammad and Cameron
+Jordan. The alias mapped to the position codes `DE` and `OLB`, and nflverse files most modern
+3-4 outside rushers as plain **LB** — while filing genuine off-ball linebackers like Lavonte
+David as **OLB**. The label cannot answer the question in either direction.
+
+`fetch_data.edge_flag` now derives an `is_edge` column per player-season. A DE or DL is an edge
+by label; a linebacker earns it by how he was used that season, best evidence first:
+
+1. PFR pressures above coverage targets (2018+),
+2. else (sacks + QB hits) per defensive snap ≥ 0.025 (2012+),
+3. else sacks per tackle ≥ 0.08 for the older seasons with neither.
+
+Checked against the 2025 board: all eight LB-filed edge rushers flagged, and none of Roquan
+Smith, Fred Warner, Bobby Wagner, Zack Baun, Demario Davis or Lavonte David. Interior linemen
+stay out — Jeffery Simmons and his 11 sacks are a DT, not an edge. The position condition
+gained an optional `flag`, honoured by both engines and emitted by both parsers. Parity 87/87.
+
+Known difference from ESPN-style sources: `games` counts seasons games with a recorded stat
+line, so a defender who played but recorded nothing is not counted (Danielle Hunter reads 16,
+ESPN 17).
 
 ### Gridiron g16 (2026-09-12) — season or career, decided by the span
 

@@ -229,6 +229,7 @@ RATE_RANKS = [
 
 # Formulas, for the glossary and for anyone checking the numbers.
 DERIVED = {
+    "is_edge": "counts as an edge rusher that season: a DE or DL by label, or a linebacker whose season shows pass-rush usage rather than coverage (PFR pressures above coverage targets; before PFR, sacks + QB hits per defensive snap, else sacks per tackle). nflverse files most 3-4 outside rushers as plain LB and some off-ball linebackers as OLB, so the label alone cannot answer 'edge rushers'",
     "playoff_wins": "postseason wins the player took part in that season: for QB/RB/FB/WR/TE, games he threw, ran or was targeted in that his team won; for every other position, his playoff team's wins (0 if the team missed the playoffs)",
     "super_bowl_wins": "1 in a season the player won the Super Bowl: a QB only if he threw the most passes for the winner in that game (the starter, not the backup holding a clipboard), RB/FB/WR/TE if he touched the ball in it, everyone else by roster; 'most Super Bowl wins' adds them up per player",
     "completion_pct": "completions / pass_attempts",
@@ -327,7 +328,7 @@ def _rate_parts():
 RATE_PARTS = _rate_parts()
 MAX_COLS = ["fg_long"]          # a career "long" is the longest one, not the sum
 # never added up: a year is not a quantity, and a salary belongs to one contract
-NEVER_SUM = ["season", "age", "height", "weight", "draft_year", "draft_round", "draft_pick",
+NEVER_SUM = ["is_edge", "season", "age", "height", "weight", "draft_year", "draft_round", "draft_pick",
              "rookie_season", "experience", "contract_apy", "contract_value", "contract_guaranteed",
              "contract_cap_pct", "contract_years", "contract_signed"]
 
@@ -536,6 +537,27 @@ def load_post_games(year):
     os.makedirs(CACHE_DIR, exist_ok=True)
     json.dump(games, open(jcache, "w"))
     return games
+
+def edge_flag(df):
+    """AN EDGE RUSHER IS A USAGE, NOT A LABEL. nflverse files Micah Parsons, Brian
+    Burns and Nik Bonitto as plain "LB", and files off-ball linebackers like
+    Lavonte David as "OLB", so "edge rushers with 10+ sacks" cannot be answered
+    from the position column. A DE or DL is an edge by label; a linebacker earns
+    it by how he was used that season, best evidence first: PFR pressures above
+    coverage targets, else pass-rush production per defensive snap, else sacks
+    per tackle for the seasons with neither. Checked against the 2025 top of the
+    board: all eight LB-filed edge rushers flagged, none of the off-ball ones."""
+    num = lambda c: pd.to_numeric(df[c], errors="coerce") if c in df else pd.Series(np.nan, index=df.index)
+    pres, cov, snaps = num("pressures"), num("cov_targets"), num("def_snaps")
+    sacks, hits, tkl = num("sacks").fillna(0), num("qb_hits").fillna(0), num("tackles").fillna(0)
+    by_pfr = pres.notna() & cov.notna()
+    by_snaps = ~by_pfr & snaps.notna() & (snaps > 0)
+    rest = ~by_pfr & ~by_snaps
+    out = pd.Series(False, index=df.index)
+    out[by_pfr] = pres[by_pfr] > cov[by_pfr]
+    out[by_snaps] = (sacks[by_snaps] + hits[by_snaps]) / snaps[by_snaps] >= 0.025
+    out[rest] = sacks[rest] / tkl[rest].clip(lower=1) >= 0.08
+    return out | df["position"].isin(["DE", "DL"])
 
 def playoff_results(year):
     """{team: playoff wins} and the Super Bowl winner, from load_pbp's cache."""
@@ -820,6 +842,7 @@ def main():
     # nflverse divides by zero in a few share columns; an infinite share is NA
     fcols = df.select_dtypes(include="float").columns
     df[fcols] = df[fcols].replace([np.inf, -np.inf], np.nan)
+    df["is_edge"] = edge_flag(df)
     df = add_ranks(df)
     df.to_parquet(OUT_FILE, index=False)
     seasons = sorted(df["season"].unique())

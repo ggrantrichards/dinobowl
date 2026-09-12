@@ -193,7 +193,7 @@
         if (re.test(q)) {
           const pos = POSITIONS[word];
           posCodes = pos.codes;
-          conds.push({ kind: "position", value: pos.codes });
+          conds.push({ kind: "position", value: pos.codes, flag: pos.flag || null });
           notes.push("position is " + pos.label);
           break;
         }
@@ -464,7 +464,10 @@
         if (c.kind === "position") {
           const codes = new Set(Array.isArray(c.value) ? c.value : [c.value]);
           const p = this.cols.position;
-          for (let i = 0; i < this.n; i++) if (mask[i] && !codes.has(p[i])) mask[i] = 0;
+          // a derived flag narrows the codes; "edge rusher" is the one group the
+          // position label cannot answer on its own (see fetch_data.edge_flag)
+          const fl = c.flag && this.has(c.flag) ? this.cols[c.flag] : null;
+          for (let i = 0; i < this.n; i++) if (mask[i] && (!codes.has(p[i]) || (fl && !fl[i]))) mask[i] = 0;
         } else if (c.kind === "playoffs") {
           const p = this.cols.made_playoffs;
           for (let i = 0; i < this.n; i++) if (mask[i] && !p[i]) mask[i] = 0;

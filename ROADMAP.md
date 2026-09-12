@@ -52,6 +52,25 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## GRIDIRON g17 — 2026-09-12 (shipped): edge rushers by usage, not by label
+
+Owner pasted the real 2025 sack board next to ours: we returned 8 of 16 edge rushers. Cause:
+`"edge rusher"` mapped to `["DE", "OLB"]`, but nflverse files Parsons / Burns / Bonitto /
+Tuipulotu / Byron Young / Josh Sweat / Muhammad / Cameron Jordan as **LB**, and files off-ball
+linebackers (Lavonte David) as **OLB** — so the label is wrong in both directions.
+
+- `fetch_data.edge_flag(df)` → `is_edge` per player-season: `DE`/`DL` by label, a linebacker by
+  usage — PFR `pressures > cov_targets`, else `(sacks + qb_hits) / def_snaps >= 0.025`, else
+  `sacks / max(tackles, 1) >= 0.08`. Empirically separated: the 2025 edge group runs 0.043-0.068
+  on the snap rate against 0.004-0.012 for off-ball, so the 0.025 line sits in open space.
+- `_pos(codes, label, flag=None)`; `_EDGE` widens the codes to DE/DL/LB/OLB/ILB/MLB and narrows
+  by the flag. DT/NT stay out, so an interior rusher is never an "edge rusher".
+- The position condition carries `flag`, applied in `run_full` and in `Table.apply`, and emitted
+  by **both** parsers — the JS parser not copying it was worth a parity failure (py 1383 /
+  js 2738) and is exactly why the harness compares matched keys and not just the first ten.
+- `is_edge` is in `NEVER_SUM` so it never becomes a career total. Parity 87/87 with four new
+  questions.
+
 ## GRIDIRON g16 — 2026-09-12 (shipped): season or career, decided by the span
 
 Owner: "most deep pass TDs since 2021" answered with one season. "How should we figure out

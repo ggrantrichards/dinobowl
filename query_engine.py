@@ -522,8 +522,15 @@ STAT_ALIASES = [
 ]
 
 # word/phrase -> (list of raw position codes in the data, friendly label)
-def _pos(codes, label):
-    return {"codes": codes, "label": label}
+def _pos(codes, label, flag=None):
+    # `flag` narrows the codes by a derived column - "edge rusher" is the one
+    # group the position label cannot answer on its own (see fetch_data.edge_flag)
+    return {"codes": codes, "label": label, "flag": flag}
+
+# An edge rusher is a USAGE, not a label: nflverse files most 3-4 outside
+# rushers as plain LB and some off-ball linebackers as OLB, so the codes are
+# wide and fetch_data.edge_flag decides who actually rushed.
+_EDGE = {"codes": ["DE", "DL", "LB", "OLB", "ILB", "MLB"], "label": "edge rusher", "flag": "is_edge"}
 
 POSITIONS = {
     "qb": _pos(["QB"], "QB"), "qbs": _pos(["QB"], "QB"),
@@ -544,9 +551,8 @@ POSITIONS = {
     "db": _pos(["CB", "DB", "S", "FS", "SAF"], "DB"), "dbs": _pos(["CB", "DB", "S", "FS", "SAF"], "DB"),
     "defensive back": _pos(["CB", "DB", "S", "FS", "SAF"], "DB"),
     "defensive backs": _pos(["CB", "DB", "S", "FS", "SAF"], "DB"),
-    "edge": _pos(["DE", "OLB"], "edge rusher"), "edges": _pos(["DE", "OLB"], "edge rusher"),
-    "edge rusher": _pos(["DE", "OLB"], "edge rusher"), "edge rushers": _pos(["DE", "OLB"], "edge rusher"),
-    "pass rusher": _pos(["DE", "OLB"], "edge rusher"), "pass rushers": _pos(["DE", "OLB"], "edge rusher"),
+    "edge": _EDGE, "edges": _EDGE, "edge rusher": _EDGE, "edge rushers": _EDGE,
+    "pass rusher": _EDGE, "pass rushers": _EDGE,
     "de": _pos(["DE"], "DE"), "defensive end": _pos(["DE"], "DE"), "defensive ends": _pos(["DE"], "DE"),
     "dt": _pos(["DT", "NT"], "DT"), "dts": _pos(["DT", "NT"], "DT"),
     "defensive tackle": _pos(["DT", "NT"], "DT"), "defensive tackles": _pos(["DT", "NT"], "DT"),
@@ -874,7 +880,7 @@ def parse(query):
         if re.search(rf"\b{re.escape(word)}\b", q):
             pos = POSITIONS[word]
             pos_codes = pos["codes"]
-            conds.append({"kind": "position", "value": pos["codes"]})
+            conds.append({"kind": "position", "value": pos["codes"], "flag": pos.get("flag")})
             notes.append(f"position is {pos['label']}")
             break
     _POS_GROUP = _pos_group(pos_codes)
@@ -1221,6 +1227,8 @@ def run_full(df, query):
         if c["kind"] == "position":
             codes = c["value"] if isinstance(c["value"], list) else [c["value"]]
             mask &= df["position"].isin(codes)
+            if c.get("flag") and c["flag"] in df:
+                mask &= df[c["flag"]].fillna(False).astype(bool)
         elif c["kind"] == "playoffs":
             mask &= df["made_playoffs"].fillna(False)
         elif c["kind"] == "season_range":
