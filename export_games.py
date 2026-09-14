@@ -41,6 +41,30 @@ KEEP = [
 ]
 
 
+FACE_HEAD = "https://static.www.nfl.com/image/%s/f_auto,q_auto/league/"
+
+
+def face_map(ids):
+    """A game line has no headshot column and never should: that is 420,000 copies
+    of a URL for 11,000 faces. The players table holds one per player, so this file
+    ships the map and the page looks a face up by id."""
+    p = pd.read_parquet(os.path.join(HERE, "data", "players.parquet"), columns=["player_id", "headshot_url"])
+    p = p.dropna(subset=["headshot_url"]).drop_duplicates("player_id")
+    want = set(ids)
+    out = {}
+    for pid, url in zip(p["player_id"], p["headshot_url"]):
+        if pid not in want or not url:
+            continue
+        for kind in ("private", "upload"):
+            head = FACE_HEAD % kind
+            if url.startswith(head):
+                out[pid] = kind[0] + ":" + url[len(head):]
+                break
+        else:
+            out[pid] = url
+    return out
+
+
 def encode(vals, n):
     """A game line is mostly zeros: a quarterback has no tackles and a lineman no
     targets. Storing the most common value once and listing only the rows that
@@ -87,6 +111,7 @@ def main():
         "sum_cols": [],            # a game line is never a career total
         "derived": fd.DERIVED,
         "coverage": {"box_score": fd.START_YEAR},
+        "faces": face_map(df["player_id"].tolist()),
     }
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:

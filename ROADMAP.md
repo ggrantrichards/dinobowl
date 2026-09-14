@@ -52,6 +52,29 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## GRIDIRON g19 + g20 — 2026-09-14 (shipped): the faces come back
+
+Owner: "player faces arent loading anymore." Two separate faults wearing the same symptom.
+
+**g19 — a headshot is not a wallpaper.** Nothing was wrong with the data or the markup:
+the URLs are byte-identical to every past build and the CDN answers 200. The league now
+stores those headshots as **4-6 MB originals** a few thousand pixels wide, and the table
+draws them at 28px — roughly 400 MB of images for a 78-row answer, so they simply never
+arrived. The host is Cloudinary, so `face(url, px)` inserts the size we actually draw
+(`w_96,c_fill,g_face` in the table, `w_256` on a player page): 3 KB each. A URL that does
+not match the pattern passes through untouched. **Diagnosing this kind of fault: check
+`content-length`, not the status code.**
+
+**g20 — and a game line has no face column.** g19 only reached the season table. A per-game
+answer reads `games.json`, which carries the box score and nothing else, so every row drew
+an empty grey circle. 420,000 game lines cannot each hold a URL for 11,000 faces, so
+`export_games.py` ships a **map keyed by player id** in meta (`"p:"`/`"u:"` + the Cloudinary
+id, ~400 KB) and `faceFor(row, px)` resolves through it when the row has none. 10,538 of the
+10,672 players in the file have one; the other 134 have no headshot anywhere.
+
+Verified in the browser on both grains — 4/4 faces on the reported per-game query, 53/53 on
+a season query, player-page header at 256px. Parity 94/94.
+
 ## DINO BOWL 2.6 — 2026-09-14 (shipped): online plays offence AND defence
 
 Owner: "the first player selects both players teams and both players cant play 1 offense 1

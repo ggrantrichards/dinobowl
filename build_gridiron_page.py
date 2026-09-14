@@ -229,6 +229,20 @@ BODY = r"""
     const face = (url, px) => (typeof url === 'string' && url)
       ? url.replace(/\/image\/(private|upload)\/f_auto,q_auto\//, `/image/$1/f_auto,q_auto,w_${px},c_fill,g_face/`)
       : '';
+    // A game row carries no headshot column, so games.json ships a map keyed by
+    // player id. The code is "<kind letter>:<cloudinary id>".
+    const FACE_KIND = { p: 'private', u: 'upload' };
+    function faceFor(row, px) {
+      let url = row.headshot_url;
+      if (!url) {
+        const code = S.T && S.T.meta.faces && S.T.meta.faces[row.player_id];
+        if (!code) return '';
+        url = (FACE_KIND[code[0]] && code[1] === ':')
+          ? `https://static.www.nfl.com/image/${FACE_KIND[code[0]]}/f_auto,q_auto/league/${code.slice(2)}`
+          : code;
+      }
+      return face(url, px);
+    }
     function head(c) { return HEAD[c] || (META && META.display[c] ? META.display[c].replace(/\s*\(.*\)\s*$/, '') : c); }
     function fmt(col, v) {
       if (v === null || v === undefined) return '—';
@@ -618,7 +632,8 @@ BODY = r"""
     $('moreAll').addEventListener('click', () => loadMore && loadMore(true));
     function rowHTML(row) {
       const sc = S.sort && S.sort.col, g = row.games || 0;
-      const imgStr = row.headshot_url ? `<img src="${face(row.headshot_url, 96)}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
+      const fsrc = faceFor(row, 96);
+      const imgStr = fsrc ? `<img src="${fsrc}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
       return `<tr data-id="${row.player_id}" data-yr="${row.season}"><td class="fz fz0" style="padding:4px 10px;text-align:center;">${imgStr}</td>` + visibleCols.map((c, i) => {
         let v = row[c], val;
         if (c === 'season') val = `<span class="season-badge">${v}</span>`;
