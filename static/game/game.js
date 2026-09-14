@@ -26,7 +26,7 @@
   const xAtYd = (yd) => FIELD_X0 + yd * YPX;
   const ydAtX = (x) => (x - FIELD_X0) / YPX;
 
-  const BUILD = "2.5.2";   // shown on the title; the shells carry the cache-bust token
+  const BUILD = "2.6";   // shown on the title; the shells carry the cache-bust token
   const TEAMS = {
     ARI: ["Cardinals", "#97233f", "#ffb612"], ATL: ["Falcons", "#a71930", "#2b2b2b"],
     BAL: ["Ravens", "#241773", "#9e7c0c"], BUF: ["Bills", "#00338d", "#c60c30"],
@@ -1104,6 +1104,37 @@
 
   const keys = {};
   let mouse = { x: 0, y: 0, down: false };
+  // ---------------------------------------------------- TWO HUMANS AT ONCE
+  // Online is not turn-taking. Whoever has the ball plays offense and the OTHER
+  // player plays defense, and they swap when possession does. The host is team
+  // A, the guest team B, and the host simulates both — so every input handler
+  // below has to be able to serve either player. `actor` names the side whose
+  // input is being handled right now; it is null (meaning "this machine's own
+  // player") except inside applyRemoteInput.
+  const lmouse = mouse;                    // this machine's pointer
+  const rmouse = { x: 0, y: 0, down: false };   // the other player's, as forwarded
+  const rkeys = {};                        // ...and their keyboard (host only)
+  let actor = null;
+  const netDuel = () => G.mode === "online" && !!Net.role;
+  const mySide = () => (Net.role === "guest" ? "B" : "A");
+  const actorSide = () => actor || mySide();
+  const sideKeys = (side) => (side === mySide() ? keys : rkeys);
+  // Run a handler AS the other player: their controlled dino, their keyboard,
+  // their pointer. Everything is restored even if the handler throws.
+  function withActor(side, fn) {
+    const pa = actor, pc = G.controlled, pm = mouse;
+    actor = side; G.controlled = (G.ctrl && G.ctrl[side]) || null;
+    mouse = side === mySide() ? lmouse : rmouse;
+    try { fn(); } finally { actor = pa; G.controlled = pc; mouse = pm; }
+  }
+  // WHO IS ON OFFENSE. Two different questions, and conflating them is the bug:
+  //   offenseIsUser()  - is the offense human-driven at all (so the CPU stays off it)
+  //   iAmOnOffense()   - is THIS player (the actor) the one attacking right now
+  // The first keeps its old meaning everywhere the simulation asks it. The
+  // second is what the input handlers and the HUD need once two people are in.
+  const iAmOnOffense = () => netDuel() ? (G.drive === actorSide()) : offenseIsUser();
+  const iAmOnDefense = () => netDuel() ? (G.drive !== actorSide()) : defenseHumanSteers();
+  const defenseIsHuman = () => netDuel() ? true : defenseHumanSteers();
 
   // --------------------------------------------------------- online play
   // The host is authoritative: it simulates the play and streams a compact
@@ -1162,7 +1193,7 @@
       quarter: G.quarter, clock: G.clock, drive: G.drive, losYd: G.losYd, down: G.down, toGain: G.toGain,
       weather: G.weather, stadium: G.stadium, rampage: G.rampage, ramp: G.ramp ? Object.assign({}, G.ramp, { ent: rampEnt }) : null,
       players: G.players, ball: G.ball, carrier, phase: G.phase, playT: G.playT, callsheet: G.callsheet,
-      playIdx: G.playIdx, curPlay: G.curPlay, defCall: G.defCall, aim: G.aim, kick: G.kick, banner: G.banner,
+      playIdx: G.playIdx, curPlay: G.curPlay, defCall: G.defCall, callFor: G.callFor, aim: G.aim, kick: G.kick, banner: G.banner,
       // `parts` is GONE from the wire. Measured on a live snap: a CLEAR frame
       // was 33,077 bytes and a SNOW frame 123,922 — 712 snowflakes, every one
       // of them a fresh {x,y,vx,vy,t,snow} object, serialised and pushed to
@@ -1172,7 +1203,9 @@
       deadT: G.deadT, camX: G.camX, shake: G.shake, pteros: G.pteros, ot: G.ot,
       stats: G.stats, gameStats: netStats(), patMode: G.patMode, clockStopped: G.clockStopped, humanB: true,
       // so a matched guest can WATCH the host pick teams (read-only)
-      selA: G.selA, selB: G.selB, selStep: G.selStep, selectFor: G.selectFor, mode: G.mode
+      selA: G.selA, selB: G.selB, selStep: G.selStep, selectFor: G.selectFor, mode: G.mode,
+      // which dino each human is driving (indexes, because `controlled` is stripped)
+      ctrlA: G.ctrl ? G.players.indexOf(G.ctrl.A) : -1, ctrlB: G.ctrl ? G.players.indexOf(G.ctrl.B) : -1
     });
   }
   function applyNetFrame(f) {
@@ -1180,6 +1213,8 @@
     // the host's pre-game lobby frame must not yank the guest off its own
     // "matched — waiting for host" screen
     if (f.state === "online_wait" || f.state === "loading" || f.state === "title" || f.state === "menu") return;
+    // the guest has its own team board now, so the host's never overwrites it
+    if (Net.role === "guest" && f.state === "select") return;
     const teamChanged = f.my && (G.my !== f.my || G.opp !== f.opp);
     if (f.state === "over" && f.mode === "online" && Net.role === "guest" && f.score && G._ratedRoom !== Net.room) {
       G._ratedRoom = Net.room;                        // the guest is team B
@@ -1195,6 +1230,12 @@
     // second and leave a sky that never holds more than ~5 frames of snow.
     if (!Array.isArray(G.parts)) G.parts = [];
     G.carrier = f.carrier >= 0 ? G.players[f.carrier] : null;
+    // re-hang the two control seats on the fresh player objects
+    G.ctrl = { A: f.ctrlA >= 0 ? G.players[f.ctrlA] : null, B: f.ctrlB >= 0 ? G.players[f.ctrlB] : null };
+    for (const e of G.players) { e.controlled = false; e.ctrlSide = null; }
+    if (G.ctrl.A) { G.ctrl.A.ctrlSide = "A"; G.ctrl.A.controlled = true; }
+    if (G.ctrl.B) { G.ctrl.B.ctrlSide = "B"; G.ctrl.B.controlled = true; }
+    G.controlled = G.ctrl[mySide()] || null;
     if (G.ramp && typeof G.ramp.ent === "number") G.ramp.ent = G.players[G.ramp.ent];
     if (teamChanged && TEAMS[G.my] && TEAMS[G.opp]) {
       G.sheets.A = DinoSprites.buildTeamSprites(TEAMS[G.my][1], TEAMS[G.my][2]);
@@ -1240,6 +1281,7 @@
   function resetNet() {
     Net.role = null; Net.remoteView = false; Net.room = null;
     Net.inputRef = null; Net.frameRef = null; Net.guestRef = null; Net.waitRef = null; Net.cancelled = false;
+    Net.teamRef = null; Net.teamSent = false; Net.guestTeam = null;
     if (Net.scanTimer) { clearInterval(Net.scanTimer); Net.scanTimer = null; }
   }
   async function ensureFirebase() {
@@ -1355,6 +1397,16 @@
       netStatus("MATCHED · YOU HOST");
       Net.waitRef.onDisconnect().cancel();
       Net.waitRef.remove();   // out of the queue: we are taken
+      // THE OTHER PLAYER PICKS HIS OWN TEAM. The host used to choose both, which
+      // is nobody's idea of a match. Each side picks one and the host starts the
+      // game when both are in.
+      Net.teamRef = ref.child("guestTeam");
+      Net.teamRef.on("value", (snap) => {
+        const abbr = snap.val();
+        if (!abbr || Net.role !== "host") return;
+        Net.guestTeam = abbr;
+        if (Net.teamSent) startOnlineMatch();
+      });
       setTimeout(() => {
         if (Net.cancelled) return;
         G.mode = "online"; G.humanB = true; G.career = null; G.szn = null; G.selectFor = "exh";
@@ -1388,7 +1440,10 @@
     await ref.child("guestJoined").set({ uid: myUid, ts: firebase.database.ServerValue.TIMESTAMP, rating: myRating() });
     Net.frameRef.on("value", (snap) => applyNetFrame(snap.val()));
     Net.inputRef = ref.child("inputs");
-    netStatus("MATCHED · TEAM B");
+    Net.teamRef = ref.child("guestTeam");
+    netStatus("MATCHED · TEAM B · PICK YOUR TEAM");
+    G.mode = "online"; G.humanB = true; G.career = null; G.szn = null; G.selectFor = "exh";
+    G.state = "select"; G.selStep = 0; G.selA = (Math.random() * 32) | 0;
   }
   function cancelMatch() {
     Net.cancelled = true;
@@ -1404,7 +1459,7 @@
     netStatus("READY");
   }
 
-  const GUEST_PLAY_STATES = ["playcall", "presnap", "live", "kick", "ptchoice"];
+  const GUEST_PLAY_STATES = ["playcall", "defcall", "presnap", "live", "kick", "ptchoice"];
   function canControlHere() {
     if (!Net.role) return true;
     // S4: the guest may also tap THROUGH a whistle — "dead" and "replay"
@@ -1412,18 +1467,23 @@
     // so the guest is no longer a spectator between its own plays. The HOST's
     // test deliberately keeps the original list: it must never lose control of
     // a dead beat merely because team B has the ball.
-    if (Net.role === "guest") return G.drive === "B" && (GUEST_PLAY_STATES.includes(G.state) || G.state === "dead" || G.state === "replay");
-    return G.drive !== "B" || !GUEST_PLAY_STATES.includes(G.state);
+    // BOTH players are live now: the one with the ball attacks, the other
+    // defends. Neither is a spectator, so neither is locked out.
+    if (Net.role === "guest") return GUEST_PLAY_STATES.includes(G.state) || G.state === "dead" || G.state === "replay";
+    return true;
   }
   function sendRemoteInput(input) { if (Net.inputRef) Net.inputRef.push(input); }
   function applyRemoteInput(i) {
-    if (Net.role !== "host" || G.drive !== "B") return;
-    if (i.type === "key") { keys[i.key] = true; onKey(i.key); }
-    if (i.type === "keyup") keys[i.key] = false;
-    if (i.type === "move") { mouse.x = i.x; mouse.y = i.y; }
-    if (i.type === "press") { mouse.x = i.x; mouse.y = i.y; mouse.down = true; onPress(); }
-    if (i.type === "release") { mouse.x = i.x; mouse.y = i.y; mouse.down = false; onRelease(); }
-    if (i.type === "alt") { mouse.x = i.x; mouse.y = i.y; onAltFire(); }
+    if (Net.role !== "host") return;
+    // served as team B, with team B's keyboard and pointer
+    withActor("B", () => {
+      if (i.type === "key") { rkeys[i.key] = true; onKey(i.key); }
+      if (i.type === "keyup") rkeys[i.key] = false;
+      if (i.type === "move") { mouse.x = i.x; mouse.y = i.y; }
+      if (i.type === "press") { mouse.x = i.x; mouse.y = i.y; mouse.down = true; onPress(); }
+      if (i.type === "release") { mouse.x = i.x; mouse.y = i.y; mouse.down = false; onRelease(); }
+      if (i.type === "alt") { mouse.x = i.x; mouse.y = i.y; onAltFire(); }
+    });
   }
   // Purely LOCAL keys. Mute, the help overlay, the box score and the pause
   // card are this machine's own screen furniture — they never touch the
@@ -1436,6 +1496,9 @@
   function onlineInput(input) {
     if (!Net.role) return false;
     if (input && input.type === "key" && (G.paused || LOCAL_ONLY_KEYS.includes(input.key))) return false;
+    // the team board is this machine's own screen: each player picks for himself,
+    // so the guest handles it here rather than forwarding it to the host
+    if (G.state === "select") return false;
     if (Net.role === "guest") { if (canControlHere()) sendRemoteInput(input); return true; }
     return !canControlHere();
   }
@@ -1518,8 +1581,8 @@
     return { x: (t.clientX - r.left) * (W / r.width), y: (t.clientY - r.top) * (H / r.height) };
   }
   const controllableNow = () => G.state === "live" &&
-    ((offenseIsUser() && (G.phase === "drop" || (G.phase === "carry" && G.controlled === G.carrier))) ||
-      (!offenseIsUser() && G.controlled));
+    ((iAmOnOffense() && (G.phase === "drop" || (G.phase === "carry" && G.controlled === G.carrier))) ||
+      (!iAmOnOffense() && G.controlled));
   function onTouchStart(e) {
     e.preventDefault();
     G.touch = true;                   // reveal on-screen controls for touch players
@@ -1575,11 +1638,15 @@
   cv.addEventListener("touchend", onTouchEnd, { passive: false });
   cv.addEventListener("touchcancel", onTouchEnd, { passive: false });
 
-  const kdir = () => {
-    if (G.touchMove && (G.touchMove.x || G.touchMove.y)) return { x: G.touchMove.x, y: G.touchMove.y };
+  // Whose sticks move this dino: the side that controls him, which online is
+  // not always the person sitting at this machine.
+  const kdir = (e) => {
+    const side = (e && e.ctrlSide) || actorSide();
+    const K = sideKeys(side);
+    if (side === mySide() && G.touchMove && (G.touchMove.x || G.touchMove.y)) return { x: G.touchMove.x, y: G.touchMove.y };
     return {
-      x: (keys["d"] || keys["arrowright"] ? 1 : 0) - (keys["a"] || keys["arrowleft"] ? 1 : 0),
-      y: (keys["s"] || keys["arrowdown"] ? 1 : 0) - (keys["w"] || keys["arrowup"] ? 1 : 0),
+      x: (K["d"] || K["arrowright"] ? 1 : 0) - (K["a"] || K["arrowleft"] ? 1 : 0),
+      y: (K["s"] || K["arrowdown"] ? 1 : 0) - (K["w"] || K["arrowup"] ? 1 : 0),
     };
   };
 
@@ -2681,7 +2748,7 @@
   function askDefense() {
     // a human calls the defensive scheme only in single-player while defending;
     // in 2-player the defense is CPU-run (alternating offensive possessions)
-    if (defenseHumanSteers()) {
+    if (defenseIsHuman()) {
       G.callsheet = relevantDefense(4);
       G.callFor = other(G.drive);
       if (G.coachMode) { G.state = "defcall"; return; }
@@ -2862,8 +2929,8 @@
     if (!sheet.length) return;
     G.playIdx = ((G.playIdx || 0) + dir + sheet.length) % sheet.length;
     const pick = sheet[G.playIdx];
-    if (offenseIsUser()) G.curPlay = pick;
-    else if (defenseHumanSteers()) G.defCall = pick;
+    if (iAmOnOffense()) G.curPlay = pick;
+    else if (iAmOnDefense()) G.defCall = pick;
     else return;
     buildPlayers();
     sfx.juke();
@@ -3818,11 +3885,14 @@
     resolvePlayerContacts();
     G.ball.x = eqb.x + eqb.dir * 8; G.ball.y = eqb.y;
     G.controlled = null;
-    if (defenseHumanSteers()) {
-      // single-player defense: the user drives the (soaring) free safety by default
+    G.ctrl = { A: null, B: null };
+    for (const e of P) { e.controlled = false; e.ctrlSide = null; }
+    if (defenseIsHuman()) {
+      // the defender's default dino is the (soaring) free safety
       const s = P.find((e) => e.team === "def" && e.species === "quetz") ||
         P.find((e) => e.team === "def" && e.role === "S") || P.find((e) => e.team === "def");
-      s.controlled = true; G.controlled = s;
+      // online that seat belongs to whoever does NOT have the ball
+      if (s) setControlledFor(netDuel() ? other(G.drive) : mySide(), s);
     }
   }
 
@@ -3858,6 +3928,15 @@
       for (const e of G.players) {
         if (e.species === "quetz" && sideOf(e) === G.soarSpent.side) e.soarCharge = 0;
       }
+    }
+    // WHOSE QUARTERBACK IS HE. Online the attacker may be at the other machine,
+    // so his seat has to be assigned rather than assumed to be this one. Offline
+    // nothing is seated at the snap and nothing should be: the player takes the
+    // quarterback by pressing him, and seating him here put a prompt on screen
+    // that was never there before.
+    if (netDuel() && offenseIsUser()) {
+      const qb0 = G.ball.holder || G.players.find((e) => e.team === "off" && e.role === "QB");
+      if (qb0) setControlledFor(G.drive, qb0);
     }
     sfx.snap();
     // per-play flags reset by construction — the throw latch (hasThrown/
@@ -3956,18 +4035,22 @@
       if (e.passive === "truck") e.truckCharges = (e.truckCharges || 0) + 2;
       if (e.passive === "yac") e.yacCharge = 1;   // first tackler whiffs
     }
-    if (offenseIsUser() && e.team === "off") setControlled(e);
+    if (offenseIsUser() && e.team === "off") setControlledFor(netDuel() ? G.drive : mySide(), e);
   }
   // offense is human-steered when the driving side is human (both sides in 2-player)
   const offenseIsUser = () => (G.drive === "A") ? true : !!G.humanB;
   // a human steers a DEFENDER only in single-player while defending (never in 2-player;
   // there the defending player only calls the scheme and the CPU executes it)
   const defenseHumanSteers = () => !G.humanB && G.drive !== "A";
-  function setControlled(e) {
-    G.players.forEach((p) => (p.controlled = false));
-    if (e) { e.controlled = true; }
-    G.controlled = e;
+  // One controlled dino per HUMAN, not one per game: online there are two.
+  function setControlledFor(side, e) {
+    G.players.forEach((p) => { if (p.ctrlSide === side || (!p.ctrlSide && p.controlled)) { p.ctrlSide = null; p.controlled = false; } });
+    if (e) { e.ctrlSide = side; e.controlled = true; }
+    if (!G.ctrl) G.ctrl = { A: null, B: null };
+    G.ctrl[side] = e || null;
+    if (side === mySide()) G.controlled = e || null;
   }
+  function setControlled(e) { setControlledFor(actorSide(), e); }
 
   // ------------------------------------------------------------ throw logic
   function maxRange() {
@@ -4160,7 +4243,7 @@
     const rec = intended || pickPassTarget(to);
     if (rec && dist(rec, to) < 320) {
       resetJumpFlags();
-      setControlled(rec);
+      setControlledFor(netDuel() ? G.drive : mySide(), rec);
     }
   }
   function timedJump(e, quiet) {
@@ -6833,7 +6916,7 @@
     if (S === "presnap") {
       // CHANGE PLAY chip (top-right): cycle the callsheet at the line
       if (!G.patMode && mouse.x > W - 200 && mouse.y > 40 && mouse.y < 86 &&
-        (offenseIsUser() || defenseHumanSteers())) { audible(1); return; }
+        (iAmOnOffense() || iAmOnDefense())) { audible(1); return; }
       const wx = mouse.x + G.camX, wy = mouse.y;
       // pressing YOUR QB is the Retro Bowl one-motion snap: the same hold
       // pulls straight back into the throw. This check runs BEFORE the
@@ -6841,7 +6924,7 @@
       // press landed nearer the RB it silently switched control to the RB
       // and handed the QB to the CPU (the real "can't throw" bug,
       // owner play-test 2026-08-07).
-      const qbP = offenseIsUser() && G.players.find((p) => p.team === "off" && p.role === "QB");
+      const qbP = iAmOnOffense() && G.players.find((p) => p.team === "off" && p.role === "QB");
       if (qbP && Math.hypot(qbP.x - wx, qbP.y - wy) < 26) {
         snap();
         G.slingAnchor = { x: mouse.x, y: mouse.y }; G.aim = null;
@@ -6854,11 +6937,11 @@
       }
       if (pick) {
         G.selCard = { e: pick, t: 2.2 };
-        const userSide = offenseIsUser() ? "off" : "def";
-        if (pick.team === "def" && !offenseIsUser()) setControlled(pick);   // choose your defender
+        const userSide = iAmOnOffense() ? "off" : "def";
+        if (pick.team === "def" && !iAmOnOffense()) setControlled(pick);   // choose your defender
         // offense: BE that player — pick a receiver/back and you play as him
         // (the CPU quarterback runs the play and can hit you on your route)
-        if (pick.team === "off" && offenseIsUser() &&
+        if (pick.team === "off" && iAmOnOffense() &&
           (pick.routeEligible || pick.role === "RB")) setControlled(pick);
         return;                       // a tap on a non-QB doesn't snap
       }
@@ -6867,10 +6950,10 @@
       // never snaps for you, so a missed 26px defender pick must NOT start
       // the play — it selects the nearest defender instead (owner-adjacent
       // fix: misclicks were snapping the CPU's play).
-      if (offenseIsUser()) {
+      if (iAmOnOffense()) {
         snap();
         G.slingAnchor = { x: mouse.x, y: mouse.y }; G.aim = null;
-      } else if (defenseHumanSteers()) {
+      } else if (iAmOnDefense()) {
         const near = G.players.filter((e2) => e2.team === "def")
           .sort((a, b) => Math.hypot(a.x - wx, a.y - wy) - Math.hypot(b.x - wx, b.y - wy))[0];
         if (near) { setControlled(near); G.selCard = { e: near, t: 1.4 }; }
@@ -6891,17 +6974,17 @@
         (G.controlled.routeEligible || G.controlled.team === "def")) {
         timedJump(G.controlled); return;
       }
-      if (G.phase === "drop" && offenseIsUser() && G.ball.holder && G.ball.holder.role === "QB") {
+      if (G.phase === "drop" && iAmOnOffense() && G.ball.holder && G.ball.holder.role === "QB") {
         // slingshot passing: the press only plants your grip — you have to
         // PULL BACKWARD (bring the ball behind your head) to load the throw
         G.slingAnchor = { x: mouse.x, y: mouse.y }; G.aim = null;
-      } else if (G.phase === "carry" && offenseIsUser() && G.carrier && G.carrier.canPass &&
+      } else if (G.phase === "carry" && iAmOnOffense() && G.carrier && G.carrier.canPass &&
         G.carrier.x < xAtYd(G.losYd)) {
         G.slingAnchor = { x: mouse.x, y: mouse.y }; G.aim = null; // halfback pass!
       } else if (G.phase === "carry" && G.controlled === G.carrier) {
         // click = juke toward mouse
         doJuke(G.carrier);
-      } else if (!offenseIsUser() && G.controlled) {
+      } else if (!iAmOnOffense() && G.controlled) {
         const c = G.controlled;
         // a soar-capable defender (quetzalcoatlus safety) LAUNCHES himself:
         // hold to aim like a throw, release to fly wings-open at the target
@@ -6985,7 +7068,7 @@
       // ball in the air: ONE button matters — time the leap
       if (G.phase === "air" && G.ball.mode === "air" && !G.ball.away) {
         b.push({ id: "jump", label: "JUMP!", key: " ", x: W - 64, y: H - 84, r: 40 });
-      } else if (offenseIsUser()) {
+      } else if (iAmOnOffense()) {
         if (G.phase === "drop") { add("bullet", "BULLET", " "); add("away", "THRWAWY", "x"); }
         else if (G.phase === "carry") { add("juke", "JUKE", "shift"); add("stiff", "STIFF", "f"); add("dive", "DIVE", "e"); add("lat", "LATRL", "q"); if (rampAvail("A")) add("ramp", "🦖", "r"); }
       } else {
@@ -7042,7 +7125,7 @@
   }
   function onAltFire() {
     // a bullet needs a loaded arm too: right-click only fires while pulled back
-    if (G.state === "live" && G.phase === "drop" && offenseIsUser() && G.aim) {
+    if (G.state === "live" && G.phase === "drop" && iAmOnOffense() && G.aim) {
       throwBullet();
     }
   }
@@ -7172,14 +7255,14 @@
       // SHIFT — offense: juke the carrier; defense: quetzalcoatlus takes flight
       if (k === "shift") {
         if (G.carrier && G.controlled === G.carrier) doJuke(G.carrier);
-        else if (!offenseIsUser() && G.controlled && G.controlled.species === "quetz" && soarReady(G.controlled)) {
-          const c2 = G.controlled, d = kdir();
+        else if (!iAmOnOffense() && G.controlled && G.controlled.species === "quetz" && soarReady(G.controlled)) {
+          const c2 = G.controlled, d = kdir(c2);
           const tgt = (d.x || d.y) ? { x: c2.x + d.x * 100, y: c2.y + d.y * 100 } :
             (G.carrier ? G.carrier : { x: c2.x - 100, y: c2.y });
           startSoar(c2, tgt);
         }
         // blocked pass-rusher: SHIFT = spin/swim move to try to shed the block
-        else if (!offenseIsUser() && G.controlled && G.controlled.blockedBy && G.controlled.spinCd <= 0) {
+        else if (!iAmOnOffense() && G.controlled && G.controlled.blockedBy && G.controlled.spinCd <= 0) {
           const c2 = G.controlled, bl = c2.blockedBy;
           c2.spinCd = 1.3; c2.spinT = 0.3; sfx.juke();
           // A SPIN ALWAYS MAKES PROGRESS. This was
@@ -7208,17 +7291,17 @@
       }
       // owner control model: forward-input on an offensive carrier IS the
       // dive — auto-run owns forward motion, so D/→ becomes the lunge
-      if ((k === "e" || k === "control" || ((k === "d" || k === "arrowright") && offenseIsUser() &&
+      if ((k === "e" || k === "control" || ((k === "d" || k === "arrowright") && iAmOnOffense() &&
         !(G.carrier && G.carrier.canPass && G.curPlay && G.curPlay.hbPass && G.carrier.x < xAtYd(G.losYd) + 4))) &&
         G.carrier && G.controlled === G.carrier) doDive(G.carrier);
       // E is the dive button on defense too (click also dives)
-      if (k === "e" && !offenseIsUser() && G.controlled) doDive(G.controlled);
-      if (k === "q" && offenseIsUser() && G.carrier && G.controlled === G.carrier) lateral();
+      if (k === "e" && !iAmOnOffense() && G.controlled) doDive(G.controlled);
+      if (k === "q" && iAmOnOffense() && G.carrier && G.controlled === G.carrier) lateral();
       // F — peanut punch (defense, near the carrier). It is an airborne swat:
       // jump or soar first, then time the strike at the ball.
-      if (k === "f" && !offenseIsUser() && G.controlled) startPunch(G.controlled);
+      if (k === "f" && !iAmOnOffense() && G.controlled) startPunch(G.controlled);
       // F with the ball = STIFF-ARM: a strength-vs-strength shove (0.35s window)
-      if (k === "f" && offenseIsUser() && G.carrier && G.controlled === G.carrier) startStiffArm(G.carrier);
+      if (k === "f" && iAmOnOffense() && G.carrier && G.controlled === G.carrier) startStiffArm(G.carrier);
       if (k === " ") {
         if (G.aim && (G.phase === "drop" || (G.phase === "carry" && G.carrier && G.carrier.canPass))) { throwBullet(); }
         // ball in the air: SPACE is a TIMED JUMP for receivers AND defenders —
@@ -7226,9 +7309,9 @@
         // works any other time)
         else if (G.ball.mode === "air" && G.controlled && (G.controlled.routeEligible || G.controlled.team === "def")) timedJump(G.controlled);
         // defense: SPACE is ALWAYS a jump (tackling lives on click / E)
-        else if (!offenseIsUser() && G.controlled) timedJump(G.controlled);
+        else if (!iAmOnOffense() && G.controlled) timedJump(G.controlled);
       }
-      if (k === "x" && G.phase === "drop" && offenseIsUser() && G.ball.mode === "held" && G.ball.holder) { // throwaway
+      if (k === "x" && G.phase === "drop" && iAmOnOffense() && G.ball.mode === "held" && G.ball.holder) { // throwaway
         // guarded on the holder: this was the only throw that read
         // G.ball.holder.x without checking it, and it left the sling armed
         const qb = G.ball.holder;
@@ -7239,7 +7322,7 @@
       }
       if (k === "r") tryRampage(G.humanB ? G.drive : "A");
       if (k === "v") throwSnowball();
-      if (k === "tab" && !offenseIsUser()) switchDefender();
+      if (k === "tab" && !iAmOnOffense()) switchDefender();
     }
     if (S === "ptchoice") {
       if (k === "1") ptChoose(false);
@@ -7557,6 +7640,32 @@
   }
 
   // ------------------------------------------------------------- selections
+  // Online the two halves of the old "pick both teams" screen belong to two
+  // different people. Confirming locks YOUR team and hands off; the host starts
+  // the game once the other pick lands.
+  const onlinePick = () => !!Net.role && G.mode === "online" && G.selectFor === "exh";
+  function submitOnlineTeam() {
+    if (Net.teamSent) return;
+    Net.teamSent = true;
+    if (Net.role === "guest") {
+      // a refused write here is why the host would sit forever, so it is loud
+      try {
+        const w = Net.teamRef && Net.teamRef.set(ABBRS[G.selA]);
+        if (w && w.catch) w.catch((e) => { Net.teamSent = false; netNote("Could not send your team pick: " + e.message, "PICK FAILED"); });
+      } catch (e) { Net.teamSent = false; netNote("Could not send your team pick: " + e.message, "PICK FAILED"); }
+      netStatus("TEAM LOCKED · WAITING FOR THE HOST");
+    } else {
+      netStatus("TEAM LOCKED · WAITING FOR THE OTHER PLAYER");
+      if (Net.guestTeam) startOnlineMatch();
+    }
+  }
+  function startOnlineMatch() {
+    if (Net.role !== "host" || G.state !== "select") return;
+    const gi = ABBRS.indexOf(Net.guestTeam);
+    // two people may want the same jersey; the guest is nudged, not refused
+    G.selB = (gi >= 0 && gi !== G.selA) ? gi : (G.selA + 16) % 32;
+    startGame();
+  }
   function selectKey(k) {
     const cols = 8;
     let sel = G.selStep === 0 ? G.selA : G.selB;
@@ -7568,6 +7677,7 @@
     if (k === "enter" || k === " ") {
       if (G.selectFor === "season") { newSeason(ABBRS[G.selA]); G.state = "hub"; return; }
       if (G.selectFor === "career") { careerPickTeam(ABBRS[G.selA]); return; }
+      if (onlinePick()) { submitOnlineTeam(); return; }
       if (G.selStep === 0) { G.selStep = 1; if (G.selB === G.selA) G.selB = (G.selA + 16) % 32; }
       else startGame();
     }
@@ -7588,6 +7698,7 @@
         if (G.selA === i) {
           if (G.selectFor === "season") { newSeason(ABBRS[i]); G.state = "hub"; return; }
           if (G.selectFor === "career") { careerPickTeam(ABBRS[i]); return; }
+          if (onlinePick()) { submitOnlineTeam(); return; }
           G.selStep = 1; if (G.selB === i) G.selB = (i + 16) % 32;
         }
         else G.selA = i;
@@ -7622,6 +7733,10 @@
     }
   }
   function cardAction(c) {
+    // Online both players are looking at this screen. The call sheet belongs to
+    // whoever it was drawn for: the attacker picks the play, the defender picks
+    // the front. The other one is just watching.
+    if (netDuel() && G.callFor && G.callFor !== actorSide()) return;
     if (c.kind === "PUNT") { enterKick("PUNT"); return; }
     if (c.kind === "FG") { enterKick("FG"); return; }
     choosePlay(c.play, G.state === "defcall");
@@ -8088,7 +8203,7 @@
     if (G.phase === "drop" && offenseIsUser() && !userIsReceiver) {
       const qb = G.ball.holder;
       if (qb && qb.role === "QB") {
-        const d = kdir();
+        const d = kdir(qb);
         const sp = qb.spd * 0.9 * G.weather.speedMod;
         if (d.x || d.y) { qb.x += d.x * sp * dt; qb.y += d.y * sp * dt; }
         else if (G.playT < 0.7) qb.x -= 42 * dt;
@@ -8235,7 +8350,7 @@
               G.ball = { mode: "held", holder: mate, x: mate.x, y: mate.y, z: 12 };
               G.carrier = null; G.phase = "drop"; mate.state = "idle";
               G.flickerDone = true;
-              if (offenseIsUser()) setControlled(mate);
+              if (offenseIsUser()) setControlledFor(netDuel() ? G.drive : mySide(), mate);
               sfx.catch();
             } else {
               becomeCarrier(mate);
@@ -8564,7 +8679,7 @@
     const receiverOnAuto = e.team === "off" && e !== G.carrier && G.ball.mode === "air" && !G.ball.away;
     if (e.controlled && !receiverOnAuto && (e === G.carrier || e !== G.ball.holder) && (e.team === "def" ||
       e.team === "off") && G.state === "live") {
-      const d = kdir();
+      const d = kdir(e);
       // hands off the sticks? a controlled receiver keeps running his route
       if (!d.x && !d.y && e.team === "off" && e !== G.carrier && e.state === "route" &&
         e.path && e.pathI < e.path.length) {
@@ -10277,7 +10392,7 @@
           const cvx = c.contactVx == null ? c.vx : c.contactVx;
           const cvy = c.contactVy == null ? c.vy : c.contactVy;
           let hx = evx, hy = evy;
-          if (e.controlled) { const k = kdir(); hx += k.x * 60; hy += k.y * 60; }
+          if (e.controlled) { const k = kdir(e); hx += k.x * 60; hy += k.y * 60; }
           const hlen = Math.hypot(hx, hy);
           const hitVec = hlen > 8 ? { x: hx / hlen, y: hy / hlen } : null;
           // Momentum alignment: a big defender driving THROUGH the ballcarrier
@@ -11856,7 +11971,9 @@
       }
       // controlled marker
       if (e.controlled && G.state === "live") {
-        cx.fillStyle = "#ffd23f"; cx.font = PF(8); cx.textAlign = "center";
+        const mine = e === G.controlled;
+        cx.fillStyle = mine ? "#ffd23f" : "rgba(140,200,255,.6)";
+        cx.font = PF(8); cx.textAlign = "center";
         cx.fillText("▼", e.x - G.camX, y - 8);
       }
       // apex rampager star
@@ -13865,9 +13982,11 @@
     cx.fillStyle = "#0a1f14"; cx.fillRect(0, 0, W, H);
     cx.textAlign = "center";
     cx.font = PF(20); cx.fillStyle = "#ffd23f";
-    cx.fillText(G.selStep === 0 ? "PICK YOUR TEAM" : "PICK YOUR OPPONENT", W / 2, 60);
+    cx.fillText((G.selStep === 0 || onlinePick()) ? "PICK YOUR TEAM" : "PICK YOUR OPPONENT", W / 2, 60);
     cx.font = PF(9); cx.fillStyle = "#9db0a4";
-    cx.fillText(Net.remoteView ? "🌐 MATCHED! YOUR HOST IS PICKING THE TEAMS…" : "ARROWS / CLICK · ENTER TO CONFIRM", W / 2, 88);
+    cx.fillText(onlinePick()
+      ? (Net.teamSent ? "🌐 TEAM LOCKED — WAITING FOR THE OTHER PLAYER…" : "🌐 PICK YOUR OWN TEAM · ARROWS / CLICK · ENTER TO CONFIRM")
+      : "ARROWS / CLICK · ENTER TO CONFIRM", W / 2, 88);
     const sel = G.selStep === 0 ? G.selA : G.selB;
     const other = G.selStep === 1 ? G.selA : -1;
     for (let i = 0; i < 32; i++) {
@@ -14076,7 +14195,7 @@
     }
   }
   function drawPresnapUI() {
-    if (offenseIsUser() && G.curPlay) {
+    if (iAmOnOffense() && G.curPlay) {
       if (G.curPlay.type === "pass") {
         for (const e of G.players) {
           if (e.team !== "off") continue;
@@ -14133,13 +14252,13 @@
       }
     }
     // CHANGE PLAY chip — top-right, like the reference
-    if (!G.patMode && (offenseIsUser() || defenseHumanSteers())) {
+    if (!G.patMode && (iAmOnOffense() || iAmOnDefense())) {
       cx.fillStyle = "rgba(4,10,7,.85)"; cx.fillRect(W - 196, 44, 178, 40);
       cx.strokeStyle = "#ffd23f"; cx.lineWidth = 2; cx.strokeRect(W - 196, 44, 178, 40);
       cx.font = PF(9); cx.textAlign = "center"; cx.fillStyle = "#ffd23f";
-      cx.fillText(offenseIsUser() ? "CHANGE PLAY" : "CHANGE DEFENSE", W - 107, 60);
+      cx.fillText(iAmOnOffense() ? "CHANGE PLAY" : "CHANGE DEFENSE", W - 107, 60);
       cx.font = PF(7); cx.fillStyle = "#9db0a4";
-      const name = offenseIsUser() ? (G.curPlay ? G.curPlay.name : "") : (G.defCall ? G.defCall.name : "");
+      const name = iAmOnOffense() ? (G.curPlay ? G.curPlay.name : "") : (G.defCall ? G.defCall.name : "");
       cx.fillText("⟳ " + name, W - 107, 76);
     }
     // star players: yellow star + soft gold pulse + initials (Retro style)
@@ -14168,11 +14287,11 @@
     cx.fillStyle = "rgba(0,0,0,.55)"; cx.fillRect(W / 2 - 370, H - 30, 740, 22);
     cx.fillStyle = "#ffd23f";
     // the footer teaches the SIGNATURE gesture, not the fallback
-    fitText(offenseIsUser()
+    fitText(iAmOnOffense()
       ? "HOLD YOUR QB & PULL BACK = SNAP + THROW  ·  SPACE = SNAP  ·  Q/E = CHANGE PLAY"
       : "TAP A DINO TO CONTROL HIM  ·  SPACE = SNAP  ·  Q/E = CHANGE DEFENSE", W / 2, H - 14, 720, 9, 7);
     // first-3-snaps coach bubble floats over the QB himself
-    if (offenseIsUser() && (G.snapTaught || 0) < 3 && !G.patMode) {
+    if (iAmOnOffense() && (G.snapTaught || 0) < 3 && !G.patMode) {
       const qb2 = G.players.find((p) => p.team === "off" && p.role === "QB");
       if (qb2) {
         const bx2 = qb2.x - G.camX, pulse = Math.sin(performance.now() / 260) * 2;
@@ -14319,12 +14438,12 @@
       cx.fillStyle = tint || "#ffd23f"; cx.fillText(txt, px, py);
     };
     if (cc && G.state === "live" && !G.soarAim) {
-      if (offenseIsUser() && cc === G.carrier && G.phase === "carry") {
+      if (iAmOnOffense() && cc === G.carrier && G.phase === "carry") {
         // a trailing teammate exists to pitch to?
         const mate = G.players.find((p) => p.team === "off" && p !== cc && p.role !== "OL" && p.x < cc.x - 4);
         if (mate && !cc.canPass) prompt("Q LATERAL");
         else if (cc.canPass) prompt("HOLD & PULL BACK TO PASS · Q LATERAL");
-      } else if (!offenseIsUser() && cc.soarT <= 0) {
+      } else if (!iAmOnOffense() && cc.soarT <= 0) {
         if (cc.species === "quetz" && soarReady(cc)) {
           prompt((cc.soarCharge >= 0.98 ? "SOAR — FULL RANGE" : "SOAR — SHORT HOP (" + Math.round(cc.soarCharge * 100) + "%)"), "#8ecafc");
         }
@@ -14334,7 +14453,7 @@
       }
     }
     // defense footer hint
-    if (!offenseIsUser() && G.controlled) {
+    if (!iAmOnOffense() && G.controlled) {
       cx.font = PF(8); cx.fillStyle = "rgba(244,246,241,.7)"; cx.textAlign = "center";
       const soarer = G.controlled.species === "quetz";
       cx.fillText("TAB SWITCH · SPACE JUMP · CLICK/E DIVE · JUMP+F PUNCH" + (soarer ? " · PULL-CLICK / SHIFT = SOAR" : ""), W / 2, H - 14);

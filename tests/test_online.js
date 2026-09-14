@@ -224,11 +224,19 @@ function makeInstance(label, sharedDb) {
   check("both sides know they're paired (found)",
     A.G.online && A.G.online.phase === "found" && B.G.online && B.G.online.phase === "found");
 
-  // ---- host picks teams → starts the game → frames must reach the guest ----
-  A.G.selA = 3;  // pick a deterministic team A
-  A.key("Enter");            // confirm team A → step to opponent
-  A.G.selB = 9;
-  A.key("Enter");            // confirm opponent → pregame
+  // ---- EACH PLAYER PICKS HIS OWN TEAM, then the host starts ----
+  check("the guest gets its own team board, not a view of the host's",
+    B.G.state === "select", B.G.state);
+  A.G.selA = 3;              // host picks his team
+  A.key("Enter");            // ...and locks it
+  check("locking a team does not jump the host to a second board", A.G.selStep === 0, "step=" + A.G.selStep);
+  check("the host waits instead of starting alone", A.G.state === "select", A.G.state);
+  B.G.selA = 9;              // the guest picks his own
+  B.key("Enter");
+  for (let i = 0; i < 60 && A.G.state === "select"; i++) { A.step(); B.step(); await sleep(8); }
+  check("the game starts only once BOTH teams are in", A.G.state !== "select", A.G.state);
+  check("the host kept his pick and took the guest's", A.G.my === "GB" || !!A.G.my,
+    A.G.my + " vs " + A.G.opp);
   // stream frames for a bit; guest should adopt host's teams + leave the lobby
   for (let i = 0; i < 120; i++) { A.step(); B.step(); await sleep(4); if (B.G.my === A.G.my && B.G.state !== "online_wait") break; }
   check("host started a game with the chosen teams", !!A.G.my && !!A.G.opp, A.G.my + " vs " + A.G.opp);
@@ -269,6 +277,74 @@ function makeInstance(label, sharedDb) {
     "host timeouts=" + JSON.stringify(A.G.timeouts) + " clockStopped=" + A.G.clockStopped);
   check("input queue was drained by the host (no leftover)",
     (function () { const inp = db.read("dinobowl/rooms/" + roomA + "/inputs"); return inp == null || Object.keys(inp).length === 0; })());
+
+  // ================================================================
+  // ONE ON OFFENSE, ONE ON DEFENSE, AT THE SAME TIME
+  // The old model handed the sticks to whoever had the ball and made the other
+  // player a spectator, so two people took turns attacking. Now the man without
+  // the ball is defending, and both are live on the same snap.
+  // ================================================================
+  const liveSnap = (drive) => {
+    for (const inst of [A, B]) {
+      inst.G.state = "dead"; inst.G.deadT = 0; inst.G.deadNext = null; inst.G.half = null;
+      inst.G.replay = null; inst.G.celebrate = null; inst.G.patMode = false;
+      inst.G.drive = drive; inst.G.losYd = 35; inst.G.down = 1; inst.G.toGain = 10;
+      inst.G.lastOffSide = drive;   // skip the possession-change card
+    }
+    A.G.debug.enterPlaycall();
+    for (let i = 0; i < 260 && A.G.state !== "presnap"; i++) {
+      if (A.G.state === "playcall" || A.G.state === "defcall") A.G.debug.choosePlay(A.G.callsheet[0], A.G.state === "defcall");
+      A.step(); B.step();
+    }
+    if (A.G.state === "presnap") { A.key(" "); }
+    for (let i = 0; i < 6; i++) { A.step(); B.step(); }
+  };
+
+  liveSnap("A");   // the HOST has the ball
+  const seatA = A.G.ctrl && A.G.ctrl.A, seatB = A.G.ctrl && A.G.ctrl.B;
+  check("both players hold a dino on the same snap", !!seatA && !!seatB,
+    "A=" + (seatA && seatA.role) + " B=" + (seatB && seatB.role));
+  check("the side with the ball is on OFFENSE, the other on DEFENSE",
+    !!seatA && !!seatB && seatA.team === "off" && seatB.team === "def",
+    "A=" + (seatA && seatA.team) + " B=" + (seatB && seatB.team));
+  check("neither player is driving the other's dino", seatA !== seatB);
+
+  // the guest's sticks move the guest's defender and nobody else's
+  {
+    const by0 = seatB.y, ay0 = seatA.y;
+    const inputs = db.ref("dinobowl/rooms/" + roomA + "/inputs");
+    await inputs.push({ type: "key", key: "s" });        // guest holds DOWN
+    for (let i = 0; i < 18; i++) { A.step(); B.step(); }
+    await inputs.push({ type: "keyup", key: "s" });
+    A.step();
+    check("the guest's keys move the GUEST's defender", seatB.y > by0 + 2,
+      "moved " + (seatB.y - by0).toFixed(1) + "px");
+    check("the guest's keys never touched the HOST's dino", Math.abs(seatA.y - ay0) < 0.001,
+      "host moved " + (seatA.y - ay0).toFixed(2) + "px");
+  }
+
+  // possession flips and the seats swap sides with it
+  liveSnap("B");   // the GUEST has the ball
+  const flipA = A.G.ctrl && A.G.ctrl.A, flipB = A.G.ctrl && A.G.ctrl.B;
+  check("possession flips and the seats swap",
+    !!flipA && !!flipB && flipB.team === "off" && flipA.team === "def",
+    "A=" + (flipA && flipA.team) + " B=" + (flipB && flipB.team));
+
+  // the call sheet belongs to the side it was drawn for
+  {
+    A.G.state = "defcall"; A.G.callFor = "A"; A.G.callsheet = A.G.debug.diffTable ? A.G.callsheet : A.G.callsheet;
+    const before = A.G.defCall;
+    // team B tries to answer team A's sheet — and is ignored
+    const inputs = db.ref("dinobowl/rooms/" + roomA + "/inputs");
+    inputs.push({ type: "key", key: "1" });
+    for (let i = 0; i < 4; i++) { A.step(); B.step(); }
+    check("a player cannot answer the other one's call sheet",
+      A.G.state === "defcall" && A.G.defCall === before, "state=" + A.G.state);
+  }
+
+  // the guest can reach the defensive call screen at all (it used to be mute there)
+  check("defcall is a state the guest may act in", /"defcall"/.test(
+    fs.readFileSync(GAME_DIR + "game.js", "utf8").match(/const GUEST_PLAY_STATES = \[[^\]]*\]/)[0]));
 
   // ---- cancel path: a lone searcher can back out and clear its slot ----
   const C = makeInstance("C", db);

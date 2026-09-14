@@ -52,7 +52,33 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
-## GRIDIRON g18 — 2026-09-14 (shipped): a second grain, one vocabulary
+## DINO BOWL 2.6 — 2026-09-14 (shipped): online plays offence AND defence
+
+Owner: "the first player selects both players teams and both players cant play 1 offense 1
+defense and switch vice versa, they take turns on offense, which is wrong."
+
+Both were the same design: the host was authoritative AND the only one with a seat.
+
+| Piece | What it is now |
+|---|---|
+| Sides | `mySide()` (host A / guest B), `actor` = the side whose input is being served, `withActor(side, fn)` swaps the seat, keyboard (`rkeys`) and pointer (`rmouse`) for one handler and restores them |
+| Seats | `G.ctrl = {A, B}` and `e.ctrlSide`; `setControlledFor(side, e)` clears only that side. `kdir(e)` answers with **the owner's** sticks, so the host's keys can never move the guest's dino |
+| Predicates | `offenseIsUser()` keeps its old meaning (is the offense human-driven at all — the simulation's question, unchanged in every offline mode). `iAmOnOffense()` / `iAmOnDefense()` are new and answer for the ACTOR; only the input handlers and the HUD were moved onto them. `defenseIsHuman()` is true online, which is what gives the defender a call sheet and a dino |
+| Input | `canControlHere()` no longer benches the man without the ball; `applyRemoteInput` runs inside `withActor("B")`; the team board is handled locally on both machines |
+| Wire | `ctrlA` / `ctrlB` indexes and `callFor` ride in the frame; the guest re-hangs both seats on its fresh player objects and marks its own |
+| Call sheets | `G.callFor` already named the side being asked; `cardAction` now refuses an answer from the other one. `defcall` joined `GUEST_PLAY_STATES` so the guest can reach its own screen |
+| Team select | Guest gets its own board (`joinMatchedRoom`), writes `guestTeam`, host starts on `startOnlineMatch()`; `applyNetFrame` never lets the host's board overwrite the guest's |
+| Rules | `database.rules.json` gained `guestTeam` (non-host writes a 4-char string). Without it the write was silently refused and the host waited forever — the code now reports it |
+
+Caught in regression: seating the quarterback at every snap (needed online so his drift
+answers the right keyboard) put a prompt on the single-player screen that had never been
+there, and `test_textboxes` failed on a ticker collision. Scoped to online only.
+
+Verified two-origin in Chrome, not just the harness: both team boards, the guest's defensive
+call crossing the wire, then a live snap with `ctrl.A = off/QB` and `ctrl.B = def/S`; the
+guest's key moved his safety 50.4px and the host's quarterback 0. Online suite 22 → 35.
+
+: a second grain, one vocabulary
 
 Owner asked for per-game questions. A row in `data.json` is a player-SEASON, so this adds a
 second table rather than bending the first.

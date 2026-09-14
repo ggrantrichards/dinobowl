@@ -141,7 +141,7 @@
     document.getElementById('fs-btn').addEventListener('click', toggleFullscreen);
     document.getElementById('fs-mobile').addEventListener('click', toggleFullscreen);
   </script>
-  <script src="/static/game/sprites.js?v=dinobowl-2-5-2-20260911"></script>
+  <script src="/static/game/sprites.js?v=dinobowl-2-6-20260914"></script>
   {% if firebase_config %}<script>window.DINO_BOWL_FIREBASE_CONFIG = {{ firebase_config|tojson }};</script>
   {% else %}<!-- no FIREBASE_WEB_CONFIG in the environment: fall back to the same public web config the static host ships -->
   <script src="/static/firebase-config.js" onerror="window.DINO_BOWL_SCRIPT_BLOCKED=1"></script>{% endif %}
@@ -149,7 +149,7 @@
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
-  <script src="/static/game/game.js?v=dinobowl-2-5-2-20260911"></script>
+  <script src="/static/game/game.js?v=dinobowl-2-6-20260914"></script>
 </body>
 
 </html>

@@ -298,7 +298,33 @@ New aliases (`yards/carry`, `yards/rush`, `yards a carry`, `rushing yards per at
 and two position swaps: for RB / FB, `yards per attempt` → yards/carry and `attempts` →
 carries. Both engines; parity 61/61.
 
-### Dino Bowl 2.5.2 (2026-09-11) — no forward pass past the line; THE KING, AA pass
+### Dino Bowl 2.6 (2026-09-14) — online is a match, not a relay race
+
+Two faults, both reported by the owner, both in the same place.
+
+- **The host picked both teams.** Each player now picks his own on his own board.
+  The guest's choice goes to the room and the host starts the game when both are in;
+  if you both want the same jersey the guest is nudged, not refused.
+- **The players took turns on offense.** Whoever had the ball played, and the other one
+  watched the CPU run his defense. Now the man without the ball **is** the defense: he
+  calls the front, drives a dino, and the two seats swap when possession does.
+
+How it works: the host still simulates everything, but an `actor` names the side whose
+input is being served, so one set of handlers feeds both players. Each human has his own
+seat (`G.ctrl.A` / `G.ctrl.B`), his own keyboard and his own pointer, and every dino moves
+on *his owner's* sticks. Two questions that used to be one are now separate — whether the
+offense is human-driven at all (so the CPU stays off it) and whether **this** player is the
+one attacking (what the controls and the HUD need). Your dino wears the gold chevron and
+the other player's wears a dim blue one.
+
+Also: the realtime-database rules gained the `guestTeam` key, and a refused write now says
+so instead of leaving the host waiting forever.
+
+Verified two-origin in Chrome: both boards, both picks, then a live snap with the host on
+the quarterback and the guest on the free safety. The guest's key moved his safety 50px and
+the host's quarterback not at all. 12 Node suites green, the online suite up from 22 to 35.
+
+ — no forward pass past the line; THE KING, AA pass
 
 - **Rule.** The frame a carrier crosses the line of scrimmage he loses the throw and any
   half-drawn aim is cancelled ("PAST THE LINE"); both throw functions refuse a forward pass
