@@ -221,6 +221,14 @@ BODY = r"""
     }
 
     // ------------------------------------------------------------ formatting + definitions
+    // A HEADSHOT IS NOT A WALLPAPER. The league serves these as 4-6 MB originals
+    // a few thousand pixels wide, and the table draws them at 28px. Seventy-eight
+    // rows of that is roughly 400 MB of images for one answer, which is why the
+    // faces stopped arriving at all. The host is Cloudinary, so asking for the
+    // size we actually draw costs 3 KB each instead.
+    const face = (url, px) => (typeof url === 'string' && url)
+      ? url.replace(/\/image\/(private|upload)\/f_auto,q_auto\//, `/image/$1/f_auto,q_auto,w_${px},c_fill,g_face/`)
+      : '';
     function head(c) { return HEAD[c] || (META && META.display[c] ? META.display[c].replace(/\s*\(.*\)\s*$/, '') : c); }
     function fmt(col, v) {
       if (v === null || v === undefined) return '—';
@@ -610,7 +618,7 @@ BODY = r"""
     $('moreAll').addEventListener('click', () => loadMore && loadMore(true));
     function rowHTML(row) {
       const sc = S.sort && S.sort.col, g = row.games || 0;
-      const imgStr = row.headshot_url ? `<img src="${row.headshot_url}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
+      const imgStr = row.headshot_url ? `<img src="${face(row.headshot_url, 96)}" loading="lazy" decoding="async" onerror="this.style.visibility='hidden'">` : `<div class="avatar" style="display:inline-block"></div>`;
       return `<tr data-id="${row.player_id}" data-yr="${row.season}"><td class="fz fz0" style="padding:4px 10px;text-align:center;">${imgStr}</td>` + visibleCols.map((c, i) => {
         let v = row[c], val;
         if (c === 'season') val = `<span class="season-badge">${v}</span>`;
@@ -752,7 +760,7 @@ BODY = r"""
         const P = { rows, sort: null, tab: tabs.some(([n]) => n === homeTab) ? homeTab : (tabs[0] || ['Bio'])[0], chart: null };
         body.innerHTML = `
           <div class="player-head">
-            <img src="${last.headshot_url || ''}" onerror="this.style.display='none'" alt="">
+            <img src="${face(last.headshot_url, 256)}" onerror="this.style.display='none'" alt="">
             <div><h2>${esc(last.player_display_name)}</h2><p>${esc(bio)}</p>
               <p>${rows.length} season${rows.length === 1 ? '' : 's'} · ${rows[0].season}–${last.season}</p></div>
           </div>

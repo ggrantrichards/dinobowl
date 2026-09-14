@@ -125,7 +125,7 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g18  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g19  # -> static/index.html (bump the version token so browsers refetch)
 python build_games.py           # -> data/games.parquet  (nflverse weekly stats, one row per player-game)
 python export_games.py         # -> static/gridiron/games.json (~43 MB, fetched only when a question asks about a game)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
@@ -168,6 +168,17 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g19 (2026-09-14) — the headshots came back
+
+Player faces had stopped appearing. The URLs were unchanged and the images still served, but
+the league now stores those headshots as **4 to 6 MB originals a few thousand pixels wide**,
+and the table draws them at 28px. Seventy-eight rows is roughly 400 MB of images for one
+answer, so the browser queued them and they never arrived.
+
+The host is Cloudinary, so the page now asks for the size it actually draws: `w_96,c_fill,g_face`
+in the table and `w_256` on a player page. 3 KB each instead of 5 MB, and the URLs that do not
+match the pattern are left alone. Verified: 78 of 78 faces load, none fail.
 
 ### Gridiron g18 (2026-09-14) — per-game lines
 
