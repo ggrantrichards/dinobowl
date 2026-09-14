@@ -694,6 +694,17 @@ POS_DEFAULTS["TE"] = POS_DEFAULTS["WR"]; POS_DEFAULTS["FB"] = POS_DEFAULTS["RB"]
 DEF_CODES = {"CB", "DB", "S", "FS", "SS", "SAF", "LB", "ILB", "OLB", "MLB", "DE", "DT", "DL", "NT", "EDGE"}
 DEF_STAT_COLS = set(POS_DEFAULTS["DEF"]) | {"hurries", "qb_knockdowns", "blitzes", "blitz_pct", "sack_per_blitz", "cov_rating", "cov_yards", "cov_tds", "tackles_solo", "safeties", "tfl_yards", "def_int_yards", "int_plus_pd"}
 
+# A yes/no playoff badge is an answer to a question nobody asked on an ordinary
+# stat line — a column of "no" between the numbers. It rides along only when the
+# question is actually about the postseason.
+PLAYOFF_FLAGS = ("made_playoffs", "playoff_game")
+
+
+def playoff_asked(conds):
+    return any(c["kind"] == "playoffs" or "playoff" in (c.get("col") or "") or "super_bowl" in (c.get("col") or "")
+               for c in conds)
+
+
 def result_columns(res, conds):
     """Ordered columns for a result frame (see the note above)."""
     named = [c["col"] for c in conds if c.get("col")]
@@ -708,6 +719,8 @@ def result_columns(res, conds):
     ordered = []
     for c in ALWAYS_COLS + named + [c for g in groups for c in POS_DEFAULTS[g]]:
         if c in res.columns and c not in ordered: ordered.append(c)
+    if not playoff_asked(conds):
+        ordered = [c for c in ordered if c not in PLAYOFF_FLAGS]
     return [c for c in ordered if c in ALWAYS_COLS or res[c].notna().any()]
 
 class QueryError(Exception):
@@ -1270,7 +1283,9 @@ def run_full(df, query):
             if c.get("flag") and c["flag"] in df:
                 mask &= df[c["flag"]].fillna(False).astype(bool)
         elif c["kind"] == "playoffs":
-            mask &= df["made_playoffs"].fillna(False)
+            # a season line says the team got there, a game line says this game was one
+            col = "made_playoffs" if "made_playoffs" in df else "playoff_game"
+            mask &= df[col].fillna(False).astype(bool)
         elif c["kind"] == "season_range":
             if c["min"] is not None: mask &= df["season"] >= c["min"]
             if c["max"] is not None: mask &= df["season"] <= c["max"]

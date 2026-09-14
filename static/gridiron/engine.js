@@ -486,7 +486,8 @@
           const fl = c.flag && this.has(c.flag) ? this.cols[c.flag] : null;
           for (let i = 0; i < this.n; i++) if (mask[i] && (!codes.has(p[i]) || (fl && !fl[i]))) mask[i] = 0;
         } else if (c.kind === "playoffs") {
-          const p = this.cols.made_playoffs;
+          // a season line says the team got there, a game line says this game was one
+          const p = this.has("made_playoffs") ? this.cols.made_playoffs : this.cols.playoff_game;
           for (let i = 0; i < this.n; i++) if (mask[i] && !p[i]) mask[i] = 0;
         } else if (c.kind === "season_range") {
           const s = this.cols.season;
@@ -524,6 +525,10 @@
     }
     // query_engine.result_columns
     resultColumns(idx, conds) {
+      // mirrors query_engine.playoff_asked: the yes/no badge only on a playoff question
+      const PLAYOFF_FLAGS = ["made_playoffs", "playoff_game"];
+      const playoffAsked = conds.some((c) => c.kind === "playoffs"
+        || (c.col || "").includes("playoff") || (c.col || "").includes("super_bowl"));
       const M = this.meta;
       const named = conds.filter((c) => c.col).map((c) => c.col);
       const positions = new Set(idx.map((i) => this.cols.position[i]).filter((p) => p != null));
@@ -541,7 +546,8 @@
         if (this.has(c) && !ordered.includes(c)) ordered.push(c);
       }
       const always = new Set(M.always_cols);
-      return ordered.filter((c) => always.has(c) || idx.some((i) => this.cols[c][i] != null));
+      const keep = playoffAsked ? ordered : ordered.filter((c) => !PLAYOFF_FLAGS.includes(c));
+      return keep.filter((c) => always.has(c) || idx.some((i) => this.cols[c][i] != null));
     }
     row(i, cols) { const o = {}; for (const c of cols) o[c] = this.cols[c][i]; return o; }
     // mirrors query_engine.sort_result: an explicit "most/fewest X" first

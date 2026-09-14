@@ -52,6 +52,22 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
+## GRIDIRON g21 — 2026-09-14 (shipped): the playoff badge is opt-in
+
+Owner: "playoff binary should not be included in these grids unless it is specifically about
+playoffs. When I look up regular stats it shouldnt pop up, it feels out of place."
+
+`made_playoffs` sat in `ALWAYS_COLS` and `playoff_game` in the game file's, so a yes/no
+column rode along on every answer — a column of "no" wedged between the numbers. Both
+engines now drop it unless a condition is actually about the postseason
+(`playoff_asked` / `playoffAsked`: the `playoffs` cond, or any column whose name contains
+`playoff` or `super_bowl`). It stays in the column picker for anyone who wants it back.
+
+Found while testing it: **"a playoff game with 300+ passing yards" threw** — the `playoffs`
+condition filtered on `made_playoffs`, which is a season column that does not exist in
+games.json. Both engines now read `playoff_game` when that is the grain. 139 rows, was a
+crash.
+
 ## GRIDIRON g19 + g20 — 2026-09-14 (shipped): the faces come back
 
 Owner: "player faces arent loading anymore." Two separate faults wearing the same symptom.
