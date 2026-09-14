@@ -125,7 +125,9 @@ Pipeline (run in order after any data refresh):
 python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, snap counts 2012+, ESPN QBR 2006+,
                                 # Next Gen Stats 2016+, and play-by-play for length/depth counts (20+ yard TDs, deep balls)
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
-python build_gridiron_page.py g17  # -> static/index.html (bump the version token so browsers refetch)
+python build_gridiron_page.py g18  # -> static/index.html (bump the version token so browsers refetch)
+python build_games.py           # -> data/games.parquet  (nflverse weekly stats, one row per player-game)
+python export_games.py         # -> static/gridiron/games.json (~43 MB, fetched only when a question asks about a game)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
 firebase deploy --only hosting --project football-dino
@@ -167,7 +169,38 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
-### Gridiron g17 (2026-09-12) — an edge rusher is a usage, not a label
+### Gridiron g18 (2026-09-14) — per-game lines
+
+"QBs with a game with 350+ total yards, 4+ total TDs, 70%+ completion, and 0 ints and 0 fumbles"
+now works. A row in the main table is one **season**, so questions about one afternoon needed a
+second table: `build_games.py` pulls nflverse weekly stats, which come from the same release as
+the season files with the same column names, so `STAT_COLS` renames them and **every alias,
+display name and position swap works unchanged on a game line**. 420,734 player-games, 2000 to
+now, lines with no production dropped.
+
+The file is 43 MB and is fetched **only when a question actually asks about a game**, so the
+ordinary visitor never pays for it. Columns whose encoding is mostly one value (a quarterback
+has no tackles) now store that value once and list only the rows that differ, which halved it.
+
+What makes a question per-game: "a game with", "games with", "in one game", "single game", and
+"a 200 yard game". Note "per game" is still a season rate, not a game line.
+
+Three parser faults that query exposed, both engines:
+
+- **"70%+ completion"** read as seventy completions. A percent on a count now means the rate that
+  count feeds (completions → completion %, receptions → catch %, FG made → FG %).
+- **"0 ints"** read as "≥ 0", which is every game ever played. A bare zero on a count is now an
+  exact zero. Yardage keeps the floor reading, since it can go negative.
+- **"total touchdowns"** for a QB read as passing TDs only, missing a QB with 3 passing and 1
+  rushing. "Total touchdowns" is now everything he accounted for (`tds_accounted`, passing +
+  rushing + receiving + returns); the bare word "touchdowns" still means the kind his position
+  scores, and without a position the ones he put in the end zone himself.
+
+Also: two game lines by the same player in the same season used to tie on every identity column,
+so their order was whatever the table happened to hold. The week settles it and the id settles the
+rest, in both engines. Parity 94/94 across both grains.
+
+ — an edge rusher is a usage, not a label
 
 "Edge rushers with 10+ sacks in 2025" returned 8 of the real 16, missing Brian Burns, Micah
 Parsons, Nik Bonitto, Tuli Tuipulotu, Byron Young, Josh Sweat, Al-Quadin Muhammad and Cameron

@@ -154,7 +154,7 @@ ADV_PCT = {"missed_tackle_pct", "cov_cmp_pct", "pressured_pct", "drop_pct_suffer
 RANK_DESC = ["passing_yards", "passing_tds", "pass_attempts", "completions", "pass_first_downs",
              "carries", "rushing_yards", "rushing_tds", "rush_first_downs",
              "targets", "receptions", "receiving_yards", "receiving_tds", "rec_first_downs", "rec_yac",
-             "fantasy_ppr", "total_tds", "total_yards",
+             "fantasy_ppr", "total_tds", "tds_accounted", "total_yards",
              "tackles", "tackles_solo", "tackles_for_loss", "sacks", "qb_hits", "def_interceptions",
              "passes_defended", "forced_fumbles", "fumble_recoveries", "def_tds", "int_tds", "fumble_rec_tds",
              "int_plus_pd", "def_int_yards", "tfl_yards", "safeties",
@@ -252,6 +252,7 @@ DERIVED = {
     "contract_years": "length of that contract in seasons",
     "contract_signed": "the season that contract was signed",
     "total_ypg": "total_yards / games",
+    "tds_accounted": "passing_tds + rushing_tds + receiving_tds + special_teams_tds — every touchdown the player accounted for, which is what 'total touchdowns' means for a quarterback (his TD passes count)",
     "total_tds": "rushing_tds + receiving_tds + special_teams_tds — touchdowns the player SCORED (a QB's TD passes are passing_tds)",
     "touches": "pass_attempts + carries + receptions + sacks_taken",
     "turnovers": "interceptions + fumbles_lost",
@@ -406,6 +407,9 @@ def load_season(year, rebuild=False):
     td_parts = [c for c in ("rushing_tds", "receiving_tds", "special_teams_tds") if c in df]
     if td_parts:
         df["total_tds"] = df[td_parts].fillna(0).sum(axis=1).astype(int)
+    acc_parts = [c for c in ("passing_tds", "rushing_tds", "receiving_tds", "special_teams_tds") if c in df]
+    if acc_parts:
+        df["tds_accounted"] = df[acc_parts].fillna(0).sum(axis=1).astype(int)
     sk = df["sacks_taken"].fillna(0) if "sacks_taken" in df else 0
     df["touches"] = (att + car + rec + sk).astype(int)
     if "fumbles_lost" in df and "interceptions" in df:

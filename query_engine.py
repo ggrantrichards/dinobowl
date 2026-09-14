@@ -484,7 +484,9 @@ STAT_ALIASES = [
     ("passing yards", "passing_yards"), ("pass yards", "passing_yards"),
     ("passing touchdowns", "passing_tds"), ("passing tds", "passing_tds"),
     ("pass tds", "passing_tds"), ("passing td", "passing_tds"),
-    ("total touchdowns", "total_tds"), ("total tds", "total_tds"),
+    ("total touchdowns", "tds_accounted"), ("total tds", "tds_accounted"),
+    ("touchdowns accounted for", "tds_accounted"), ("tds accounted for", "tds_accounted"),
+    ("total scores", "tds_accounted"),
     ("total td", "total_tds"), ("combined touchdowns", "total_tds"),
     ("combined tds", "total_tds"), ("interception rate", "int_rate"),
     ("interception percentage", "int_rate"), ("interception percent", "int_rate"),
@@ -518,7 +520,7 @@ STAT_ALIASES = [
     ("forced fumbles", "forced_fumbles"), ("fumbles forced", "forced_fumbles"),
     ("defensive touchdowns", "def_tds"), ("defensive tds", "def_tds"),
     # ---- generic words, resolved by position in _find_stat (POS_SWAP)
-    ("touchdowns", "total_tds"), ("tds", "total_tds"), ("yards", "any_yards"),
+    ("touchdowns", "any_tds"), ("tds", "any_tds"), ("yards", "any_yards"),
 ]
 
 # word/phrase -> (list of raw position codes in the data, friendly label)
@@ -582,6 +584,7 @@ POSITIONS = {
 
 DISPLAY = {
     "playoff_wins": "playoff wins", "super_bowl_wins": "Super Bowl wins",
+    "tds_accounted": "TDs accounted for", "week": "week", "opponent": "opponent", "playoff_game": "playoff game",
     "passing_yards": "passing yards", "passing_tds": "passing TDs",
     "interceptions": "interceptions", "int_rate": "interception rate",
     "pass_attempts": "pass attempts", "completions": "completions",
@@ -718,7 +721,9 @@ POS_SWAP = {
     "interceptions": {"DEF": "def_interceptions"},
     "sacks": {"QB": "sacks_taken"},
     "fumbles": {"DEF": "forced_fumbles"},
-    "total_tds": {"QB": "passing_tds", "RB": "rushing_tds", "FB": "rushing_tds", "WR": "receiving_tds", "TE": "receiving_tds", "DEF": "def_tds"},
+    # bare "touchdowns": the kind this position scores; without a position, the
+    # ones he put in the end zone himself. "total touchdowns" is always the sum.
+    "any_tds": {"QB": "passing_tds", "RB": "rushing_tds", "FB": "rushing_tds", "WR": "receiving_tds", "TE": "receiving_tds", "DEF": "def_tds", "*": "total_tds"},
     # bare "yards": the position's own yards; without a position, the sum. "total yards" is always the sum.
     "any_yards": {"QB": "passing_yards", "RB": "rushing_yards", "FB": "rushing_yards", "WR": "receiving_yards", "TE": "receiving_yards", "*": "total_yards"},
     # a back's "yards per attempt" / "attempts" are carries, not throws
@@ -854,6 +859,24 @@ def _covered(i, spans):
     return any(a <= i < b for a, b in spans)
 
 _SIGN = {">": ">", "<": "<", ">=": "≥", "<=": "≤"}
+
+# A number typed with a % that lands on a COUNT means the rate that count feeds:
+# "70%+ completion" is the completion percentage, not seventy completions.
+PCT_SIBLING = {"completions": "completion_pct", "receptions": "catch_pct", "fg_made": "fg_pct",
+               "passing_tds": "td_pct", "interceptions": "int_rate", "sacks_taken": "sack_pct",
+               "pat_made": "pat_pct"}
+
+def _pct_col(col, marked):
+    sib = PCT_SIBLING.get(col)
+    return sib if (marked and sib and col not in PCT_STATS) else col
+
+# A bare zero is an EXACT zero: "0 interceptions" asks for the games with none,
+# and ">= 0" is every game ever played. Yardage can go negative, so it keeps the
+# floor reading; a count cannot.
+def _zero_op(col, num, op):
+    if num == 0 and op == ">=" and not re.search(r"yards|epa|rating|pct|rate|share", col):
+        return "<="
+    return op
 
 def _pct_value(col, num, marked):
     """A percent stat typed as '5%' or '5' means 0.05; typed as '0.05' stays."""
@@ -1021,10 +1044,12 @@ def parse(query):
         else:
             col = st[0]
 
+        col = _pct_col(col, is_pct)
         num = _pct_value(col, num, is_pct)
-        conds.append({"kind": "threshold", "col": col, "op": ">=" if gte else "<=", "value": num})
+        op = _zero_op(col, num, ">=" if gte else "<=")
+        conds.append({"kind": "threshold", "col": col, "op": op, "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
-        notes.append(f"{DISPLAY.get(col, col)} {_SIGN['>=' if gte else '<=']} {shown}")
+        notes.append(f"{DISPLAY.get(col, col)} {_SIGN[op]} {shown}")
         spans.append(mm.span())
 
     # A number next to a stat with no comparison word at all — "100 receptions",
@@ -1044,12 +1069,20 @@ def parse(query):
             frag = re.split(r"\b(and|with|who|that|since|before|between)\b|,", frag)[0].strip()
             ignored.append(frag)
             continue
+        col = _pct_col(col, bool(tail))
         value = _pct_value(col, num, bool(tail))
-        conds.append({"kind": "threshold", "col": col, "op": ">=", "value": value})
+        op = _zero_op(col, value, ">=")
+        conds.append({"kind": "threshold", "col": col, "op": op, "value": value})
         shown = f"{value*100:g}%" if col in PCT_STATS else f"{value:g}"
-        notes.append(f"{DISPLAY.get(col, col)} {_SIGN['>=']} {shown}")
+        notes.append(f"{DISPLAY.get(col, col)} {_SIGN[op]} {shown}")
         spans.append((mm.start(), end))
 
+    # A GAME LINE, NOT A SEASON LINE. "a game with 350+ yards" is a question
+    # about one afternoon, and it is answered from the per-game table. Note this
+    # does NOT match "per game", which is a season rate.
+    if re.search(r"\ba game\b|\bgames with\b|\bgame with\b|\bgame where\b|\bin one game\b|\bsingle[- ]game\b|\bany game\b|\bone game\b"
+                 r"|\d[\d,]*\s*\+?\s*(?:yard|yd|point|td|touchdown|sack|tackle|reception|catch|carry)s?[\s-]*game", q):
+        conds.append({"kind": "scope", "value": "game"})
     # the escape hatch that keeps a multi-season question on season lines
     if re.search(r"\bin a (?:single )?season\b|\bsingle[- ]season\b|\bbest season\b|\bper season\b|\bseason with the\b", q):
         conds.append({"kind": "scope", "value": "season"})
@@ -1130,9 +1163,13 @@ def rate_notes(col, rate_ranks):
         out.append(f"ranked only for a player with at least {fl[1]:g} {DISPLAY.get(fl[0], fl[0])} per {'scheduled game' if fl[2] else 'season'} over the span")
     return out
 
+def is_game(conds):
+    """True when the question asked about one GAME, which is a different table."""
+    return any(c["kind"] == "scope" and c["value"] == "game" for c in conds)
+
 def career_scope(conds, res, sums, rate_parts, rate_ranks):
     """(career?, extra notes) — the reading this question gets."""
-    if any(c["kind"] == "scope" and c["value"] == "season" for c in conds): return False, []
+    if any(c["kind"] == "scope" and c["value"] in ("season", "game") for c in conds): return False, []
     if any(c["kind"] == "rank" for c in conds): return False, []
     if res["season"].nunique() < 2: return False, []
     sort = next((c for c in conds if c["kind"] == "sort"), None)
@@ -1200,19 +1237,22 @@ def sort_result(res, conds, rate_ranks=None):
     """Result order: an explicit "most/fewest X" first, otherwise newest season.
     A rate leaderboard is only meaningful among players with the volume to qualify,
     so unqualified seasons sink to the bottom instead of topping the table."""
+    # Two game lines by the same player in the same season tie on every identity
+    # column there used to be, so the order was whatever the table happened to
+    # hold. The week settles it, and the id settles the rest.
+    tail = ["season"] + (["week"] if "week" in res.columns else []) + ["player_display_name", "player_id"]
+    tasc = [False] + ([False] if "week" in res.columns else []) + [True, True]
     s = next((c for c in conds if c["kind"] == "sort" and c["col"] in res.columns), None)
     if s is None:
-        return res.sort_values(["season", "player_display_name"], ascending=[False, True])
+        return res.sort_values(tail, ascending=tasc)
     fl = rate_floor(s["col"], rate_ranks) if rate_ranks else None
     if fl and fl[0] in res.columns:
         sched = res["season"].map(lambda y: 17 if int(y) >= 2021 else 16)
         need = fl[1] * sched if fl[2] else fl[1]
         res = res.assign(_unq=(pd.to_numeric(res[fl[0]], errors="coerce").fillna(0) < need).astype(int))
-        out = res.sort_values(["_unq", s["col"], "season", "player_display_name"],
-                              ascending=[True, s["asc"], False, True], na_position="last")
+        out = res.sort_values(["_unq", s["col"]] + tail, ascending=[True, s["asc"]] + tasc, na_position="last")
         return out.drop(columns=["_unq"])
-    return res.sort_values([s["col"], "season", "player_display_name"],
-                           ascending=[s["asc"], False, True], na_position="last")
+    return res.sort_values([s["col"]] + tail, ascending=[s["asc"]] + tasc, na_position="last")
 
 def run(df, query):
     res, notes, _conds, _ignored = run_full(df, query)

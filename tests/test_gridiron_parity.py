@@ -87,6 +87,13 @@ QUERIES = [
     "edge rushers with the most sacks since 2020",
     "linebackers with the most tackles in 2025",
     "the most sacks in a season since 2015",
+    "QBs with a game with 350+ total yards, 4+ total TDs, 70%+ completion, and 0 ints and 0 fumbles",
+    "RBs with a 200 yard game since 2020",
+    "QBs with a game with 5+ passing TDs",
+    "WRs with a game with 200+ receiving yards since 2015",
+    "edge rushers with a game with 3+ sacks since 2018",
+    "QBs with the most total touchdowns in 2024",
+    "RBs with the most touchdowns in 2024",
     "What QB has had the most deep pass TDs (20+ yards) since 2021",
     "QBs with the most passing yards since 2015",
     "the most passing yards in a season since 2021",
@@ -111,16 +118,22 @@ NODE_RUNNER = r"""
 const {Table} = require(process.argv[2]);
 const data = JSON.parse(require("fs").readFileSync(process.argv[3], "utf8"));
 const T = new Table(data);
+const gpath = process.argv[5];
+const G = gpath ? new Table(JSON.parse(require("fs").readFileSync(gpath, "utf8"))) : null;
 const qs = JSON.parse(require("fs").readFileSync(process.argv[4], "utf8"));
+const key = (t, i) => t.cols.season[i] + "|" + (t.meta.grain === "game" ? t.cols.week[i] + "|" : "") + t.cols.player_id[i];
 const out = [];
 for (const q of qs) {
   try {
-    const r = T.run(q);
-    const ordered = T.sortIdx(r.idx, r.conds).slice(0, 10).map(i => T.cols.season[i] + "|" + T.cols.player_id[i]);
-    const p = T.present(r.idx, r.conds, r.notes, r.ignored, 5000);
+    const pre = T.engine.parse(q);
+    const game = pre.conds.some((c) => c.kind === "scope" && c.value === "game");
+    const T2 = game ? G : T;
+    const r = { conds: pre.conds, notes: pre.notes, ignored: pre.ignored, idx: T2.apply(pre.conds) };
+    const ordered = T2.sortIdx(r.idx, r.conds).slice(0, 10).map(i => key(T2, i));
+    const p = T2.present(r.idx, r.conds, r.notes, r.ignored, 5000);
     const num = (v) => v == null ? "" : (Number.isInteger(v) ? String(v) : v.toFixed(4));
     const career = p.career ? p.rows.slice(0, 10).map(x => x.player_id + "|" + x.season + "|" + num(x[p.sort.col])) : null;
-    out.push({ notes: p.notes, readNotes: p.readNotes || [], ignored: r.ignored, first10: ordered, keys: r.idx.map(i => T.cols.season[i] + "|" + T.cols.player_id[i]).sort(),
+    out.push({ notes: p.notes, readNotes: p.readNotes || [], ignored: r.ignored, first10: ordered, keys: r.idx.map(i => key(T2, i)).sort(),
                career, careerKeys: p.career ? p.rows.map(x => x.player_id).sort() : null });
   }
   catch (e) { out.push({ error: e.message }); }
@@ -129,9 +142,12 @@ process.stdout.write(JSON.stringify(out));
 """
 
 SUMS = None
+GDF = None
 
 def main():
     df = pd.read_parquet(os.path.join(ROOT, "data", "players.parquet"))
+    global GDF
+    GDF = pd.read_parquet(os.path.join(ROOT, "data", "games.parquet"))
     global SUMS
     SUMS = qe.sum_cols(df, fd.RANK_DESC, fd.RATE_PARTS, fd.NEVER_SUM, fd.MAX_COLS)
     with tempfile.TemporaryDirectory() as td:
@@ -139,11 +155,15 @@ def main():
         open(runner, "w", encoding="utf-8").write(NODE_RUNNER)
         json.dump(QUERIES, open(qfile, "w", encoding="utf-8"))
         js = json.loads(subprocess.check_output(["node", runner, os.path.join(ROOT, "static", "gridiron", "engine.js"),
-                                                 os.path.join(ROOT, "static", "gridiron", "data.json"), qfile], text=True, encoding="utf-8"))
+                                                 os.path.join(ROOT, "static", "gridiron", "data.json"), qfile,
+                                                 os.path.join(ROOT, "static", "gridiron", "games.json")], text=True, encoding="utf-8"))
     fails = 0
     for q, j in zip(QUERIES, js):
         try:
-            res, notes, conds, ignored = qe.run_full(df, q)
+            conds0 = qe.parse(q)[0]
+            game = qe.is_game(conds0)
+            res, notes, conds, ignored = qe.run_full(GDF if game else df, q)
+            wk = (res["week"].astype(int).astype(str) + "|") if game else ""
             ordered = qe.sort_result(res, conds, fd.RATE_RANKS).head(10)
             career, extra = qe.career_scope(conds, res, SUMS, fd.RATE_PARTS, fd.RATE_RANKS)
             read = list(extra)
@@ -155,8 +175,9 @@ def main():
                 if rfl and rfl[0] in res.columns:
                     read.append(f"ranked only among seasons with at least {rfl[1]:g} {qe.DISPLAY.get(rfl[0], rfl[0])} per {'scheduled game' if rfl[2] else 'season'}; the rest sit below them")
             py = {"notes": notes, "readNotes": read, "ignored": ignored,
-                  "first10": [f"{int(s)}|{p}" for s, p in zip(ordered["season"], ordered["player_id"])],
-                  "keys": sorted(f"{int(s)}|{p}" for s, p in zip(res["season"], res["player_id"])),
+                  "first10": [f"{int(s)}|{w}{p}" for s, w, p in zip(ordered["season"],
+                              (ordered["week"].astype(int).astype(str) + "|") if game else [""] * len(ordered), ordered["player_id"])],
+                  "keys": sorted(f"{int(s)}|{w}{p}" for s, w, p in zip(res["season"], wk if game else [""] * len(res), res["player_id"])),
                   "career": None, "careerKeys": None}
             if career:
                 cr = qe.career_rows(res, conds, SUMS, fd.RATE_PARTS, fd.RATE_RANKS, fd.MAX_COLS)

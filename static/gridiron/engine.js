@@ -57,7 +57,7 @@
       interceptions: { DEF: "def_interceptions" },
       sacks: { QB: "sacks_taken" },
       fumbles: { DEF: "forced_fumbles" },
-      total_tds: { QB: "passing_tds", RB: "rushing_tds", FB: "rushing_tds", WR: "receiving_tds", TE: "receiving_tds", DEF: "def_tds" },
+      any_tds: { QB: "passing_tds", RB: "rushing_tds", FB: "rushing_tds", WR: "receiving_tds", TE: "receiving_tds", DEF: "def_tds", "*": "total_tds" },
       any_yards: { QB: "passing_yards", RB: "rushing_yards", FB: "rushing_yards", WR: "receiving_yards", TE: "receiving_yards", "*": "total_yards" },
       ypa: { RB: "ypc", FB: "ypc" },                 // a back's yards per attempt are carries
       pass_attempts: { RB: "carries", FB: "carries" },
@@ -132,6 +132,13 @@
     }
     // a percent stat typed as "5%" or "5" means 0.05; typed as "0.05" stays
     const pctValue = (col, value, marked) => (PCT.has(col) && (marked || value >= 1)) ? value / 100 : value;
+    // "70%+ completion" is the completion PERCENTAGE, not seventy completions
+    const PCT_SIBLING = { completions: "completion_pct", receptions: "catch_pct", fg_made: "fg_pct",
+                          passing_tds: "td_pct", interceptions: "int_rate", sacks_taken: "sack_pct",
+                          pat_made: "pat_pct" };
+    const pctCol = (col, marked) => (marked && PCT_SIBLING[col] && !PCT.has(col)) ? PCT_SIBLING[col] : col;
+    // a bare zero is an EXACT zero: "0 interceptions" wants the games with none
+    const zeroOp = (col, value, op) => (value === 0 && op === ">=" && !/yards|epa|rating|pct|rate|share/.test(col)) ? "<=" : op;
     const SIGN = { ">": ">", "<": "<", ">=": "\u2265", "<=": "\u2264" };
     const NUM_RE = /\d[\d,.]*/g;
     const PCT_TAIL_RE = /^\s*(%|percent)/;
@@ -303,7 +310,9 @@
         else if (opWord === "at least") op = ">=";
         else if (COMPARE_LT.has(opWord)) op = "<";
         else op = "<=";
+        col = pctCol(col, pctMark);
         value = pctValue(col, value, pctMark);
+        op = zeroOp(col, value, op);
         conds.push({ kind: "threshold", col, op, value });
         const shown = PCT.has(col) ? g(value * 100) + "%" : g(value);
         notes.push(disp(col) + " " + SIGN[op] + " " + shown);
@@ -329,8 +338,10 @@
         let col;
         if (!st) { if (value >= 18 && value <= 50) col = "age"; else continue; }
         else col = st[0];
+        col = pctCol(col, isPct);
         value = pctValue(col, value, isPct);
-        conds.push({ kind: "threshold", col, op: gte ? ">=" : "<=", value });
+        const op2 = zeroOp(col, value, gte ? ">=" : "<=");
+        conds.push({ kind: "threshold", col, op: op2, value });
         const shown = PCT.has(col) ? g(value * 100) + "%" : g(value);
         notes.push(disp(col) + " " + SIGN[gte ? ">=" : "<="] + " " + shown);
         spans.push([mm.index, end]);
@@ -349,7 +360,7 @@
         const tail = PCT_TAIL_RE.exec(q.slice(mm.index + mm[0].length));
         const end = mm.index + mm[0].length + (tail ? tail[0].length : 0);
         const st = statForNumber(q, mm.index, end, 40);
-        const col = st ? st[0] : null;
+        let col = st ? st[0] : null;
         // "25 years old" is an equality, not a floor, so age stays explicit
         if (col === null || col === "age") {
           let frag = q.slice(mm.index, mm.index + 30).trim();
@@ -357,12 +368,16 @@
           ignored.push(frag);
           continue;
         }
+        col = pctCol(col, !!tail);
         const v = pctValue(col, value, !!tail);
-        conds.push({ kind: "threshold", col, op: ">=", value: v });
-        notes.push(disp(col) + " " + SIGN[">="] + " " + (PCT.has(col) ? g(v * 100) + "%" : g(v)));
+        const op3 = zeroOp(col, v, ">=");
+        conds.push({ kind: "threshold", col, op: op3, value: v });
+        notes.push(disp(col) + " " + SIGN[op3] + " " + (PCT.has(col) ? g(v * 100) + "%" : g(v)));
         spans.push([mm.index, end]);
       }
 
+      // a game line, not a season line (this does NOT match "per game")
+      if (/\ba game\b|\bgames with\b|\bgame with\b|\bgame where\b|\bin one game\b|\bsingle[- ]game\b|\bany game\b|\bone game\b|\d[\d,]*\s*\+?\s*(?:yard|yd|point|td|touchdown|sack|tackle|reception|catch|carry)s?[\s-]*game/.test(q)) conds.push({ kind: "scope", value: "game" });
       // the escape hatch that keeps a multi-season question on season lines
       if (/\bin a (?:single )?season\b|\bsingle[- ]season\b|\bbest season\b|\bper season\b|\bseason with the\b/.test(q)) conds.push({ kind: "scope", value: "season" });
       if (!conds.length) throw new QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.");
@@ -389,8 +404,10 @@
       this.cols = {};
       for (const [name, c] of Object.entries(data.cols)) {
         if (Array.isArray(c)) this.cols[name] = c;
-        else {   // sparse -> dense array of nulls
-          const arr = new Array(this.n).fill(null);
+        else {   // sparse -> dense; `d` is the value the omitted rows hold (a
+                 // game line is mostly zeros, and 420k explicit zeros per column
+                 // is most of the file)
+          const arr = new Array(this.n).fill(c.d === undefined ? null : c.d);
           for (let k = 0; k < c.i.length; k++) arr[c.i[k]] = c.v[k];
           this.cols[name] = arr;
         }
@@ -533,14 +550,18 @@
       const s = this.cols.season, nm = this.cols.player_display_name;
       // Python compares strings by code point and pandas puts NA last; locale
       // collation disagrees on names like "A.J." vs "Aaron", so match Python.
+      const wk = this.has("week") ? this.cols.week : null;
+      const pid = this.cols.player_id;
       const byName = (a, b) => {
         const d = s[b] - s[a];
         if (d) return d;
+        if (wk) { const w = wk[b] - wk[a]; if (w) return w; }   // newest game first inside a season
         const x = nm[a], y = nm[b];
-        if (x == null && y == null) return 0;
+        if (x == null && y == null) return pid[a] < pid[b] ? -1 : pid[a] > pid[b] ? 1 : 0;
         if (x == null) return 1;
         if (y == null) return -1;
-        return x < y ? -1 : x > y ? 1 : 0;
+        if (x !== y) return x < y ? -1 : 1;
+        return pid[a] < pid[b] ? -1 : pid[a] > pid[b] ? 1 : 0;
       };
       const so = (conds || []).find((c) => c.kind === "sort" && this.has(c.col));
       if (!so) return idx.slice().sort(byName);
@@ -610,7 +631,7 @@
     }
     careerScope(idx, conds) {
       const M = this.meta, D = (c) => this.engine.DISPLAY[c] || c;
-      if (conds.some((c) => c.kind === "scope" && c.value === "season")) return { career: false, notes: [] };
+      if (conds.some((c) => c.kind === "scope" && (c.value === "season" || c.value === "game"))) return { career: false, notes: [] };
       if (conds.some((c) => c.kind === "rank")) return { career: false, notes: [] };
       const seasons = new Set();
       for (const i of idx) seasons.add(this.cols.season[i]);

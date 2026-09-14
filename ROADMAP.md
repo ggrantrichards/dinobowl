@@ -52,7 +52,34 @@ ordered by how often they hit it. P0 = necessary, P1 = clear improvement, P2 = w
 Not proposed: accounts, comments, comparisons/compare-two-players, team pages, fantasy
 projections, predictions. They are features, not upgrades, and each would need its own data.
 
-## GRIDIRON g17 — 2026-09-12 (shipped): edge rushers by usage, not by label
+## GRIDIRON g18 — 2026-09-14 (shipped): a second grain, one vocabulary
+
+Owner asked for per-game questions. A row in `data.json` is a player-SEASON, so this adds a
+second table rather than bending the first.
+
+- `build_games.py` → `data/games.parquet` (420,734 player-games, 2000+). nflverse's
+  `stats_player_week_{year}` ships from the same release as the season files with identical
+  column names, so `fetch_data.STAT_COLS` renames it and the whole alias / DISPLAY / POS_SWAP
+  vocabulary applies with no new words. Rows with no production dropped (39,096 of them).
+- `export_games.py` → `static/gridiron/games.json`, same `{meta, cols}` shape, so the browser
+  `Table` class loads it unchanged. 67 box-score columns: season-only sources (PFR, Next Gen,
+  QBR, snaps) have no game grain, and per-play rates are noise on one line.
+- **Column encoding gained a default.** `{d, i, v}` means "everything is `d` except these rows".
+  A game line is mostly zeros; this took the file from 113 MB to 43 MB.
+- Scope: `{kind: "scope", value: "game"}` from "a game with" / "games with" / "in one game" /
+  "single game" / "a 200 yard game", and deliberately NOT from "per game". `career_scope`
+  refuses career mode on a game question. The page parses first, picks the table, then applies —
+  `S.T` carries the grain so the re-run, the zero-rows explainer and the count line all follow it,
+  and league-leader dots are off (a game is not a season).
+- Parser faults the owner's query exposed: a percent on a count now means that count's rate
+  (`PCT_SIBLING`); a bare zero on a count is an exact zero (`_zero_op`), not a floor; and
+  `tds_accounted` splits "total touchdowns" (everything accounted for) from the bare word
+  (the kind this position scores) — the same fix `total_yards` got in g14.
+- Default order gained `week` then `player_id`: two game lines by one player in one season tied
+  on everything else, and the two engines broke the tie differently. That was three parity
+  failures and is exactly what the harness is for. 94/94 across both grains.
+
+: edge rushers by usage, not by label
 
 Owner pasted the real 2025 sack board next to ours: we returned 8 of 16 edge rushers. Cause:
 `"edge rusher"` mapped to `["DE", "OLB"]`, but nflverse files Parsons / Burns / Bonitto /

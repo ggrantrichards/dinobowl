@@ -116,6 +116,10 @@ BODY = r"""
   <script src="/gridiron/engine.js?v=__V__"></script>
   <script>
     const DATA_URL = '/gridiron/data.json?v=__V__';
+    // Per-game lines are a second, bigger table. It is fetched the first time a
+    // question actually asks about a game, so the ordinary visitor never pays
+    // for it.
+    const GAMES_URL = '/gridiron/games.json?v=__V__';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -137,6 +141,7 @@ BODY = r"""
     // with its parenthetical trimmed
     const HEAD = {
       season: "Yr", player_display_name: "Player", position: "Pos", recent_team: "Tm", games: "G", made_playoffs: "Playoffs", age: "Age",
+      week: "Wk", opponent: "Opp", playoff_game: "Playoff", tds_accounted: "TDs",
       passing_yards: "Pass Yds", passing_tds: "Pass TD", completions: "Cmp", pass_attempts: "Att", completion_pct: "Cmp%", interceptions: "INT",
       int_rate: "INT%", td_pct: "TD%", ypa: "Y/A", passer_rating: "Rate", qbr: "QBR", epa_per_play: "EPA/play", pass_epa_per_play: "Pass EPA/play",
       rush_epa_per_carry: "Rush EPA/car", rec_epa_per_target: "Rec EPA/tgt", cpoe: "CPOE", cpoe_ngs: "CPOE (NGS)", sacks_taken: "Sacked", sack_pct: "Sk%",
@@ -167,34 +172,49 @@ BODY = r"""
     const FROZEN = ["season", "player_display_name", "position"];   // stay put when the grid scrolls sideways
     const CHUNK = 150;                                                 // rows rendered per scroll step
 
-    let T = null, META = null, loading = null;
+    let T = null, META = null, loading = null, GT = null, gloading = null;
     const $ = (id) => document.getElementById(id);
     const q = $('q'), runBtn = $('run'), status = $('status');
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
     // ------------------------------------------------------------ data
+    async function fetchJson(url, label, estimate) {
+      const bar = $('progress'), fill = bar.firstElementChild;
+      status.className = 'status'; status.textContent = 'Loading ' + label + ' (one time)…'; bar.hidden = false; fill.style.width = '4%';
+      const res = await fetch(url);
+      if (!res.ok) throw new Error(url.split('?')[0] + ' ' + res.status);
+      const reader = res.body && res.body.getReader ? res.body.getReader() : null;
+      let json;
+      if (reader) {
+        // gzip hides the byte total; fall back to a soft estimate so the bar still moves
+        const total = +res.headers.get('content-length') || estimate; const chunks = []; let got = 0;
+        for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; const pct = Math.min(96, Math.round(got / total * 100)); fill.style.width = pct + '%'; status.textContent = 'Loading ' + label + '… ' + pct + '%'; }
+        const buf = new Uint8Array(got); let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
+        json = JSON.parse(new TextDecoder().decode(buf));
+      } else json = await res.json();
+      fill.style.width = '100%';
+      status.textContent = ''; setTimeout(() => { bar.hidden = true; fill.style.width = '0'; }, 400);
+      return json;
+    }
+    // the per-game table, fetched on the first question that needs it
+    async function loadGames() {
+      if (GT) return GT;
+      if (gloading) return gloading;
+      gloading = (async () => {
+        const json = await fetchJson(GAMES_URL, 'the per-game lines', 9000000);
+        GT = new Gridiron.Table(json);
+        return GT;
+      })();
+      return gloading;
+    }
     async function loadTable() {
       if (T) return T;
       if (loading) return loading;
       loading = (async () => {
-        const bar = $('progress'), fill = bar.firstElementChild;
-        status.className = 'status'; status.textContent = 'Loading the stat table (one time)…'; bar.hidden = false; fill.style.width = '4%';
-        const res = await fetch(DATA_URL);
-        if (!res.ok) throw new Error('data.json ' + res.status);
-        const reader = res.body && res.body.getReader ? res.body.getReader() : null;
-        let json;
-        if (reader) {
-          // gzip hides the byte total; fall back to a soft estimate so the bar still moves
-          const total = +res.headers.get('content-length') || 24500000; const chunks = []; let got = 0;
-          for (;;) { const { done, value } = await reader.read(); if (done) break; chunks.push(value); got += value.length; const pct = Math.min(96, Math.round(got / total * 100)); fill.style.width = pct + '%'; status.textContent = 'Loading the stat table… ' + pct + '%'; }
-          const buf = new Uint8Array(got); let o = 0; for (const c of chunks) { buf.set(c, o); o += c.length; }
-          json = JSON.parse(new TextDecoder().decode(buf));
-        } else json = await res.json();
-        fill.style.width = '100%';
+        const json = await fetchJson(DATA_URL, 'the stat table', 24500000);
         T = new Gridiron.Table(json); META = json.meta;
         $('meta').innerHTML = `<span><b>${META.rows.toLocaleString()}</b> player-seasons</span><span>seasons <b>${META.seasons[0]}–${META.seasons[META.seasons.length - 1]}</b></span><span><b>${META.columns.length}</b> stats per line</span><span>built <b>${META.built.slice(0, 10)}</b></span>`;
         renderGlossary(); buildVocab();
-        status.textContent = ''; setTimeout(() => { bar.hidden = true; fill.style.width = '0'; }, 400);
         return T;
       })();
       return loading;
@@ -204,7 +224,7 @@ BODY = r"""
     function head(c) { return HEAD[c] || (META && META.display[c] ? META.display[c].replace(/\s*\(.*\)\s*$/, '') : c); }
     function fmt(col, v) {
       if (v === null || v === undefined) return '—';
-      if (col === 'made_playoffs') return v ? '<span class="yes">✓ yes</span>' : '<span class="no">no</span>';
+      if (col === 'made_playoffs' || col === 'playoff_game') return v ? '<span class="yes">✓ yes</span>' : '<span class="no">no</span>';
       if (col === 'height') return Math.floor(v / 12) + "'" + Math.round(v % 12) + '"';
       if (META && META.pct_stats.includes(col)) return (v * 100).toFixed(1) + '%';
       if (META && META.pp_stats.includes(col)) return (v >= 0 ? '+' : '') + Number(v).toFixed(1);
@@ -343,14 +363,19 @@ BODY = r"""
         const table = await loadTable();
         status.className = 'status'; status.textContent = '';
         let r;
-        try { r = table.run(text); }
+        try { r = table.engine.parse(text); }
         catch (e) {
           if (e instanceof Gridiron.QueryError || e.name === 'QueryError') { failed(e.message); return; }
           throw e;
         }
+        // "a game with 350 yards" is a question about one afternoon, and it is
+        // answered from the per-game table, which is fetched only when asked for
+        const wantsGame = r.conds.some((c) => c.kind === 'scope' && c.value === 'game');
+        const tbl = wantsGame ? await loadGames() : table;
+        S.T = tbl;
         S.text = text; S.conds = r.conds; S.notes = r.notes; S.ignored = r.ignored;
         const keep = S.sort && (r.conds.length) ? S.sort : null;
-        present(table.present(r.idx, r.conds, r.notes, r.ignored), keep);
+        present(tbl.present(tbl.apply(r.conds), r.conds, r.notes, r.ignored), keep);
         if (push !== false) pushUrl(false);
       } catch (e) { status.className = 'status error'; status.textContent = 'Something broke: ' + e.message; }
       finally { runBtn.disabled = false; runBtn.textContent = 'Run query'; }
@@ -358,7 +383,7 @@ BODY = r"""
     // the same question with an edited reading
     function rerunConds() {
       try {
-        const d = T.queryConds(S.conds, S.notes, S.ignored);
+        const d = (S.T || T).queryConds(S.conds, S.notes, S.ignored);
         present(d, S.sort);
         pushUrl(true);
       } catch (e) { failed(e.message); }
@@ -375,7 +400,7 @@ BODY = r"""
       // keep the sort if that column is still on screen (#15)
       S.sort = keepSort && d.columns.includes(keepSort.col) ? keepSort : (d.sort ? { col: d.sort.col, dir: d.sort.asc ? 'asc' : 'desc' } : null);
       renderRead();
-      $('countline').innerHTML = `<span class="count">${d.count.toLocaleString()}</span> ` + (d.career ? `player${d.count === 1 ? '' : 's'} · career totals over the matched seasons` : `player-season${d.count === 1 ? '' : 's'}`) + (d.truncated ? ` · first 2,000 shown` : '');
+      $('countline').innerHTML = `<span class="count">${d.count.toLocaleString()}</span> ` + (d.career ? `player${d.count === 1 ? '' : 's'} · career totals over the matched seasons` : (S.T && S.T.meta.grain === 'game') ? `player-game${d.count === 1 ? '' : 's'}` : `player-season${d.count === 1 ? '' : 's'}`) + (d.truncated ? ` · first 2,000 shown` : '');
       status.textContent = '';
       renderEmpty(d);
       $('toolbar').hidden = !d.rows.length;
@@ -470,7 +495,7 @@ BODY = r"""
       if (filters.length > 1) {
         for (const f of filters) {
           const rest = S.conds.filter((_, j) => j !== f.i);
-          const idx = T.apply(rest);
+          const idx = (S.T || T).apply(rest);
           if (!best || idx.length > best.n) best = { ...f, n: idx.length, idx };
         }
       }
@@ -478,8 +503,8 @@ BODY = r"""
       if (best && best.n > 0) {
         html += ` Without <i>${esc(S.notes[best.i])}</i>, <b>${best.n.toLocaleString()}</b> season${best.n === 1 ? '' : 's'} match.`;
         const c = best.c;
-        if (c.kind === 'threshold' && T.has(c.col)) {
-          const v = T.cols[c.col]; let ext = null;
+        if (c.kind === 'threshold' && (S.T || T).has(c.col)) {
+          const v = (S.T || T).cols[c.col]; let ext = null;
           const hi = c.op.includes('>');
           for (const i of best.idx) { const x = v[i]; if (typeof x !== 'number') continue; if (ext == null || (hi ? x > ext : x < ext)) ext = x; }
           if (ext != null) html += ` The ${hi ? 'highest' : 'lowest'} ${esc(head(c.col))} among them is <b>${fmt(c.col, ext)}</b>.`;
@@ -510,7 +535,8 @@ BODY = r"""
       }
       LEAD.set(col, m); return m;
     }
-    const leadable = (c) => META.rank_desc.includes(c) || (META.rate_ranks || []).some(r => r[0] === c) || META.ascending_good.includes(c);
+    const gameGrain = () => !!(S.d && S.T && S.T.meta.grain === 'game');
+    const leadable = (c) => !gameGrain() && META.rank_desc.includes(c) || (META.rate_ranks || []).some(r => r[0] === c) || META.ascending_good.includes(c);
     const counting = (c) => (META.rank_desc.includes(c) || ['playoff_wins', 'super_bowl_wins'].includes(c)) && !META.pct_stats.includes(c) && !(META.pp_stats || []).includes(c) && !['games', 'age'].includes(c);
 
     function sortRows(rows, sort) {
@@ -632,7 +658,7 @@ BODY = r"""
       if (!S.d) return;
       const cols = visibleCols, rows = sortRows(S.d.rows, S.sort);
       const cell = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
-      const csv = [cols.map(c => cell(META.display[c] || c)).join(','), ...rows.map(r => cols.map(c => cell(c === 'made_playoffs' ? (r[c] ? 'yes' : 'no') : r[c])).join(','))].join('\n');
+      const csv = [cols.map(c => cell(META.display[c] || c)).join(','), ...rows.map(r => cols.map(c => cell(c === 'made_playoffs' || c === 'playoff_game' ? (r[c] ? 'yes' : 'no') : r[c])).join(','))].join('\n');
       try { await navigator.clipboard.writeText(csv); flash($('csvBtn'), `Copied ${rows.length} rows ✓`); } catch (_) { flash($('csvBtn'), 'Clipboard blocked'); }
     });
     $('linkBtn').addEventListener('click', async () => { try { await navigator.clipboard.writeText(location.href); flash($('linkBtn'), 'Link copied ✓'); } catch (_) { flash($('linkBtn'), 'Clipboard blocked'); } });
