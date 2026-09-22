@@ -11,6 +11,10 @@ main page to play in a corner widget while your queries run, or open
 latest-season starters (ratings derived from actual stats via `/api/game/teams`).
 See [Dino Bowl](#dino-bowl) below.
 
+**New: 📺 WATCH** — the round 📺 button beside the 🦖 in the bottom-right corner opens
+this week's NFL games in a pop-up player (full screen with ⛶). NFL only: see
+[Gridiron g22](#gridiron-g22-2026-09-22--watch-nfl-games-only).
+
 Example:
 
 > QBs top 10 in passing yards and passing touchdowns with a top 5 lowest
@@ -168,6 +172,26 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g22 (2026-09-22) — 📺 Watch, NFL games only
+
+A 📺 button now sits in the corner dock next to the 🦖 and links this site to
+[UnderDog Live](https://underdog-nfl-media.web.app/). One click opens a pop-up with this
+week's slate (live games first, then kickoffs, then finals). **▶ Watch** plays the game in
+the panel, and **⛶ full screen** fills the screen (on an iPhone it fills the window). Each
+stream has source and feed buttons for when one goes down, and **UnderDog ↗** opens the
+full site with chat and picks.
+
+- **NFL only, by construction.** The list *is* ESPN's NFL scoreboard
+  (`site.api.espn.com/.../football/nfl/scoreboard`). A stream from the feed UnderDog uses
+  (`streamed.pk/api/matches/american-football`) attaches to a game only when its two sides
+  are exactly that game's two teams ("Arizona Cardinals", "Cardinals", "ARI", "LA Rams") and
+  it starts within 12 hours of kickoff. "Louisville Cardinals vs Pittsburgh Panthers" and
+  "NFL PrimeTime" never match.
+- Only `https:` embed URLs go into the player. On phones the player is sandboxed, as it is
+  on UnderDog, to block the embeds' pop-up ads.
+- Opening Watch minimises Dino Bowl, and opening Dino Bowl closes Watch. Closing Watch
+  unloads the stream. The dock hides while either panel is open.
 
 ### Gridiron g19 (2026-09-14) — the headshots came back
 

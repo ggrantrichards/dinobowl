@@ -99,7 +99,27 @@ BODY = r"""
        while the panel is open, whose head carries the same controls -->
   <div class="dino-dock">
     <button class="dino-mute" id="dinoMute" type="button" aria-pressed="false" title="Mute Dino Bowl" hidden>🔊</button>
+    <button class="dino-btn watch-btn" id="watchBtn" type="button" title="Watch NFL games live" aria-label="Watch NFL games">📺</button>
     <button class="dino-btn" id="dinoBtn" type="button" title="Dino Bowl — 8-bit football. With dinosaurs." aria-label="Open Dino Bowl">🦖</button>
+  </div>
+  <!-- WATCH: this week's NFL slate from ESPN's NFL scoreboard, each game paired
+       with its stream from the same feed UnderDog Live uses. The list IS the
+       NFL scoreboard, so nothing that is not an NFL game can get in. -->
+  <div class="watch-panel" id="watchPanel" role="dialog" aria-label="Watch NFL games" hidden>
+    <div class="dino-head watch-head">
+      <span class="watch-title" id="watchTitle">WATCH — NFL games only</span>
+      <span class="tools">
+        <button id="watchBack" type="button" title="Back to this week's games" hidden>←<span class="wl"> games</span></button>
+        <button id="watchFull" type="button" title="Full screen" hidden>⛶<span class="wl"> full screen</span></button>
+        <a href="https://underdog-nfl-media.web.app/" target="_blank" rel="noopener" title="UnderDog Live — chat and picks with the game">UnderDog ↗</a>
+        <button id="watchClose" type="button" title="Close (stops the stream)" aria-label="Close">✕</button>
+      </span>
+    </div>
+    <div class="watch-list" id="watchList"></div>
+    <div class="watch-player" id="watchPlayer" hidden>
+      <div class="watch-screen"><p class="watch-msg" id="watchMsg" hidden></p><iframe id="watchFrame" title="NFL stream" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+      <div class="watch-sources" id="watchSources"></div>
+    </div>
   </div>
   <div class="dino-panel" id="dinoPanel">
     <div class="dino-head">
@@ -853,7 +873,8 @@ BODY = r"""
     function openPanel(open) {
       dinoPanel.classList.toggle('open', open);
       if (open && !dinoFrame.src) dinoFrame.src = '/game/';
-      dinoDock.classList.toggle('hidden', open);
+      if (open) closeWatch();
+      syncDock();
       if (dinoFrame.src) dinoMute.hidden = false;
     }
     dinoBtn.addEventListener('click', () => openPanel(!dinoPanel.classList.contains('open')));
@@ -873,6 +894,165 @@ BODY = r"""
     muteBtns.forEach(btn => btn.addEventListener('click', () => setMuted(!isMuted())));
     window.addEventListener('message', (e) => { if (e.origin !== location.origin) return; const d = e.data; if (d && d.dinobowl === 'muted') paintMute(!!d.muted); });
     paintMute(isMuted());
+
+    // ------------------------------------------------------------ Watch: NFL games, and only NFL games
+    // The slate is ESPN's NFL scoreboard, so the list can only ever hold NFL
+    // games. A streamed.pk "american-football" match (the feed UnderDog Live
+    // uses) is attached to a game only when its two sides ARE that game's two
+    // teams ("Arizona Cardinals", "Cardinals", "ARI" — not "Louisville
+    // Cardinals") and it starts within half a day of kickoff, so college games
+    // and shows never match.
+    const STREAM_API = 'https://streamed.pk/api';
+    const NFL_SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
+    const watchPanel = $('watchPanel'), watchList = $('watchList'), watchPlayer = $('watchPlayer'), watchFrame = $('watchFrame'),
+      watchSources = $('watchSources'), watchTitle = $('watchTitle'), watchFull = $('watchFull'), watchBack = $('watchBack'), watchMsg = $('watchMsg');
+    const W = { games: [], loadedAt: 0, error: null, timer: 0, game: null, src: -1, streams: [], feed: -1, token: 0, realFs: false };
+    // UnderDog's rule: on phones the player is sandboxed, which stops the embeds' pop-up ads
+    if (matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) watchFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
+    function syncDock() { dinoDock.classList.toggle('hidden', dinoPanel.classList.contains('open') || !watchPanel.hidden); }
+
+    const norm = (t) => String(t || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z0-9]+/g, ' ').trim();
+    function teamNames(t) {
+      const nick = norm(t.name || t.shortDisplayName), loc = norm(t.location), abbr = norm(t.abbreviation);
+      const names = [norm(t.displayName), nick, abbr, abbr + ' ' + nick, loc + ' ' + nick];
+      if (loc === 'los angeles') names.push('la ' + nick); else if (loc === 'new york') names.push('ny ' + nick); else names.push(loc);
+      return new Set(names.filter(n => n && n !== ' '));
+    }
+    // "Away vs Home" (or at / @ / -) split into its two sides, or null
+    function sidesOf(title) {
+      const parts = String(title || '').toLowerCase().replace(/^\s*nfl\s*[:|\-–]\s*/, '').split(/\s+(?:vs\.?|v\.?|at|@|-|–)\s+/);
+      return parts.length === 2 ? parts.map(norm) : null;
+    }
+    const isGame = (sides, a, b) => !!sides && ((a.has(sides[0]) && b.has(sides[1])) || (b.has(sides[0]) && a.has(sides[1])));
+    const side = (c) => ({ name: c.team.displayName, short: c.team.shortDisplayName || c.team.name || c.team.abbreviation, abbr: c.team.abbreviation, logo: c.team.logo || '', score: c.score });
+    function pairStreams(events, matches) {
+      return events.map(ev => {
+        const comp = ev.competitions[0], home = comp.competitors.find(c => c.homeAway === 'home'), away = comp.competitors.find(c => c.homeAway === 'away');
+        const kick = Date.parse(ev.date), hn = teamNames(home.team), an = teamNames(away.team);
+        const sources = [];
+        for (const m of matches) {
+          const t = m.teams || {}, named = t.home && t.away ? [norm(t.home.name), norm(t.away.name)] : null;
+          if (/\b(ncaa|college|cfb)\b/i.test(m.title || '') || !(isGame(sidesOf(m.title), hn, an) || isGame(named, hn, an))) continue;
+          if (m.date && Math.abs(m.date - kick) > 12 * 3600e3) continue;
+          for (const s of m.sources || []) if (s && s.source && s.id && !sources.some(x => x.source === s.source && x.id === s.id)) sources.push(s);
+        }
+        return { id: ev.id, kick, state: ev.status.type.state, detail: ev.status.type.shortDetail || '', home: side(home), away: side(away), sources };
+      });
+    }
+    async function loadSlate(force) {
+      if (!force && W.games.length && Date.now() - W.loadedAt < 60e3) return renderSlate();
+      if (!W.games.length) watchList.innerHTML = '<p class="watch-msg">Finding this week’s NFL games…</p>';
+      try {
+        const [board, matches] = await Promise.all([
+          fetch(NFL_SCOREBOARD, { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('scoreboard ' + r.status); return r.json(); }),
+          fetch(STREAM_API + '/matches/american-football', { cache: 'no-store' }).then(r => r.ok ? r.json() : []).catch(() => [])
+        ]);
+        W.games = pairStreams(board.events || [], Array.isArray(matches) ? matches : []);
+        W.loadedAt = Date.now(); W.error = null;
+      } catch (e) { W.error = e; }
+      renderSlate();
+    }
+    const STATE_ORDER = { in: 0, pre: 1, post: 2 };
+    function renderSlate() {
+      if (!W.games.length) {
+        watchList.innerHTML = W.error
+          ? '<p class="watch-msg">Couldn’t reach the NFL scoreboard just now. <button type="button" data-retry>Try again</button> or watch on <a href="https://underdog-nfl-media.web.app/" target="_blank" rel="noopener">UnderDog Live ↗</a></p>'
+          : '<p class="watch-msg">No NFL games on the board this week.</p>';
+        return;
+      }
+      const games = W.games.slice().sort((a, b) => (STATE_ORDER[a.state] ?? 1) - (STATE_ORDER[b.state] ?? 1) || a.kick - b.kick);
+      const team = (t, score) => `<span class="wg-team" title="${esc(t.name)}">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}${esc(t.short)}${score ? ` <b>${esc(t.score)}</b>` : ''}</span>`;
+      watchList.innerHTML = games.map(g => {
+        const when = g.state === 'in' ? '● LIVE · ' + g.detail : g.state === 'post' ? g.detail || 'Final'
+          : new Date(g.kick).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+        const act = g.sources.length ? `<button type="button" data-watch="${esc(g.id)}">▶ Watch</button>` : `<span class="wg-none">${g.state === 'post' ? 'final' : 'no stream yet'}</span>`;
+        return `<div class="wg wg-${esc(g.state)}"><span class="wg-when">${esc(when)}</span><span class="wg-teams">${team(g.away, g.state !== 'pre')}<span class="wg-at">@</span>${team(g.home, g.state !== 'pre')}</span>${act}</div>`;
+      }).join('');
+    }
+
+    function screenMessage(text) { watchFrame.src = 'about:blank'; watchMsg.textContent = text; watchMsg.hidden = false; }
+    function renderSources() {
+      const g = W.game; if (!g) return;
+      let h = '<span>source</span>' + g.sources.map((s, i) => `<button type="button" data-src="${i}" class="${i === W.src ? 'on' : ''}">${esc(s.source)}</button>`).join('');
+      if (W.streams.length > 1) h += '<span>feed</span>' + W.streams.map((s, k) => `<button type="button" data-feed="${k}" class="${k === W.feed ? 'on' : ''}">${k + 1}${s.hd ? ' HD' : ''}${s.language ? ' · ' + esc(s.language) : ''}</button>`).join('');
+      watchSources.innerHTML = h;
+    }
+    function playFeed(k) {
+      const s = W.streams[k]; if (!s) return;
+      watchMsg.hidden = true; W.feed = k; watchFrame.src = s.embedUrl || s.url; renderSources();
+    }
+    // one source's streams; false when it has none. A newer click wins (token).
+    async function trySource(i, token) {
+      const s = W.game && W.game.sources[i]; if (!s) return false;
+      W.src = i; W.streams = []; W.feed = -1; renderSources();
+      let list = [];
+      try { const r = await fetch(`${STREAM_API}/stream/${encodeURIComponent(s.source)}/${encodeURIComponent(s.id)}`, { cache: 'no-store' }); if (r.ok) list = await r.json(); } catch (_) { }
+      if (token !== W.token) return true;
+      // only https embeds go in the frame: never a javascript: or data: URL from a third party
+      W.streams = (Array.isArray(list) ? list : []).filter(x => x && /^https:\/\//i.test(x.embedUrl || x.url || ''));
+      if (!W.streams.length) { renderSources(); return false; }
+      playFeed(0); return true;
+    }
+    async function playGame(g) {
+      const token = ++W.token;
+      W.game = g; W.src = -1; W.streams = []; W.feed = -1;
+      watchList.hidden = true; watchPlayer.hidden = false; watchBack.hidden = false; watchFull.hidden = false;
+      watchTitle.textContent = `${g.away.short} @ ${g.home.short}` + (g.state === 'in' ? ' · LIVE' : '');
+      screenMessage('Loading the stream…');
+      for (let i = 0; i < g.sources.length; i++) { if (await trySource(i, token)) return; if (token !== W.token) return; }
+      if (token === W.token) screenMessage('Every stream for this game is offline right now. Try again closer to kickoff, or on UnderDog Live ↗');
+    }
+    function showList() {
+      W.token++; W.game = null; W.streams = []; exitFull();
+      watchFrame.src = 'about:blank'; watchMsg.hidden = true;
+      watchPlayer.hidden = true; watchList.hidden = false; watchBack.hidden = true; watchFull.hidden = true;
+      watchTitle.textContent = 'WATCH — NFL games only';
+      renderSlate();
+    }
+    function openWatch() {
+      if (dinoPanel.classList.contains('open')) openPanel(false);
+      watchPanel.hidden = false; syncDock(); showList(); loadSlate();
+      clearInterval(W.timer);
+      W.timer = setInterval(() => { if (!W.game && !document.hidden) loadSlate(true); }, 60e3);
+    }
+    function closeWatch() {
+      if (watchPanel.hidden) return;
+      showList(); clearInterval(W.timer); watchPanel.hidden = true; syncDock();
+    }
+
+    // FULL SCREEN: the real thing where the browser allows it; where it does
+    // not (iPhone), the panel fills the window instead. Either way it is .max.
+    const fsEl = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+    function paintFull() { const on = watchPanel.classList.contains('max'); watchFull.innerHTML = on ? '⤡<span class="wl"> exit full screen</span>' : '⛶<span class="wl"> full screen</span>'; watchFull.title = on ? 'Exit full screen' : 'Full screen'; }
+    function enterFull() {
+      watchPanel.classList.add('max'); paintFull();
+      const req = watchPanel.requestFullscreen || watchPanel.webkitRequestFullscreen;
+      if (req) { try { const p = req.call(watchPanel); if (p && p.catch) p.catch(() => { }); } catch (_) { } }
+    }
+    function exitFull() {
+      watchPanel.classList.remove('max'); paintFull();
+      if (fsEl() === watchPanel) { const ex = document.exitFullscreen || document.webkitExitFullscreen; try { const p = ex.call(document); if (p && p.catch) p.catch(() => { }); } catch (_) { } }
+    }
+    ['fullscreenchange', 'webkitfullscreenchange'].forEach(ev => document.addEventListener(ev, () => {
+      if (fsEl() === watchPanel) W.realFs = true;
+      else if (W.realFs) { W.realFs = false; watchPanel.classList.remove('max'); paintFull(); }
+    }));
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && watchPanel.classList.contains('max') && !fsEl()) exitFull(); });
+
+    $('watchBtn').addEventListener('click', openWatch);
+    $('watchClose').addEventListener('click', closeWatch);
+    watchBack.addEventListener('click', () => { showList(); loadSlate(); });
+    watchFull.addEventListener('click', () => watchPanel.classList.contains('max') ? exitFull() : enterFull());
+    watchList.addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.hasAttribute('data-retry')) return loadSlate(true);
+      const g = W.games.find(x => x.id === b.dataset.watch); if (g) playGame(g);
+    });
+    watchSources.addEventListener('click', async (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.feed != null) return playFeed(+b.dataset.feed);
+      if (b.dataset.src != null) { const token = ++W.token; screenMessage('Loading the stream…'); if (!(await trySource(+b.dataset.src, token)) && token === W.token) screenMessage('That source is offline — try another.'); }
+    });
 
     // ------------------------------------------------------------ theme (#18): light → dark → auto
     const themeBtn = $('themeToggle'), mq = matchMedia('(prefers-color-scheme: dark)');
@@ -924,6 +1104,51 @@ EXTRA_CSS = """
     .dino-head .tools a, .dino-head .tools button { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius); padding: 3px 8px; cursor: pointer; text-decoration: none; line-height: 1.4 }
     .dino-head .tools a:hover, .dino-head .tools button:hover { border-color: var(--accent) }
     .dino-head .tools button.is-muted { background: var(--accent); color: var(--on-accent); border-color: var(--accent) }
+
+    /* WATCH: the NFL panel, same corner and chrome as Dino Bowl's, sized for video */
+    .watch-panel { position: fixed; right: 22px; bottom: 22px; z-index: 1201; width: min(760px, calc(100vw - 44px)); max-height: calc(100vh - 44px); display: flex; flex-direction: column; background: var(--card); color: var(--chalk); border: 1px solid var(--line-strong); border-radius: 6px; overflow: hidden; box-shadow: 0 18px 60px rgba(0, 0, 0, .35) }
+    .watch-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex: none; padding: 8px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim); border-bottom: 1px solid var(--line) }
+    .watch-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; letter-spacing: .04em }
+    .watch-head .tools { flex: none }
+    .watch-head .tools a { display: inline-flex; align-items: center }
+    .watch-list { overflow-y: auto; min-height: 120px }
+    .wg { display: grid; grid-template-columns: 120px 1fr auto; align-items: center; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft) }
+    .wg:last-child { border-bottom: 0 }
+    .wg-when { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim) }
+    .wg-in .wg-when { color: var(--danger); font-weight: 600 }
+    .wg-post { opacity: .6 }
+    .wg-teams { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; font-size: 14px; font-weight: 600 }
+    .wg-team { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap }
+    .wg-team img { width: 24px; height: 24px; object-fit: contain }
+    .wg-team b { font-family: 'IBM Plex Mono', monospace; font-weight: 600 }
+    .wg-at { color: var(--chalk-dim); font-size: 12px }
+    .wg button { font: 600 12px 'IBM Plex Mono', monospace; height: 32px; padding: 0 12px; background: var(--accent); color: var(--on-accent); border: 0; border-radius: var(--radius); cursor: pointer; white-space: nowrap }
+    .wg button:hover { filter: brightness(1.1) }
+    .wg-none { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim); white-space: nowrap }
+    .watch-msg { margin: 0; padding: 18px 16px; font-size: 13px; line-height: 1.5; color: var(--chalk-dim) }
+    .watch-msg a { color: var(--accent) }
+    .watch-msg button { font: inherit; color: var(--accent); background: transparent; border: 0; border-bottom: 1px dashed var(--accent); cursor: pointer; padding: 0 }
+    .watch-player { display: flex; flex-direction: column; min-height: 0 }
+    .watch-screen { position: relative; aspect-ratio: 16 / 9; background: #000 }
+    .watch-screen iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0 }
+    .watch-screen .watch-msg { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; text-align: center; color: #d6e0d9; background: #000 }
+    .watch-sources { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; padding: 8px 12px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim); border-top: 1px solid var(--line) }
+    .watch-sources:empty { display: none }
+    .watch-sources span + button { margin-left: 2px }
+    .watch-sources button + span { margin-left: 8px }
+    .watch-sources button { font: 11px 'IBM Plex Mono', monospace; height: 28px; padding: 0 10px; color: var(--chalk); background: transparent; border: 1px solid var(--line-strong); border-radius: var(--radius); cursor: pointer }
+    .watch-sources button:hover { border-color: var(--accent) }
+    .watch-sources button.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent) }
+    /* full screen (the real one, or the panel filling the window where that is not allowed) */
+    .watch-panel.max { inset: 0; width: auto; height: 100vh; height: 100dvh; max-height: none; border: 0; border-radius: 0 }
+    .watch-panel.max .watch-player { flex: 1 }
+    .watch-panel.max .watch-screen { flex: 1; aspect-ratio: auto }
+    @media (max-width: 640px) {
+      .watch-panel:not(.max) { right: 8px; left: 8px; bottom: 8px; width: auto; max-height: calc(100vh - 16px) }
+      .watch-head .wl { display: none }
+      .wg { grid-template-columns: 1fr auto; gap: 6px 10px }
+      .wg-when { grid-column: 1 / -1 }
+    }
 
     /* a clause the parser could not read is shown, not swallowed */
     .cond.ignored { color: var(--danger); border-color: var(--danger) }
