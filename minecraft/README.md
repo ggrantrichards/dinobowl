@@ -65,6 +65,21 @@ if a VM already exists, it tells you and exits.
 It only creates Always Free resources: one Ampere VM of at most 4 OCPU / 24 GB,
 the default ~47 GB boot volume, and a free VCN.
 
+### Safety net: a quota policy that blocks anything beyond Always Free
+
+`oracle-quota-policy.txt` makes Oracle **refuse** to create VMs or disks beyond
+the free amounts, instead of billing for them. It is worth having before any
+upgrade to Pay As You Go, and harmless on Free Tier.
+
+☰ → **Governance & Administration** → **Quota Policies** → **Create Quota Policy**:
+name `always-free-only`, compartment = your root compartment, paste the seven
+lines from the file, **Create**.
+
+It covers compute (only Ampere A1 up to 4 OCPU / 24 GB) and disk space (200 GB
+total). Other paid services such as databases and load balancers are not
+covered; don't create them, and keep a $1 budget alert as a second line of
+defence.
+
 ## 2. Open the port in Oracle's cloud firewall
 
 Instance page → **Primary VNIC → Subnet** → **Security Lists** → the default list →
