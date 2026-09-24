@@ -16,6 +16,55 @@ the Oracle console clicks (steps 1 and 2); the script handles the rest.
    Upgrading to Pay-As-You-Go usually fixes it, and you still pay nothing
    while you stay inside the Always Free limits.
 
+### Stuck on "Out of capacity"? Let a script keep retrying
+
+`oracle-retry-launch.sh` asks Oracle for the VM about once a minute until it
+gets one, trying 4 OCPU / 24 GB first and then 2 / 12. It also creates the
+network if needed and opens port 25565, so you can skip step 2. It runs on
+your Mac, and the setup below is a one-time job.
+
+**A. Give the OCI CLI access to your account**
+
+1. Install the tools. If `brew` isn't found, install Homebrew from
+   <https://brew.sh> first.
+   ```bash
+   brew install oci-cli jq
+   ```
+2. In the Oracle console, click the **profile icon** (top right) →
+   **My profile** (or **User settings**) → **API keys** (or **Tokens and keys**)
+   → **Add API key** → **Generate API key pair** → **Download private key**
+   → **Add**.
+3. A **Configuration file preview** appears. Click **Copy**.
+4. In Terminal:
+   ```bash
+   mkdir -p ~/.oci
+   ls ~/Downloads/*.pem                       # the API key you just downloaded
+   mv ~/Downloads/THE-FILE-NAME.pem ~/.oci/oci_api_key.pem
+   nano ~/.oci/config                         # paste the preview, Ctrl+O Enter, Ctrl+X
+   ```
+   In that file, change the `key_file=` line to
+   `key_file=~/.oci/oci_api_key.pem`. Then run:
+   ```bash
+   chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem
+   oci iam region list                         # prints a list of regions = it works
+   ```
+
+**B. Run it** (the SSH key is the one you downloaded when creating the VM;
+the private key or `.pub` both work):
+
+```bash
+cd ~/Downloads
+bash oracle-retry-launch.sh --ssh-key ~/Downloads/ssh-key-XXXX.key
+```
+
+Leave Terminal open and the Mac plugged in. The script keeps the Mac awake
+while it runs. When it succeeds, it shows a notification and prints the IP and
+the next commands. Stop it with Ctrl+C at any time. Running it again is safe:
+if a VM already exists, it tells you and exits.
+
+It only creates Always Free resources: one Ampere VM of at most 4 OCPU / 24 GB,
+the default ~47 GB boot volume, and a free VCN.
+
 ## 2. Open the port in Oracle's cloud firewall
 
 Instance page → **Primary VNIC → Subnet** → **Security Lists** → the default list →
