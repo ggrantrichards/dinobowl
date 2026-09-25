@@ -20,7 +20,7 @@ fi
 
 SHAPE="VM.Standard.A1.Flex"
 SSH_KEY=""
-SIZES="4:24 2:12"
+SIZES="2:12"
 INTERVAL=60
 NAME="minecraft"
 COMPARTMENT=""
@@ -31,7 +31,7 @@ usage() {
 Usage: bash oracle-retry-launch.sh --ssh-key PATH [options]
 
   --ssh-key PATH     The SSH key you downloaded from Oracle (private key or .pub)
-  --sizes "4:24 2:12"  OCPU:GB sizes to try, biggest first (max 4:24 on Always Free)
+  --sizes "2:12"     OCPU:GB sizes to try, biggest first (Always Free max is 2:12 since June 2026)
   --interval 60      Seconds to wait between rounds of attempts
   --bedrock          Also open UDP 19132 for Bedrock players
   --name minecraft   Name for the VM
@@ -61,8 +61,9 @@ command -v jq >/dev/null || die "jq isn't installed. On a Mac: brew install jq"
 [[ -f "$SSH_KEY" ]] || die "No such file: $SSH_KEY"
 
 for size in $SIZES; do
-  [[ "$size" =~ ^[0-9]+:[0-9]+$ ]] || die "Bad size '$size'; use OCPU:GB like 4:24"
-  (( ${size%%:*} <= 4 && ${size##*:} <= 24 )) || die "$size is over the Always Free limit of 4 OCPU / 24 GB"
+  [[ "$size" =~ ^[0-9]+:[0-9]+$ ]] || die "Bad size '$size'; use OCPU:GB like 2:12"
+  # Oracle halved the Always Free A1 allowance on 2026-06-15 (1,500 OCPU-h / 9,000 GB-h a month).
+  (( ${size%%:*} <= 2 && ${size##*:} <= 12 )) || die "$size is over the Always Free limit of 2 OCPU / 12 GB"
 done
 
 # Oracle wants the public key. Accept the private key too and derive it.

@@ -9,7 +9,8 @@ the Oracle console clicks (steps 1 and 2); the script handles the rest.
    Always Free resources are not charged.
 2. **Compute → Instances → Create instance**
    - **Image:** Canonical Ubuntu 24.04 (22.04 also works)
-   - **Shape:** Ampere `VM.Standard.A1.Flex`, **4 OCPU / 24 GB** (or 2 / 12)
+   - **Shape:** Ampere `VM.Standard.A1.Flex`, **2 OCPU / 12 GB**. That is the Always Free
+     maximum since Oracle halved it on 15 June 2026; anything bigger can be billed
    - **Networking:** keep "Assign a public IPv4 address" on
    - **SSH keys:** "Generate a key pair for me" → **Save private key**
 3. **"Out of capacity"?** Pick another availability domain or retry later.
@@ -19,7 +20,7 @@ the Oracle console clicks (steps 1 and 2); the script handles the rest.
 ### Stuck on "Out of capacity"? Let a script keep retrying
 
 `oracle-retry-launch.sh` asks Oracle for the VM about once a minute until it
-gets one, trying 4 OCPU / 24 GB first and then 2 / 12. It also creates the
+gets one, at 2 OCPU / 12 GB. It also creates the
 network if needed and opens port 25565, so you can skip step 2. It runs on
 your Mac, and the setup below is a one-time job.
 
@@ -62,7 +63,7 @@ while it runs. When it succeeds, it shows a notification and prints the IP and
 the next commands. Stop it with Ctrl+C at any time. Running it again is safe:
 if a VM already exists, it tells you and exits.
 
-It only creates Always Free resources: one Ampere VM of at most 4 OCPU / 24 GB,
+It only creates Always Free resources: one Ampere VM of at most 2 OCPU / 12 GB,
 the default ~47 GB boot volume, and a free VCN.
 
 ### Safety net: a quota policy that blocks anything beyond Always Free
@@ -75,7 +76,7 @@ upgrade to Pay As You Go, and harmless on Free Tier.
 name `always-free-only`, compartment = your root compartment, paste the seven
 lines from the file, **Create**.
 
-It covers compute (only Ampere A1 up to 4 OCPU / 24 GB) and disk space (200 GB
+It covers compute (only Ampere A1 up to 2 OCPU / 12 GB) and disk space (200 GB
 total). Other paid services such as databases and load balancers are not
 covered; don't create them, and keep a $1 budget alert as a second line of
 defence.
@@ -121,7 +122,7 @@ It takes a few minutes and prints the address friends connect to:
 | `--whitelist A,B` | Players allowed to join (Java names) |
 | `--bedrock` | Install Geyser + Floodgate and open UDP 19132 |
 | `--version 1.21.8` | Pin a Minecraft version (default: newest with a stable Paper build) |
-| `--memory 16G` | Java heap (default: about 2/3 of RAM, so 16G on a 24 GB VM) |
+| `--memory 16G` | Java heap (default: about 2/3 of RAM, so 8G on a 12 GB VM) |
 | `--motd "text"` | Server list message (first install only) |
 | `--dir PATH` | Install location (default `~/mc`) |
 

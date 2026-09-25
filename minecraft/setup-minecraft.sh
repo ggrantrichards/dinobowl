@@ -243,7 +243,7 @@ total_mb=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
 if [[ -z "$MEMORY" ]]; then
   heap_gb=$(( total_mb * 2 / 3 / 1024 ))
   if (( heap_gb < 1 )); then
-    warn "Only ${total_mb} MB RAM. Use the Ampere A1 shape (4 OCPU / 24 GB), not the 1 GB micro VM."
+    warn "Only ${total_mb} MB RAM. Use the Ampere A1 shape (2 OCPU / 12 GB), not the 1 GB micro VM."
     MEMORY="768M"
   else
     MEMORY="${heap_gb}G"
