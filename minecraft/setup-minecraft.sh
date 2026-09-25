@@ -141,8 +141,26 @@ pick_build_v2() {  # legacy API, used only if the v3 API is unreachable
   JAR_SHA=$(jq -r --argjson b "$BUILD" '.builds[] | select(.build==$b) | .downloads.application.sha256' <<<"$builds")
   JAR_URL="$PAPER_API_V2/v2/projects/paper/versions/$MC_VERSION/builds/$BUILD/downloads/$name"
 }
+# Worlds can only be upgraded, so never move an existing server to an older
+# Minecraft version (e.g. back to the newest *stable* Paper after an --version
+# upgrade to an experimental one).
+INSTALLED=""
+if [[ -f "$MC_DIR/.paper-version" ]]; then
+  INSTALLED=$(cat "$MC_DIR/.paper-version")
+elif [[ -f /etc/systemd/system/minecraft.service ]]; then
+  INSTALLED=$(sed -n 's/^Description=Minecraft server (Paper \(.*\))$/\1/p' /etc/systemd/system/minecraft.service)
+fi
+REQUESTED="$MC_VERSION"
 pick_build_v3 || { warn "Paper v3 API failed, trying the v2 API"; pick_build_v2; } \
   || die "Could not find a Paper build${MC_VERSION:+ for $MC_VERSION}. Check https://papermc.io/downloads/paper"
+if [[ -n "$INSTALLED" && "$MC_VERSION" != "$INSTALLED" ]] \
+   && [[ "$(printf '%s\n' "$INSTALLED" "$MC_VERSION" | sort -V | head -n 1)" == "$MC_VERSION" ]]; then
+  [[ -z "$REQUESTED" ]] || die "This world is on Minecraft $INSTALLED; moving it back to $MC_VERSION can break it.
+       To really do that, restore an older backup from $BACKUP_DIR first."
+  echo "Newest stable Paper is $MC_VERSION, but this server is already on $INSTALLED; staying on $INSTALLED."
+  MC_VERSION="$INSTALLED" JAR_URL="" JAVA_MIN="" BUILD=""
+  pick_build_v3 || pick_build_v2 || die "Could not find a Paper build for $MC_VERSION"
+fi
 [[ -n "$JAR_URL" && "$JAR_URL" != null ]] || die "Paper API returned no download URL"
 if [[ -z "$JAVA_MIN" ]]; then
   # 1.20.5 to 1.21.x need Java 21; the year-numbered releases (26.x+) need 25.
@@ -193,6 +211,7 @@ else
   echo "$JAR_SHA  server.jar.new" | sha256sum -c - || die "Checksum mismatch on the Paper download"
   mv server.jar.new server.jar
 fi
+echo "$MC_VERSION" > .paper-version
 
 if [[ $BEDROCK -eq 1 ]]; then
   log "Installing Geyser + Floodgate (Bedrock support)"
