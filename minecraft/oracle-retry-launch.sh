@@ -12,6 +12,12 @@
 # Stop it any time with Ctrl+C; running it again picks up where it left off.
 set -uo pipefail
 
+# Keep a Mac awake while this runs (it still sleeps if you close the lid on battery).
+# This has to happen before the options are parsed, while "$@" is still intact.
+if [[ "$(uname)" == Darwin && -z "${OCI_RETRY_CAFFEINATED:-}" ]] && command -v caffeinate >/dev/null; then
+  OCI_RETRY_CAFFEINATED=1 exec caffeinate -i bash "$0" "$@"
+fi
+
 SHAPE="VM.Standard.A1.Flex"
 SSH_KEY=""
 SIZES="4:24 2:12"
@@ -49,11 +55,6 @@ done
 log() { printf '[%s] %s\n' "$(date +%H:%M:%S)" "$*"; }
 die() { printf '\nERROR: %s\n' "$*" >&2; exit 1; }
 
-# Keep a Mac awake while this runs (it still sleeps if you close the lid on battery).
-if [[ "$(uname)" == Darwin && -z "${OCI_RETRY_CAFFEINATED:-}" ]] && command -v caffeinate >/dev/null; then
-  OCI_RETRY_CAFFEINATED=1 exec caffeinate -i bash "$0" "$@"
-fi
-
 command -v oci >/dev/null || die "The OCI CLI isn't installed. On a Mac: brew install oci-cli"
 command -v jq >/dev/null || die "jq isn't installed. On a Mac: brew install jq"
 [[ -n "$SSH_KEY" ]] || { usage; die "--ssh-key is required"; }
@@ -66,7 +67,7 @@ done
 
 # Oracle wants the public key. Accept the private key too and derive it.
 PUB_KEY="$SSH_KEY"
-if ! head -c 4 "$SSH_KEY" | grep -q '^ssh-\|^ecds'; then
+if ! head -c 4 "$SSH_KEY" | grep -qE '^(ssh-|ecds)'; then
   chmod 600 "$SSH_KEY"
   PUB_KEY=$(mktemp "${TMPDIR:-/tmp}/oci-retry-pub.XXXXXX")
   ssh-keygen -y -f "$SSH_KEY" > "$PUB_KEY" 2>/dev/null \
