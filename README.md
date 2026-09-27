@@ -190,6 +190,10 @@ full site with chat and picks.
   "NFL PrimeTime" never match.
 - Only `https:` embed URLs go into the player. On phones the player is sandboxed, as it is
   on UnderDog, to block the embeds' pop-up ads.
+- **NFL RedZone** (g23) is pinned at the top of the list. It is a channel, not a game, so it is
+  matched by name ("NFL RedZone") in streamed.pk's `american-football` and `all-today` lists.
+  A college "RedZone" never matches. When it isn't listed, the row reads "off air" (it runs
+  Sunday afternoons, 1–8 PM ET).
 - Opening Watch minimises Dino Bowl, and opening Dino Bowl closes Watch. Closing Watch
   unloads the stream. The dock hides while either panel is open.
 
