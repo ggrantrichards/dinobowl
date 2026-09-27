@@ -513,6 +513,9 @@
     .wg-when { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--chalk-dim) }
     .wg-in .wg-when { color: var(--danger); font-weight: 600 }
     .wg-post { opacity: .6 }
+    .wg-rz { border-left: 3px solid var(--danger); padding-left: 11px; background: var(--hover) }
+    .wg-rz .wg-when { color: var(--danger); font-weight: 600 }
+    .wg-sub { font-size: 12px; font-weight: 500; color: var(--chalk-dim) }
     .wg-teams { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-width: 0; font-size: 14px; font-weight: 600 }
     .wg-team { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap }
     .wg-team img { width: 24px; height: 24px; object-fit: contain }
@@ -860,13 +863,13 @@
     <iframe id="dinoFrame" title="Dino Bowl"></iframe>
   </div>
 
-  <script src="/gridiron/engine.js?v=g22"></script>
+  <script src="/gridiron/engine.js?v=g23"></script>
   <script>
-    const DATA_URL = '/gridiron/data.json?v=g22';
+    const DATA_URL = '/gridiron/data.json?v=g23';
     // Per-game lines are a second, bigger table. It is fetched the first time a
     // question actually asks about a game, so the ordinary visitor never pays
     // for it.
-    const GAMES_URL = '/gridiron/games.json?v=g22';
+    const GAMES_URL = '/gridiron/games.json?v=g23';
     const EXAMPLES = [
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
@@ -1628,12 +1631,13 @@
     // uses) is attached to a game only when its two sides ARE that game's two
     // teams ("Arizona Cardinals", "Cardinals", "ARI" — not "Louisville
     // Cardinals") and it starts within half a day of kickoff, so college games
-    // and shows never match.
+    // and shows never match. NFL RedZone is the one channel let in: it is not a
+    // game, so it gets its own row, pinned on top, matched by name.
     const STREAM_API = 'https://streamed.pk/api';
     const NFL_SCOREBOARD = 'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard';
     const watchPanel = $('watchPanel'), watchList = $('watchList'), watchPlayer = $('watchPlayer'), watchFrame = $('watchFrame'),
       watchSources = $('watchSources'), watchTitle = $('watchTitle'), watchFull = $('watchFull'), watchBack = $('watchBack'), watchMsg = $('watchMsg');
-    const W = { games: [], loadedAt: 0, error: null, timer: 0, game: null, src: -1, streams: [], feed: -1, token: 0, realFs: false };
+    const W = { games: [], redzone: { id: 'redzone', title: 'NFL RedZone', sources: [] }, loadedAt: 0, error: null, timer: 0, game: null, src: -1, streams: [], feed: -1, token: 0, realFs: false };
     // UnderDog's rule: on phones the player is sandboxed, which stops the embeds' pop-up ads
     if (matchMedia('(pointer: coarse)').matches || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent)) watchFrame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-presentation');
     function syncDock() { dinoDock.classList.toggle('hidden', dinoPanel.classList.contains('open') || !watchPanel.hidden); }
@@ -1666,30 +1670,48 @@
         return { id: ev.id, kick, state: ev.status.type.state, detail: ev.status.type.shortDetail || '', home: side(home), away: side(away), sources };
       });
     }
+    // NFL RedZone, from whichever list carries it today; never a college "red zone" show
+    function findRedZone(lists) {
+      const sources = [];
+      for (const list of lists) for (const m of Array.isArray(list) ? list : []) {
+        const t = String(m && m.title || '');
+        if (!/red\s*-?zone/i.test(t) || /\b(ncaa|ncaaf|college|cfb)\b/i.test(t)) continue;
+        for (const s of m.sources || []) if (s && s.source && s.id && !sources.some(x => x.source === s.source && x.id === s.id)) sources.push(s);
+      }
+      return { id: 'redzone', title: 'NFL RedZone', sources };
+    }
     async function loadSlate(force) {
       if (!force && W.games.length && Date.now() - W.loadedAt < 60e3) return renderSlate();
       if (!W.games.length) watchList.innerHTML = '<p class="watch-msg">Finding this week’s NFL games…</p>';
       try {
-        const [board, matches] = await Promise.all([
+        const list = (path) => fetch(STREAM_API + path, { cache: 'no-store' }).then(r => r.ok ? r.json() : []).catch(() => []);
+        const [board, matches, today] = await Promise.all([
           fetch(NFL_SCOREBOARD, { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('scoreboard ' + r.status); return r.json(); }),
-          fetch(STREAM_API + '/matches/american-football', { cache: 'no-store' }).then(r => r.ok ? r.json() : []).catch(() => [])
+          list('/matches/american-football'), list('/matches/all-today')
         ]);
         W.games = pairStreams(board.events || [], Array.isArray(matches) ? matches : []);
+        W.redzone = findRedZone([matches, today]);
         W.loadedAt = Date.now(); W.error = null;
       } catch (e) { W.error = e; }
       renderSlate();
     }
     const STATE_ORDER = { in: 0, pre: 1, post: 2 };
+    function redZoneRow() {
+      const rz = W.redzone, on = rz.sources.length > 0;
+      return `<div class="wg wg-rz"><span class="wg-when">${on ? '● ON AIR' : 'Sundays · 1–8 PM ET'}</span>`
+        + '<span class="wg-teams"><span class="wg-team">NFL RedZone</span><span class="wg-sub">every touchdown from every Sunday afternoon game</span></span>'
+        + (on ? '<button type="button" data-watch="redzone">▶ Watch</button>' : '<span class="wg-none">off air</span>') + '</div>';
+    }
     function renderSlate() {
       if (!W.games.length) {
-        watchList.innerHTML = W.error
+        watchList.innerHTML = (W.redzone.sources.length ? redZoneRow() : '') + (W.error
           ? '<p class="watch-msg">Couldn’t reach the NFL scoreboard just now. <button type="button" data-retry>Try again</button> or watch on <a href="https://underdog-nfl-media.web.app/" target="_blank" rel="noopener">UnderDog Live ↗</a></p>'
-          : '<p class="watch-msg">No NFL games on the board this week.</p>';
+          : '<p class="watch-msg">No NFL games on the board this week.</p>');
         return;
       }
       const games = W.games.slice().sort((a, b) => (STATE_ORDER[a.state] ?? 1) - (STATE_ORDER[b.state] ?? 1) || a.kick - b.kick);
       const team = (t, score) => `<span class="wg-team" title="${esc(t.name)}">${t.logo ? `<img src="${esc(t.logo)}" alt="" loading="lazy">` : ''}${esc(t.short)}${score ? ` <b>${esc(t.score)}</b>` : ''}</span>`;
-      watchList.innerHTML = games.map(g => {
+      watchList.innerHTML = redZoneRow() + games.map(g => {
         const when = g.state === 'in' ? '● LIVE · ' + g.detail : g.state === 'post' ? g.detail || 'Final'
           : new Date(g.kick).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
         const act = g.sources.length ? `<button type="button" data-watch="${esc(g.id)}">▶ Watch</button>` : `<span class="wg-none">${g.state === 'post' ? 'final' : 'no stream yet'}</span>`;
@@ -1724,10 +1746,10 @@
       const token = ++W.token;
       W.game = g; W.src = -1; W.streams = []; W.feed = -1;
       watchList.hidden = true; watchPlayer.hidden = false; watchBack.hidden = false; watchFull.hidden = false;
-      watchTitle.textContent = `${g.away.short} @ ${g.home.short}` + (g.state === 'in' ? ' · LIVE' : '');
+      watchTitle.textContent = g.title || `${g.away.short} @ ${g.home.short}` + (g.state === 'in' ? ' · LIVE' : '');
       screenMessage('Loading the stream…');
       for (let i = 0; i < g.sources.length; i++) { if (await trySource(i, token)) return; if (token !== W.token) return; }
-      if (token === W.token) screenMessage('Every stream for this game is offline right now. Try again closer to kickoff, or on UnderDog Live ↗');
+      if (token === W.token) screenMessage(g.id === 'redzone' ? 'RedZone is off air right now. It runs on Sunday afternoons, 1–8 PM ET.' : 'Every stream for this game is offline right now. Try again closer to kickoff, or on UnderDog Live ↗');
     }
     function showList() {
       W.token++; W.game = null; W.streams = []; exitFull();
@@ -1773,7 +1795,7 @@
     watchList.addEventListener('click', (e) => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.hasAttribute('data-retry')) return loadSlate(true);
-      const g = W.games.find(x => x.id === b.dataset.watch); if (g) playGame(g);
+      const g = b.dataset.watch === 'redzone' ? W.redzone : W.games.find(x => x.id === b.dataset.watch); if (g) playGame(g);
     });
     watchSources.addEventListener('click', async (e) => {
       const b = e.target.closest('button'); if (!b) return;
