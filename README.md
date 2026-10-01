@@ -139,7 +139,7 @@ firebase deploy --only hosting --project football-dino
 
 `data.json` and `games.json` are git-ignored, and a deploy replaces the whole site, so
 `firebase deploy` first runs `prepare_deploy.py` (the hosting `predeploy` hook in
-`firebase.json`). It rebuilds either file when it is missing or older than its parquet, and it
+`firebase.json`). It rebuilds either file when it is missing or older than its parquet or the export code, and it
 stops the deploy if it can't build them. A fresh checkout therefore deploys a complete site
 without first running the export steps. The one requirement is a one-time Python setup.
 Homebrew's Python refuses a system-wide `pip install` ("externally-managed-environment"), so
