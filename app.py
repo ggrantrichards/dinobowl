@@ -8,6 +8,7 @@ import pandas as pd
 from flask import Flask, jsonify, render_template, request, send_from_directory
 
 import query_engine as qe
+import fetch_data as fd
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                          "data", "players.parquet")
@@ -21,7 +22,7 @@ def get_df():
     if _DF is None:
         if not os.path.exists(DATA_FILE):
             raise FileNotFoundError("No data file yet. Run python fetch_data.py first.")
-        _DF = pd.read_parquet(DATA_FILE)
+        _DF = fd.ensure_derived(pd.read_parquet(DATA_FILE))
     return _DF
 
 def _clean(v):

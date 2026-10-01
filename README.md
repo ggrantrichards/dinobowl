@@ -139,7 +139,7 @@ firebase deploy --only hosting --project football-dino
 
 `data.json` and `games.json` are git-ignored, and a deploy replaces the whole site, so
 `firebase deploy` first runs `prepare_deploy.py` (the hosting `predeploy` hook in
-`firebase.json`). It rebuilds either file when it is missing or older than its parquet, and it
+`firebase.json`). It rebuilds either file when it is missing or older than its parquet or the export code, and it
 stops the deploy if it can't build them. A fresh checkout therefore deploys a complete site
 without first running the export steps. The one requirement is a one-time Python setup.
 Homebrew's Python refuses a system-wide `pip install` ("externally-managed-environment"), so
@@ -190,6 +190,20 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g24 (2026-10-01) — "combined TDs" counts TD passes
+
+"QBs with … 30+ combined tds …" matched nobody. "Combined tds", "combined touchdowns" and
+"total td" pointed at TDs *scored* (rushing + receiving + returns), and no QB scores 30.
+They now read like "total touchdowns": `tds_accounted`, every TD the player accounted for.
+That is passing + rushing + receiving + return TDs, so a QB's trick-play catch counts too.
+"Passing and rushing touchdowns" reads the same way. For a non-passer the number is unchanged,
+apart from a rare TD pass.
+
+The committed `data/players.parquet` also predated the `tds_accounted` column, so "total
+touchdowns" found no column in a build made from the repo. `fetch_data.ensure_derived()`
+rebuilds it from the parts on load. It is called by `export_gridiron.py`, `app.py` and the
+parity test. Parity: 98/98, including four new TD questions.
 
 ### Gridiron g22 (2026-09-22) — 📺 Watch, NFL games only
 

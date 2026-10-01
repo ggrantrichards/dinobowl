@@ -46,7 +46,7 @@ def clean(v):
     return v
 
 def main():
-    df = pd.read_parquet(SRC)
+    df = fd.ensure_derived(pd.read_parquet(SRC))
     df = df[[c for c in df.columns if not c.endswith("_rank")]]
     df = df.sort_values(["season", "player_display_name"], ascending=[False, True]).reset_index(drop=True)
     n = len(df)

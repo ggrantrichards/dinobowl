@@ -4,8 +4,8 @@ Gridiron — deploy guard (runs as firebase.json's hosting predeploy).
 static/gridiron/data.json and games.json are generated and git-ignored, and a
 Firebase deploy replaces the whole site: deploying from a checkout without them
 took the stat table off the live site ("/gridiron/data.json 404"). Before every
-deploy this rebuilds whichever is missing or older than its parquet, and stops
-the deploy if it cannot.
+deploy this rebuilds whichever is missing or older than its parquet or the
+export code, and stops the deploy if it cannot.
 
 The exports need pandas, pyarrow and rapidfuzz. Homebrew's Python refuses a
 system-wide pip install (PEP 668), so they live in a project virtualenv,
@@ -25,9 +25,14 @@ OUTPUTS = [
     ("static/gridiron/games.json", "data/games.parquet", "export_games.py"),
 ]
 
+# the code that shapes the exports: a change here (a new derived column, a new
+# alias) must rebuild them even when the parquet itself has not changed
+CODE = ["fetch_data.py", "query_engine.py", "export_gridiron.py", "export_games.py"]
+
 def stale(out, src):
-    out, src = os.path.join(HERE, out), os.path.join(HERE, src)
-    return not os.path.exists(out) or os.path.getmtime(out) < os.path.getmtime(src)
+    out = os.path.join(HERE, out)
+    inputs = [os.path.join(HERE, f) for f in [src] + CODE]
+    return not os.path.exists(out) or os.path.getmtime(out) < max(os.path.getmtime(f) for f in inputs if os.path.exists(f))
 
 VENV = os.path.join(HERE, ".venv")
 SETUP = ("One-time setup, in this folder:\n"

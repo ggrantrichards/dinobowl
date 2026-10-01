@@ -22,6 +22,11 @@ QUERIES = [
     "WRs with over 100 receptions and top 5 in receiving yards since 2015",
     "Qbs under 25 years old",
     "QBs with a QBR over 70 and EPA per play above 0.2",
+    # "combined" / "total" TDs count TD passes (tds_accounted); the committed parquet lacks the column
+    "QBs with 4300+ total yards, 30+ combined tds with fewer than 9 interceptions and 30 or fewer sacks",
+    "QBs with 40+ total touchdowns",
+    "QBs with 35+ passing and rushing touchdowns since 2015",
+    "RBs with 20+ combined touchdowns",
     "edge rushers with 50+ pressures and a pressure rate over 7% since 2020",
     "edge rushers top 5 in pressure rate since 2020",
     "CBs top 5 in interceptions plus passes defended with a completion percentage allowed under 55%",
@@ -145,7 +150,7 @@ SUMS = None
 GDF = None
 
 def main():
-    df = pd.read_parquet(os.path.join(ROOT, "data", "players.parquet"))
+    df = fd.ensure_derived(pd.read_parquet(os.path.join(ROOT, "data", "players.parquet")))
     global GDF
     GDF = pd.read_parquet(os.path.join(ROOT, "data", "games.parquet"))
     global SUMS

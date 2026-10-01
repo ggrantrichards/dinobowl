@@ -698,6 +698,16 @@ def load_ngs():
         out = out.join(f, how="outer")
     return out.reset_index()
 
+def ensure_derived(df):
+    """Derived columns newer than a saved players.parquet, rebuilt from the
+    parts it does have. The committed table predates tds_accounted, so without
+    this every "total" / "combined" TDs question found no column (or no QB)."""
+    if "tds_accounted" not in df:
+        parts = [c for c in ("passing_tds", "rushing_tds", "receiving_tds", "special_teams_tds") if c in df]
+        if parts:
+            df["tds_accounted"] = df[parts].fillna(0).sum(axis=1).astype(int)
+    return df
+
 def add_ranks(df):
     out = []
     for season, grp in df.groupby("season"):

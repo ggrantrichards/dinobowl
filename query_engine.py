@@ -487,8 +487,13 @@ STAT_ALIASES = [
     ("total touchdowns", "tds_accounted"), ("total tds", "tds_accounted"),
     ("touchdowns accounted for", "tds_accounted"), ("tds accounted for", "tds_accounted"),
     ("total scores", "tds_accounted"),
-    ("total td", "total_tds"), ("combined touchdowns", "total_tds"),
-    ("combined tds", "total_tds"), ("interception rate", "int_rate"),
+    # "combined" / "total" touchdowns count TD passes too: a QB's 30 "combined TDs" are
+    # passing + rushing. For a non-passer this is the same number as TDs scored.
+    ("total td", "tds_accounted"), ("combined touchdowns", "tds_accounted"),
+    ("combined tds", "tds_accounted"), ("combined td", "tds_accounted"),
+    ("passing and rushing touchdowns", "tds_accounted"), ("passing and rushing tds", "tds_accounted"),
+    ("passing plus rushing touchdowns", "tds_accounted"), ("passing plus rushing tds", "tds_accounted"),
+    ("interception rate", "int_rate"),
     ("interception percentage", "int_rate"), ("interception percent", "int_rate"),
     ("int rate", "int_rate"), ("int percentage", "int_rate"),
     ("int percent", "int_rate"), ("interceptions", "interceptions"),
