@@ -120,7 +120,9 @@ next measurable steps (split data file, team words, compare view, print), are in
 ## Gridiron 2.1 — hosted, catch-all stats
 
 Gridiron now runs entirely in the browser, on the same Firebase host as the game:
-https://football-dino.web.app/ (the game stays at /game/). No server, no Python at
+https://gridiron-den.web.app/ (the game stays at /game/). The old address,
+football-dino.web.app, 301-redirects every path there (`firebase.json` serves it from
+`redirect/`). No server, no Python at
 runtime; the Flask app still serves the identical page locally at http://127.0.0.1:5000/.
 
 Pipeline (run in order after any data refresh):
@@ -190,6 +192,21 @@ tackles for loss, the QB's sacks taken).
   carries mute / minimise / full screen), so nothing sits over the charts while you scroll.
 
 ## Dino Bowl
+
+### Gridiron g25 (2026-10-01) — the site is Gridiron Den
+
+The site now lives at **https://gridiron-den.web.app/**, and the page title and header read
+"Gridiron Den". `firebase.json` deploys two Hosting sites in the `football-dino` project:
+`gridiron-den`, which serves `static/` and runs the deploy guard, and `football-dino`,
+which 301-redirects every path (`/game/`, `?q=` links, …) to the same path on
+gridiron-den.web.app. The database and anonymous sign-in belong to the project, not the
+address, so Dino Bowl online play is unchanged.
+
+Create the new site once, before the first deploy:
+
+```bash
+firebase hosting:sites:create gridiron-den --project football-dino
+```
 
 ### Gridiron g24 (2026-10-01) — "combined TDs" counts TD passes
 
