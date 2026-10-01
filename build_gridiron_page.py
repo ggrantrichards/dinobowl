@@ -22,7 +22,7 @@ BODY = r"""
     <header>
       <button class="theme" id="themeToggle" type="button" title="Light → Dark → Auto">☾ Dark</button>
       <p class="eyebrow">NFL stat engine · nflverse · PFR advanced · Next Gen Stats · ESPN QBR</p>
-      <h1>Grid<span>iron</span></h1>
+      <h1>Grid<span>iron</span> Den</h1>
       <p class="sub">Ask for player-seasons in plain-ish English. Every number is a real season line, 2000 to now.</p>
       <div class="meta" id="meta"><span>loading the stat table…</span></div>
     </header>
@@ -1373,10 +1373,10 @@ def main():
     head_end = src.index("<body>")
     head = src[:head_end]
     # the page title says what it is now
-    head = re.sub(r"<title>.*?</title>", "<title>Gridiron — NFL stat engine</title>", head, count=1, flags=re.S)
+    head = re.sub(r"<title>.*?</title>", "<title>Gridiron Den — NFL stat engine</title>", head, count=1, flags=re.S)
     head = head.replace("</style>", EXTRA_CSS + "  </style>", 1)
     if 'rel="icon"' not in head:
-        head = head.replace("</title>", "</title>\n  <meta name=\"description\" content=\"Gridiron: ask for NFL player-seasons in plain English — box score, EPA, CPOE, QBR, pressures, blitzes, coverage, Next Gen Stats — 2000 to now.\">\n  <link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%230a1f14'/><text x='32' y='47' font-size='40' text-anchor='middle'>🏈</text></svg>\">", 1)
+        head = head.replace("</title>", "</title>\n  <meta name=\"description\" content=\"Gridiron Den: ask for NFL player-seasons in plain English — box score, EPA, CPOE, QBR, pressures, blitzes, coverage, Next Gen Stats — 2000 to now.\">\n  <link rel=\"icon\" href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='12' fill='%230a1f14'/><text x='32' y='47' font-size='40' text-anchor='middle'>🏈</text></svg>\">", 1)
     out = head + BODY.replace("__V__", VERSION).lstrip("\n")
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(out)
