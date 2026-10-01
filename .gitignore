@@ -13,3 +13,6 @@ static/gridiron/games.json
 
 # per-season download cache (rebuildable)
 data/cache/
+
+# project virtualenv for the export scripts (see prepare_deploy.py)
+.venv/
