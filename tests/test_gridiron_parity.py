@@ -27,6 +27,11 @@ QUERIES = [
     "QBs with 40+ total touchdowns",
     "QBs with 35+ passing and rushing touchdowns since 2015",
     "RBs with 20+ combined touchdowns",
+    # "won a playoff game" is a season fact even when "game with" follows it;
+    # "a playoff game with 400+ yards" (no "won") is still one game
+    "QBs who won a playoff game with 4000+ passing yards",
+    "QBs who won a playoff game with 30+ passing touchdowns since 2010",
+    "QBs with a playoff game with 400+ passing yards",
     "edge rushers with 50+ pressures and a pressure rate over 7% since 2020",
     "edge rushers top 5 in pressure rate since 2020",
     "CBs top 5 in interceptions plus passes defended with a completion percentage allowed under 55%",

@@ -193,6 +193,15 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
+### Gridiron g26 (2026-10-01) — "won a playoff game with …" is a season again
+
+"QBs who won a playoff game with 4000+ passing yards" (one of the page's own examples) failed
+with *I don't have a 'playoff wins' column*. The words "game with" made the parser read it as a
+single-game question. The per-game table has no `playoff_wins`, since a game line has no
+win/loss. Both engines now blank out the "won a playoff game" clause before the single-game test,
+so the question reads as seasons: 71 seasons. "QBs with a playoff game with 400+ passing yards"
+(no "won") is still one game: 15 games. Parity 101/101, and all 15 examples run in the browser.
+
 ### Gridiron g25 (2026-10-01) — the site is Gridiron Den
 
 The site now lives at **https://gridiron-den.web.app/**, and the page title and header read

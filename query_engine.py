@@ -956,12 +956,17 @@ def parse(query):
         conds.append({"kind": "threshold", "col": "super_bowl_wins", "op": ">=", "value": 1})
         notes.append("won the Super Bowl that season")
         spans.append(m.span())
+    # the game-scope test below must not see the "game" in "won a playoff game":
+    # that clause is a season fact (playoff_wins), and the per-game table has no
+    # win/loss column, so "won a playoff game with 4000+ passing yards" is a season
+    scope_q = q
     m = re.search(r"\b(?:won|win|winning|wins)\b[^,]{0,25}?\b(?:playoff|postseason)\s+(?:game|games|win|wins|matchup)\b|\bwon in the (?:playoffs|postseason)\b|\b(?:playoff|postseason) (?:win|wins|victory|victories)\b", q)
     if m:
         if not re.search(r"\d\s*\+?\s*(?:or more\s+)?(?:playoff|postseason) (?:win|wins|victories)", q):
             conds.append({"kind": "threshold", "col": "playoff_wins", "op": ">=", "value": 1})
             notes.append("won a playoff game that season")
             spans.append(m.span())
+            scope_q = q[:m.start()] + " " * (m.end() - m.start()) + q[m.end():]
     elif re.search(r"playoff|postseason", q):
         conds.append({"kind": "playoffs"})
         notes.append("appeared in the playoffs that season")
@@ -1099,7 +1104,7 @@ def parse(query):
     # about one afternoon, and it is answered from the per-game table. Note this
     # does NOT match "per game", which is a season rate.
     if re.search(r"\ba game\b|\bgames with\b|\bgame with\b|\bgame where\b|\bin one game\b|\bsingle[- ]game\b|\bany game\b|\bone game\b"
-                 r"|\d[\d,]*\s*\+?\s*(?:yard|yd|point|td|touchdown|sack|tackle|reception|catch|carry)s?[\s-]*game", q):
+                 r"|\d[\d,]*\s*\+?\s*(?:yard|yd|point|td|touchdown|sack|tackle|reception|catch|carry)s?[\s-]*game", scope_q):
         conds.append({"kind": "scope", "value": "game"})
     # the escape hatch that keeps a multi-season question on season lines
     if re.search(r"\bin a (?:single )?season\b|\bsingle[- ]season\b|\bbest season\b|\bper season\b|\bseason with the\b", q):

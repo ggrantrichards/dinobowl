@@ -228,12 +228,15 @@
         notes.push("won the Super Bowl that season");
         spans.push([m.index, m.index + m[0].length]);
       }
+      // the game-scope test must not see the "game" in "won a playoff game": a season fact
+      let scopeQ = q;
       m = q.match(/\b(?:won|win|winning|wins)\b[^,]{0,25}?\b(?:playoff|postseason)\s+(?:game|games|win|wins|matchup)\b|\bwon in the (?:playoffs|postseason)\b|\b(?:playoff|postseason) (?:win|wins|victory|victories)\b/);
       if (m) {
         if (!/\d\s*\+?\s*(?:or more\s+)?(?:playoff|postseason) (?:win|wins|victories)/.test(q)) {
           conds.push({ kind: "threshold", col: "playoff_wins", op: ">=", value: 1 });
           notes.push("won a playoff game that season");
           spans.push([m.index, m.index + m[0].length]);
+          scopeQ = q.slice(0, m.index) + " ".repeat(m[0].length) + q.slice(m.index + m[0].length);
         }
       } else if (/playoff|postseason/.test(q)) { conds.push({ kind: "playoffs" }); notes.push("appeared in the playoffs that season"); }
 
@@ -377,7 +380,7 @@
       }
 
       // a game line, not a season line (this does NOT match "per game")
-      if (/\ba game\b|\bgames with\b|\bgame with\b|\bgame where\b|\bin one game\b|\bsingle[- ]game\b|\bany game\b|\bone game\b|\d[\d,]*\s*\+?\s*(?:yard|yd|point|td|touchdown|sack|tackle|reception|catch|carry)s?[\s-]*game/.test(q)) conds.push({ kind: "scope", value: "game" });
+      if (/\ba game\b|\bgames with\b|\bgame with\b|\bgame where\b|\bin one game\b|\bsingle[- ]game\b|\bany game\b|\bone game\b|\d[\d,]*\s*\+?\s*(?:yard|yd|point|td|touchdown|sack|tackle|reception|catch|carry)s?[\s-]*game/.test(scopeQ)) conds.push({ kind: "scope", value: "game" });
       // the escape hatch that keeps a multi-season question on season lines
       if (/\bin a (?:single )?season\b|\bsingle[- ]season\b|\bbest season\b|\bper season\b|\bseason with the\b/.test(q)) conds.push({ kind: "scope", value: "season" });
       if (!conds.length) throw new QueryError("I couldn't find anything to filter on. Try naming a position, a stat with 'top N', a threshold like 'over 4000 passing yards', or 'playoffs'.");
