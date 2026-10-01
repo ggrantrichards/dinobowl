@@ -12,7 +12,7 @@ system-wide pip install (PEP 668), so they live in a project virtualenv,
 .venv, and this script switches to it on its own; nothing needs activating:
 
     python3 -m venv .venv
-    .venv/bin/python -m pip install -r requirements.txt
+    .venv/bin/python -m pip install --only-binary=:all: -r requirements.txt
 
     python prepare_deploy.py
 """
@@ -32,7 +32,7 @@ def stale(out, src):
 VENV = os.path.join(HERE, ".venv")
 SETUP = ("One-time setup, in this folder:\n"
          "  python3 -m venv .venv\n"
-         "  .venv/bin/python -m pip install -r requirements.txt\n"
+         "  .venv/bin/python -m pip install --only-binary=:all: -r requirements.txt\n"
          "then deploy again.")
 
 def has_deps():

@@ -148,9 +148,11 @@ activating:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python -m pip install --only-binary=:all: -r requirements.txt
 ```
- Deploying without that guard once took the stat
+ `--only-binary=:all:` makes pip use ready-made packages only. It never compiles from source.
+`pyarrow` needs version 22 or later on Python 3.14, which the pin allows; before that, pip tried
+to compile pyarrow and failed on a Mac. Deploying without that guard once took the stat
 table off the live site ("/gridiron/data.json 404").
 
 Every stat is either a nflverse/PFR/NGS/ESPN field as published or a derived rate whose
