@@ -137,6 +137,14 @@ python tests/test_gridiron_parity.py   # the browser engine must match the Pytho
 firebase deploy --only hosting --project football-dino
 ```
 
+`data.json` and `games.json` are git-ignored, and a deploy replaces the whole site, so
+`firebase deploy` first runs `prepare_deploy.py` (the hosting `predeploy` hook in
+`firebase.json`). It rebuilds either file when it is missing or older than its parquet, and it
+stops the deploy if it can't build them. A fresh checkout therefore deploys a complete site
+without first running the export steps. The one requirement is
+`python3 -m pip install -r requirements.txt`. Deploying without that guard once took the stat
+table off the live site ("/gridiron/data.json 404").
+
 Every stat is either a nflverse/PFR/NGS/ESPN field as published or a derived rate whose
 formula is listed in `fetch_data.DERIVED` and on the page under "Every stat I know".
 ESPN's Pass Rush Win Rate / Run Stop Win Rate and per-lineman sacks allowed are not

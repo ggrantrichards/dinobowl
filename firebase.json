@@ -1,6 +1,9 @@
 {
   "hosting": {
     "public": "static",
+    "predeploy": [
+      "python3 \"$PROJECT_DIR/prepare_deploy.py\""
+    ],
     "ignore": [
       "firebase.json",
       "**/.*",
