@@ -141,8 +141,16 @@ firebase deploy --only hosting --project football-dino
 `firebase deploy` first runs `prepare_deploy.py` (the hosting `predeploy` hook in
 `firebase.json`). It rebuilds either file when it is missing or older than its parquet, and it
 stops the deploy if it can't build them. A fresh checkout therefore deploys a complete site
-without first running the export steps. The one requirement is
-`python3 -m pip install -r requirements.txt`. Deploying without that guard once took the stat
+without first running the export steps. The one requirement is a one-time Python setup.
+Homebrew's Python refuses a system-wide `pip install` ("externally-managed-environment"), so
+the packages go in a project virtualenv. The guard switches to it by itself, so nothing needs
+activating:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+```
+ Deploying without that guard once took the stat
 table off the live site ("/gridiron/data.json 404").
 
 Every stat is either a nflverse/PFR/NGS/ESPN field as published or a derived rate whose
