@@ -191,6 +191,20 @@ tackles for loss, the QB's sacks taken).
 
 ## Dino Bowl
 
+### Gridiron g24 (2026-10-01) — "combined TDs" counts TD passes
+
+"QBs with … 30+ combined tds …" matched nobody. "Combined tds", "combined touchdowns" and
+"total td" pointed at TDs *scored* (rushing + receiving + returns), and no QB scores 30.
+They now read like "total touchdowns": `tds_accounted`, every TD the player accounted for.
+That is passing + rushing + receiving + return TDs, so a QB's trick-play catch counts too.
+"Passing and rushing touchdowns" reads the same way. For a non-passer the number is unchanged,
+apart from a rare TD pass.
+
+The committed `data/players.parquet` also predated the `tds_accounted` column, so "total
+touchdowns" found no column in a build made from the repo. `fetch_data.ensure_derived()`
+rebuilds it from the parts on load. It is called by `export_gridiron.py`, `app.py` and the
+parity test. Parity: 98/98, including four new TD questions.
+
 ### Gridiron g22 (2026-09-22) — 📺 Watch, NFL games only
 
 A 📺 button now sits in the corner dock next to the 🦖 and links this site to
