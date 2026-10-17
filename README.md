@@ -1,4 +1,8 @@
-# Gridiron — local NFL stat query app
+# Gridiron + Dino Bowl
+
+Two football projects in one local app: **Gridiron** explores NFL player-season statistics, and **Dino Bowl** is a playable retro dinosaur football game. The repository is named `dinobowl`; the statistics interface is named Gridiron.
+
+## Gridiron — NFL stat explorer
 
 Ask for NFL player-seasons in plain-ish English and get a filtered stat table back.
 Runs entirely on your machine, uses free open data, and shows you exactly how it
