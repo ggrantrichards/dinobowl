@@ -36,6 +36,7 @@ jobs:
 
       - run: python fetch_data.py
       - run: python build_games.py
+      - run: python build_teams.py
 
       - uses: google-github-actions/auth@v2
         with:

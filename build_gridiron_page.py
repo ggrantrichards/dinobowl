@@ -45,7 +45,7 @@ BODY = r"""
     </div>
 
     <div class="read" id="read">
-      <h3>How I read that <span class="hint">click a number to change it · × drops the clause</span></h3>
+      <h3>How I read that <span class="hint" id="readhint">click a number to change it · × drops the clause</span></h3>
       <div class="conds" id="conds"></div>
       <div class="readnotes" id="readnotes"></div>
     </div>
@@ -53,6 +53,7 @@ BODY = r"""
     <div class="status" id="status"></div>
     <div class="progress" id="progress" hidden><div></div></div>
     <div class="empty" id="empty" hidden></div>
+    <div class="teamres" id="teamres" hidden></div>
 
     <div class="toolbar" id="toolbar" hidden>
       <span class="count-line" id="countline"></span>
@@ -134,13 +135,16 @@ BODY = r"""
   </div>
 
   <script src="/gridiron/engine.js?v=__V__"></script>
+  <script src="/gridiron/teams.js?v=__V__"></script>
   <script>
     const DATA_URL = '/gridiron/data.json?v=__V__';
     // Per-game lines are a second, bigger table. It is fetched the first time a
     // question actually asks about a game, so the ordinary visitor never pays
     // for it.
     const GAMES_URL = '/gridiron/games.json?v=__V__';
+    const TEAMS_URL = '/gridiron/teams.json?v=__V__';
     const EXAMPLES = [
+      "2026 teams top 6 in point differential with a top 10 passer rating QB and a 1000+ yard RB",
       "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
       "QBs with a QBR over 70 and EPA per play above 0.2",
       "edge rushers with 50+ pressures and a pressure rate over 7% since 2020",
@@ -192,7 +196,7 @@ BODY = r"""
     const FROZEN = ["season", "player_display_name", "position"];   // stay put when the grid scrolls sideways
     const CHUNK = 150;                                                 // rows rendered per scroll step
 
-    let T = null, META = null, loading = null, GT = null, gloading = null;
+    let T = null, META = null, loading = null, GT = null, gloading = null, TEAMS = null;
     const $ = (id) => document.getElementById(id);
     const q = $('q'), runBtn = $('run'), status = $('status');
     const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -226,6 +230,11 @@ BODY = r"""
         return GT;
       })();
       return gloading;
+    }
+    // the team table (team questions), small, fetched on the first one asked
+    async function loadTeams() {
+      if (!TEAMS) TEAMS = fetch(TEAMS_URL).then((r) => { if (!r.ok) throw new Error('teams.json ' + r.status); return r.json(); });
+      return TEAMS;
     }
     async function loadTable() {
       if (T) return T;
@@ -337,7 +346,8 @@ BODY = r"""
       return { frag: (frag || '').toLowerCase().replace(/^\s+/, ''), start: upto.length - (frag || '').length };
     }
     function showAc() {
-      if (!VOCAB.length) return hideAc();
+      // a pasted checklist is not being typed, and the list would sit on top of Run
+      if (!VOCAB.length || q.value.includes('\n')) return hideAc();
       let { frag, start } = fragmentAtCaret();
       // an article or a stray word in front should not hide the match: try shorter tails
       const words = frag.split(' ');
@@ -404,6 +414,17 @@ BODY = r"""
       try {
         const table = await loadTable();
         status.className = 'status'; status.textContent = '';
+        // "2026 teams with ..." is about team-seasons: teams.js on the team table
+        if (GridironTeams.isTeamQuery(text)) {
+          const teams = await loadTeams();
+          let tr;
+          try { tr = GridironTeams.run(text, teams, table); }
+          catch (e) { if (e.name === 'QueryError') { failed(e.message); return; } throw e; }
+          S.text = text; S.T = null; S.sort = null; S.conds = []; S.notes = []; S.ignored = [];
+          presentTeams(tr);
+          if (push !== false) pushUrl(false);
+          return;
+        }
         let r;
         try { r = table.engine.parse(text); }
         catch (e) {
@@ -432,11 +453,13 @@ BODY = r"""
     }
     function failed(msg) {
       $('read').classList.remove('show'); status.className = 'status error'; status.textContent = msg;
+      $('teamres').hidden = true;
       for (const id of ['results', 'scrollTop']) $(id).style.display = 'none';
       for (const id of ['toolbar', 'chart-container', 'empty']) $(id).hidden = true;
     }
     function present(d, keepSort) {
       S.d = d;
+      $('teamres').hidden = true;
       S.readNotes = d.readNotes || [];   // how the engine read the question: career vs season, rebuilt rates
       S.engineSort = d.sort ? { col: d.sort.col, dir: d.sort.asc ? 'asc' : 'desc' } : null;
       // keep the sort if that column is still on screen (#15)
@@ -449,10 +472,52 @@ BODY = r"""
       renderTable(d); renderScatter(d);
     }
 
+    // A team answer: every requirement with how many teams met it, then the
+    // team-seasons, best first, a ✓/✗ per requirement and the reasons a click away.
+    // A season shows all its teams; a span shows those within one of everything.
+    function presentTeams(r) {
+      for (const id of ['results', 'scrollTop']) $(id).style.display = 'none';
+      for (const id of ['toolbar', 'chart-container', 'empty', 'more']) $(id).hidden = true;
+      S.d = null;
+      $('readhint').textContent = 'every line must hold · “or” needs one side · click a team for the details';
+      $('conds').innerHTML = r.notes.map((n, k) => `<div class="cond">${esc(n)}<span class="tpass">${r.passCounts[k]} of ${r.scope}</span></div>`).join('')
+        + r.ignored.map((x) => `<div class="cond ignored">couldn't read “${esc(x)}” — not used</div>`).join('');
+      $('readnotes').innerHTML = r.readNotes.map((n) => `<div class="rnote">${esc(n)}</div>`).join('');
+      $('read').classList.add('show');
+      const shown = r.scope <= 40 ? r.rows : r.rows.filter((x) => x.met >= x.total - 1).slice(0, 300);
+      const labels = r.reqs.map((x) => x.label);
+      const f1 = (v) => v == null ? '—' : Number(v).toFixed(1);
+      const sg = (v, d) => v == null ? '—' : (v > 0 ? '+' : '') + Number(v).toFixed(d);
+      const head = '<tr><th class="txt">Team</th><th>Yr</th><th>W-L</th><th>Met</th>'
+        + labels.map((l, k) => `<th class="chk" title="${esc(r.reqs[k].text)}">${esc(l)}</th>`).join('')
+        + '<th title="point differential">Pt diff</th><th title="points per game">PPG</th><th title="points allowed per game">Opp PPG</th>'
+        + '<th title="yards per game">YPG</th><th title="yards allowed per game">Opp YPG</th><th title="turnover differential">TO ±</th>'
+        + '<th title="special teams EPA">ST EPA</th><th class="txt">QB</th></tr>';
+      const body = shown.map((x, k) => {
+        const cells = x.checks.map((c, j) => `<td class="${c ? 'ok' : 'no'}" title="${esc(x.whys[j])}">${c ? '✓' : '✗'}</td>`).join('');
+        const detail = x.checks.map((c, j) => `<li class="${c ? 'ok' : 'no'}"><b>${esc(labels[j])}</b> ${esc(r.reqs[j].text)}<div class="why">${esc(x.whys[j])}</div></li>`).join('');
+        const open = x.met === x.total && r.all <= 3;
+        return `<tr class="trow${x.met === x.total ? ' all' : ''}" data-k="${k}"><td class="txt"><span class="team">${esc(x.team)}</span></td><td>${x.season}</td><td>${esc(x.record)}</td><td><b>${x.met}/${x.total}</b></td>${cells}`
+          + `<td>${sg(x.point_diff, 0)}</td><td>${f1(x.ppg)}</td><td>${f1(x.papg)}</td><td>${f1(x.ypg)}</td><td>${f1(x.ypg_allowed)}</td><td>${sg(x.turnover_diff, 0)}</td><td>${sg(x.st_epa, 1)}</td><td class="txt">${esc(x.qb || '—')}</td></tr>`
+          + `<tr class="tdetail" data-k="${k}"${open ? '' : ' hidden'}><td colspan="${12 + labels.length}"><ul>${detail}</ul></td></tr>`;
+      }).join('');
+      const n = r.reqs.length;
+      const what = r.all ? `team-season${r.all === 1 ? '' : 's'} meet${r.all === 1 ? 's' : ''} all ${n}` : `team-seasons meet all ${n} — the closest are below`;
+      const more = shown.length < r.scope ? ` · showing the ${shown.length} within one requirement` : ` · of ${r.scope}`;
+      $('teamres').innerHTML = `<div class="tcount"><span class="count">${r.all}</span> ${what}${more}</div><div class="twrap"><table class="tteam"><thead>${head}</thead><tbody>${body}</tbody></table></div>`;
+      $('teamres').hidden = false;
+    }
+    $('teamres').addEventListener('click', (e) => {
+      const tr = e.target.closest('tr.trow'); if (!tr) return;
+      const d = $('teamres').querySelector(`tr.tdetail[data-k="${tr.dataset.k}"]`);
+      if (d) d.hidden = !d.hidden;
+    });
+
     // The reading is the filter UI: a number is editable in place, × drops
     // the clause, and every change re-runs against the same table.
     function renderRead() {
       const box = $('conds');
+      $('readhint').textContent = 'click a number to change it · × drops the clause';
       const shown = (c) => c.kind === 'threshold' ? (META.pct_stats.includes(c.col) ? (c.value * 100).toString().replace(/\.0+$/, '') : String(c.value)) : c.kind === 'rank' ? String(c.n) : null;
       box.innerHTML = S.notes.map((n, i) => {
         const c = S.conds[i]; let html = esc(n);
@@ -770,7 +835,7 @@ BODY = r"""
       ['Kicking', /^(fg_|pat_|punt)/],
     ];
     const BIO = ['height', 'weight', 'age', 'college', 'draft_year', 'draft_round', 'draft_pick', 'rookie_season', 'experience', 'off_snaps', 'def_snaps', 'st_snaps'];
-    const HOME = ['#search', '#read', '#status', '#empty', '#toolbar', '#chart-container', '#scrollTop', '#results', '#more', '#glossary'];
+    const HOME = ['#search', '#read', '#status', '#empty', '#teamres', '#toolbar', '#chart-container', '#scrollTop', '#results', '#more', '#glossary'];
     function showHome() { $('player').hidden = true; for (const sel of HOME) document.querySelector(sel).classList.remove('offpage'); }
     async function showPlayer(pid) {
       for (const sel of HOME) document.querySelector(sel).classList.add('offpage');
@@ -1294,6 +1359,30 @@ EXTRA_CSS = """
     .cond .x:hover { background: var(--danger); color: #fff }
     .cond .mean { font: inherit; color: var(--accent); background: transparent; border: 0; border-bottom: 1px dashed var(--accent); cursor: pointer; padding: 0 }
     .rnote { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--chalk-dim); margin-top: 8px; padding-left: 12px; border-left: 2px solid var(--line-strong) }
+
+    /* team questions */
+    .teamres { margin-top: 18px }
+    .tcount { font-family: 'IBM Plex Mono', monospace; font-size: 13px; color: var(--chalk-dim); margin-bottom: 10px }
+    .tcount .count { font-family: Oswald, sans-serif; font-size: 22px; font-weight: 600; color: var(--chalk); margin-right: 4px }
+    .twrap { overflow-x: auto; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--card) }
+    .tteam { border-collapse: collapse; width: 100%; font-size: 13px; font-variant-numeric: tabular-nums }
+    .tteam th { background: var(--thead); font: 600 11px 'IBM Plex Mono', monospace; letter-spacing: .04em; text-transform: uppercase; color: var(--chalk-dim); padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line-strong) }
+    .tteam td { padding: 7px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--line) }
+    .tteam .txt { text-align: left }
+    .tteam th.chk, .tteam td.ok, .tteam td.no { text-align: center; padding: 7px 6px }
+    .tteam td.ok { color: var(--accent); font-weight: 700 }
+    .tteam td.no { color: var(--danger) }
+    .tteam tr.trow { cursor: pointer }
+    .tteam tr.trow:hover { background: var(--hover) }
+    .tteam tr.all { background: var(--sorted) }
+    .tdetail td { white-space: normal; text-align: left; background: var(--field-2); padding: 10px 14px }
+    /* the table scrolls sideways; the reasons stay in view and wrap at the screen's width */
+    .tdetail ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; position: sticky; left: 14px; max-width: min(900px, calc(100vw - 72px)) }
+    .tdetail li { padding-left: 10px; border-left: 3px solid var(--line-strong); font-size: 13px }
+    .tdetail li.ok { border-left-color: var(--accent) }
+    .tdetail li.no { border-left-color: var(--danger) }
+    .tdetail .why { font-family: 'IBM Plex Mono', monospace; font-size: 11.5px; color: var(--chalk-dim); margin-top: 2px }
+    .cond .tpass { margin-left: 10px; font: 500 11px 'IBM Plex Mono', monospace; color: var(--chalk-dim); white-space: nowrap }
 
     /* empty state */
     .empty { margin-top: 16px; padding: 14px 16px; background: var(--card); border: 1px solid var(--line-strong); border-left: 3px solid var(--accent-2); border-radius: var(--radius); font-size: 14px; line-height: 1.6 }

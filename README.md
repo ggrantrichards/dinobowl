@@ -137,6 +137,8 @@ python fetch_data.py            # nflverse box score 2000+, PFR advanced 2018+, 
 python export_gridiron.py       # -> static/gridiron/data.json (table + vocabulary + rank rules; ~22 MB, gzipped on the wire)
 python build_gridiron_page.py g19  # -> static/index.html (bump the version token so browsers refetch)
 python build_games.py           # -> data/games.parquet  (nflverse weekly stats, one row per player-game)
+python build_teams.py           # -> data/teams.parquet  (team-seasons: record, points, yards, turnovers, special teams EPA)
+python export_teams.py          # -> static/gridiron/teams.json (team questions: "2026 teams top 6 in point differential with ...")
 python export_games.py         # -> static/gridiron/games.json (~43 MB, fetched only when a question asks about a game)
 python tests/test_gridiron_parity.py   # the browser engine must match the Python engine on every question:
                                        # same rows, same conditions, same ignored list, same order
