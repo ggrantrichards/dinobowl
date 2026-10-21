@@ -31,6 +31,13 @@ QUERIES = [
     "QBs with 2+ passing touchdowns per game in 2025",
     "QBs with the most passing tds per game since 2020",
     "QBs top 5 in passing touchdowns per game in 2024",
+    # a comma after a number is a clause break ("over 65, interception rate" is
+    # two clauses), and singular "completion" is the rate
+    "In 2026, QBs with over completion percentage over 65, interception rate under 1.5%, and 230+ passing yards/game",
+    "In 2026, QBs with over 65% completion, interception rate under 1.5%, and 230+ passing yards/game",
+    "QBs with over 65% completions in 2026",
+    "QBs with 300+ completions in 2024",
+    "QBs with over 1,500 passing yards, and 10+ passing tds in 2026",
     "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
     "WRs with over 100 receptions and top 5 in receiving yards since 2015",
     "Qbs under 25 years old",

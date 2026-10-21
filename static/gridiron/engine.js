@@ -144,7 +144,7 @@
     // a bare zero is an EXACT zero: "0 interceptions" wants the games with none
     const zeroOp = (col, value, op) => (value === 0 && op === ">=" && !/yards|epa|rating|pct|rate|share/.test(col)) ? "<=" : op;
     const SIGN = { ">": ">", "<": "<", ">=": "\u2265", "<=": "\u2264" };
-    const NUM_RE = /\d[\d,.]*/g;
+    const NUM_RE = /\d(?:[\d,.]*\d)?/g;   // ends on a digit, so "65," keeps its clause break
     const PCT_TAIL_RE = /^\s*(%|percent)/;
     const covered = (i, spans) => spans.some(([a, b]) => a <= i && i < b);
 
@@ -299,7 +299,7 @@
         }
       }
 
-      const threshPat = new RegExp("(" + COMPARE_RE + ")\\s+([\\d,\\.]+)\\s*(%|percent)?", "g");
+      const threshPat = new RegExp("(" + COMPARE_RE + ")\\s+([\\d,\\.]*\\d)\\s*(%|percent)?", "g");
       for (const mm of q.matchAll(threshPat)) {
         const opWord = mm[1], pctMark = !!mm[3];
         let value = parseFloat(mm[2].replace(/,/g, ""));
@@ -329,7 +329,7 @@
       // "12%+" and "12+%" mean the same thing, so the percent mark is allowed
       // on either side of the plus. It used to be accepted only after it, which
       // made "12%+ pressure rate" parse as nothing at all.
-      const postPat = /(?<num>[\d,.]+)\s*(?<pre>%|percent)?\s*(?<word>\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(?<post>%|percent|years old)?/g;
+      const postPat = /(?<num>[\d,.]*\d)\s*(?<pre>%|percent)?\s*(?<word>\+|or more|or fewer|or less|or higher|or lower|or younger|or older)\s*(?<post>%|percent|years old)?/g;
       for (const mm of q.matchAll(postPat)) {
         let value = parseFloat(mm.groups.num.replace(/,/g, ""));
         if (!Number.isFinite(value)) continue;

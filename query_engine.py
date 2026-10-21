@@ -508,6 +508,8 @@ STAT_ALIASES = [
     ("completion percent", "completion_pct"), ("completion pct", "completion_pct"),
     ("comp percentage", "completion_pct"), ("comp percent", "completion_pct"),
     ("comp pct", "completion_pct"), ("completions", "completions"),
+    # singular "completion" is the rate ("65% completion"); "completions" above wins the tie
+    ("completion %", "completion_pct"), ("completion rate", "completion_pct"), ("completion", "completion_pct"),
     ("rushing yards", "rushing_yards"), ("rush yards", "rushing_yards"),
     ("rushing touchdowns", "rushing_tds"), ("rushing tds", "rushing_tds"),
     ("rush tds", "rushing_tds"), ("carries", "carries"),
@@ -881,7 +883,9 @@ def _stat_for_number(q, start, end, fwd_len):
     if st: return st
     return _find_stat_last(q[max(0, start - 40):start])
 
-_NUM_RE = re.compile(r"\d[\d,\.]*")
+# a number ends on a digit: "over 65, interception rate" is 65 and a clause
+# break, and the comma must not ride along and hide the break
+_NUM_RE = re.compile(r"\d(?:[\d,\.]*\d)?")
 _PCT_TAIL_RE = re.compile(r"\s*(%|percent)")
 
 def _covered(i, spans):
@@ -1033,7 +1037,7 @@ def parse(query):
                 conds.append({"kind": "sort", "col": st[0], "asc": asc})
                 notes.append(f"sorted by {DISPLAY.get(st[0], st[0])} ({'lowest' if asc else 'highest'} first)")
 
-    thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]+)\s*(%|percent)?"
+    thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]*\d)\s*(%|percent)?"
     for mm in re.finditer(thresh_pat, q):
         op_word, num, pct_mark = mm.group(1), float(mm.group(2).replace(",", "")), bool(mm.group(3))
         st = None
@@ -1047,7 +1051,9 @@ def parse(query):
         elif op_word == "at least": op = ">="
         elif op_word in COMPARE_LT: op = "<"
         else: op = "<="
+        col = _pct_col(col, pct_mark)
         num = _pct_value(col, num, pct_mark)
+        op = _zero_op(col, num, op)
         conds.append({"kind": "threshold", "col": col, "op": op, "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
         notes.append(f"{DISPLAY.get(col, col)} {_SIGN[op]} {shown}")
@@ -1056,7 +1062,7 @@ def parse(query):
     # "12%+" and "12+%" mean the same thing, so the percent mark is allowed on
     # either side of the plus. It used to be accepted only after it, which made
     # "12%+ pressure rate" parse as nothing.
-    post_pat = (r"(?P<num>[\d,\.]+)\s*(?P<pre>%|percent)?\s*"
+    post_pat = (r"(?P<num>[\d,\.]*\d)\s*(?P<pre>%|percent)?\s*"
                 r"(?P<word>\+|or more|or fewer|or less|or higher|or lower|or younger|or older)"
                 r"\s*(?P<post>%|percent|years old)?")
     for mm in re.finditer(post_pat, q):
