@@ -374,6 +374,8 @@ STAT_ALIASES = [
     ("passer rating allowed", "cov_rating"), ("rating allowed", "cov_rating"),
     ("passer rating", "passer_rating"), ("qb rating", "passer_rating"), ("quarterback rating", "passer_rating"),
     # ---- per-attempt / per-game rates
+    ("passing touchdowns per game", "pass_tds_pg"), ("passing tds per game", "pass_tds_pg"), ("pass tds per game", "pass_tds_pg"),
+    ("passing td per game", "pass_tds_pg"), ("td passes per game", "pass_tds_pg"), ("passing tds/game", "pass_tds_pg"),
     ("passing yards per game", "pass_ypg"), ("pass yards per game", "pass_ypg"), ("passing yards/game", "pass_ypg"),
     ("rushing yards per game", "rush_ypg"), ("rush yards per game", "rush_ypg"),
     ("receiving yards per game", "rec_ypg"), ("rec yards per game", "rec_ypg"),
@@ -613,7 +615,7 @@ DISPLAY = {
     "contract_apy": "contract $M/yr", "contract_value": "contract total $M", "contract_guaranteed": "guaranteed $M",
     "contract_cap_pct": "% of cap", "contract_years": "contract years", "contract_signed": "signed",
     "passer_rating": "passer rating", "td_pct": "TD %", "ypa": "yards/attempt", "ypc": "yards/carry", "ypr": "yards/reception",
-    "catch_pct": "catch %", "pass_ypg": "passing yards/game", "rush_ypg": "rushing yards/game", "rec_ypg": "receiving yards/game",
+    "catch_pct": "catch %", "pass_ypg": "passing yards/game", "pass_tds_pg": "passing TDs/game", "rush_ypg": "rushing yards/game", "rec_ypg": "receiving yards/game",
     "total_ypg": "yards/game", "total_yards": "total yards", "touches": "touches",
     "pacr": "PACR", "racr": "RACR", "target_share": "target share", "air_yards_share": "air-yards share", "wopr": "WOPR",
     # sacks, ball security
@@ -687,7 +689,7 @@ PP_STATS = {"cpoe", "cpoe_ngs"}
 # column that is empty for every matched row is dropped afterwards.
 ALWAYS_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games", "made_playoffs", "age"]
 POS_DEFAULTS = {
-    "QB": ["pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "interceptions", "int_rate",
+    "QB": ["pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "pass_tds_pg", "interceptions", "int_rate",
            "passer_rating", "qbr", "epa_per_play", "cpoe", "ypa", "sacks_taken", "sack_pct", "turnover_pct", "rushing_yards", "rushing_tds", "total_yards", "contract_apy"],
     "RB": ["carries", "rushing_yards", "ypc", "rushing_tds", "receptions", "receiving_yards", "receiving_tds", "total_yards",
            "total_ypg", "fumbles_lost", "epa_per_play", "ryoe_per_att", "fantasy_ppr", "contract_apy"],

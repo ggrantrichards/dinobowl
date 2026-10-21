@@ -27,6 +27,10 @@ QUERIES = [
     "QBs with intended air yards over 9 since 2020",
     "QBs with completed air yards over 7 and an air yards differential above -2 since 2020",
     "QBs with 2000+ yards after catch in 2024",
+    # "per game" is its own column, not dropped: 2+ TD passes a game, not 2+ in the season
+    "QBs with 2+ passing touchdowns per game in 2025",
+    "QBs with the most passing tds per game since 2020",
+    "QBs top 5 in passing touchdowns per game in 2024",
     "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
     "WRs with over 100 receptions and top 5 in receiving yards since 2015",
     "Qbs under 25 years old",

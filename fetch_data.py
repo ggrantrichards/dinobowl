@@ -178,6 +178,7 @@ RATE_RANKS = [
     ("bad_throw_pct", True, "pass_attempts", 14, True),
     ("on_target_pct", False, "pass_attempts", 14, True),
     ("pass_ypg", False, "pass_attempts", 14, True),
+    ("pass_tds_pg", False, "pass_attempts", 14, True),
     ("turnover_pct", True, "touches", 6.25, True),
     ("ypc", False, "carries", 6.25, True),
     ("rush_ypg", False, "carries", 6.25, True),
@@ -239,6 +240,7 @@ DERIVED = {
     "sack_pct": "sacks_taken / (pass_attempts + sacks_taken)",
     "passer_rating": "NFL passer rating (cmp%, yds/att, td%, int% components, each capped 0-2.375)",
     "pass_ypg": "passing_yards / games",
+    "pass_tds_pg": "passing_tds / games",
     "ypc": "rushing_yards / carries",
     "rush_ypg": "rushing_yards / games",
     "ypr": "receiving_yards / receptions",
@@ -388,7 +390,9 @@ def load_season(year, rebuild=False):
     att = df["pass_attempts"].fillna(0) if "pass_attempts" in df else pd.Series(0, index=df.index)
     if "interceptions" in df: df["int_rate"] = _rate(df["interceptions"], att)
     if "completions" in df: df["completion_pct"] = _rate(df["completions"], att)
-    if "passing_tds" in df: df["td_pct"] = _rate(df["passing_tds"], att)
+    if "passing_tds" in df:
+        df["td_pct"] = _rate(df["passing_tds"], att)
+        df["pass_tds_pg"] = (df["passing_tds"].fillna(0) / g.where(g > 0)).where(att > 0).round(2)
     if "passing_yards" in df:
         df["ypa"] = (df["passing_yards"].fillna(0) / att.where(att > 0)).round(2)
         df["pass_ypg"] = (df["passing_yards"].fillna(0) / g.where(g > 0)).where(att > 0).round(1)
@@ -715,6 +719,12 @@ def ensure_derived(df):
         parts = [c for c in ("passing_tds", "rushing_tds", "receiving_tds", "special_teams_tds") if c in df]
         if parts:
             df["tds_accounted"] = df[parts].fillna(0).sum(axis=1).astype(int)
+    # added after many seasons were cached; load_season derives it for new
+    # downloads, so a table mixing old and new seasons has it only in part
+    if "passing_tds" in df:
+        g, att = df["games"].fillna(0), df["pass_attempts"].fillna(0)
+        full = (df["passing_tds"].fillna(0) / g.where(g > 0)).where(att > 0).round(2)
+        df["pass_tds_pg"] = df["pass_tds_pg"].fillna(full) if "pass_tds_pg" in df else full
     return df
 
 def add_ranks(df):
@@ -866,7 +876,7 @@ def main():
     fcols = df.select_dtypes(include="float").columns
     df[fcols] = df[fcols].replace([np.inf, -np.inf], np.nan)
     df["is_edge"] = edge_flag(df)
-    df = add_ranks(df)
+    df = add_ranks(ensure_derived(df))
     df.to_parquet(OUT_FILE, index=False)
     seasons = sorted(df["season"].unique())
     print(f"\nDone. {len(df):,} player-seasons across {len(seasons)} seasons, {len(df.columns)} columns.")

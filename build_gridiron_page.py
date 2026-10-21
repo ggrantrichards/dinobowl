@@ -165,7 +165,7 @@ BODY = r"""
       passing_yards: "Pass Yds", passing_tds: "Pass TD", completions: "Cmp", pass_attempts: "Att", completion_pct: "Cmp%", interceptions: "INT",
       int_rate: "INT%", td_pct: "TD%", ypa: "Y/A", passer_rating: "Rate", qbr: "QBR", epa_per_play: "EPA/play", pass_epa_per_play: "Pass EPA/play",
       rush_epa_per_carry: "Rush EPA/car", rec_epa_per_target: "Rec EPA/tgt", cpoe: "CPOE", cpoe_ngs: "CPOE (NGS)", sacks_taken: "Sacked", sack_pct: "Sk%",
-      sack_yards_lost: "Sk Yds", turnover_pct: "TO%", turnovers: "TO", fumbles: "Fum", fumbles_lost: "FL", pass_ypg: "Pass Y/G",
+      sack_yards_lost: "Sk Yds", turnover_pct: "TO%", turnovers: "TO", fumbles: "Fum", fumbles_lost: "FL", pass_ypg: "Pass Y/G", pass_tds_pg: "Pass TD/G",
       rushing_yards: "Rush Yds", rushing_tds: "Rush TD", carries: "Car", ypc: "Y/C", rush_ypg: "Rush Y/G", ryoe: "RYOE", ryoe_per_att: "RYOE/att",
       receptions: "Rec", targets: "Tgt", receiving_yards: "Rec Yds", receiving_tds: "Rec TD", catch_pct: "Catch%", ypr: "Y/R", rec_ypg: "Rec Y/G",
       rec_yac: "YAC", drops: "Drops", drop_pct: "Drop%", target_share: "Tgt%", separation: "Sep", cushion: "Cush", adot: "aDOT",
