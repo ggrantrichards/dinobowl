@@ -18,6 +18,15 @@ import query_engine as qe
 import fetch_data as fd
 
 QUERIES = [
+    # the in-progress season must be the whole season so far, not the weeks first cached
+    "QBs in 2026 with 65% completion or higher",
+    # bare "air yards", aDOT, intended air yards and YAC read as a passer's own on a QB
+    "QBs with the most air yards in 2025",
+    "WRs with 1500+ air yards since 2020",
+    "QBs with an aDOT over 9 since 2020",
+    "QBs with intended air yards over 9 since 2020",
+    "QBs with completed air yards over 7 and an air yards differential above -2 since 2020",
+    "QBs with 2000+ yards after catch in 2024",
     "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
     "WRs with over 100 receptions and top 5 in receiving yards since 2015",
     "Qbs under 25 years old",

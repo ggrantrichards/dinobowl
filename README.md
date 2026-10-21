@@ -57,9 +57,13 @@ python fetch_data.py
 python app.py
 ```
 
-To refresh mid-season with the latest data, run `python fetch_data.py` again
-(it only re-downloads the current season plus anything missing). Use
-`python fetch_data.py --rebuild` to force a full re-download.
+To refresh mid-season with the latest data, run `python fetch_data.py` again.
+A season's cache is reused only once it was written after that season's Super
+Bowl, so the current season (and any season cached before it ended) is always
+downloaded again. Use `python fetch_data.py --rebuild` to force a full
+re-download. The live site refreshes itself every morning through
+`.github/workflows/refresh-stats.yml`, which needs the `FIREBASE_SERVICE_ACCOUNT`
+repository secret described at the top of that file.
 
 ---
 

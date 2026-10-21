@@ -455,6 +455,9 @@ STAT_ALIASES = [
     ("rush percentage over expected", "rush_pct_oe"), ("stacked box rate", "stacked_box_pct"), ("eight defenders in the box", "stacked_box_pct"),
     ("rushing efficiency", "rush_efficiency"), ("time to line of scrimmage", "time_to_los"), ("time to los", "time_to_los"),
     ("passing air yards", "pass_air_yards"), ("receiving air yards", "rec_air_yards"), ("air yards share", "air_yards_share"),
+    ("completed air yards", "ngs_cay"), ("air yards differential", "air_yards_diff"), ("air-yards differential", "air_yards_diff"),
+    ("longest completed air", "max_completed_air"), ("air yards per attempt", "iay_per_att"), ("air yards per target", "adot"),
+    ("air-yards share", "air_yards_share"),
     ("intended air yards", "rec_iay"), ("target share", "target_share"), ("wopr", "wopr"), ("racr", "racr"), ("pacr", "pacr"),
     ("passing first downs", "pass_first_downs"), ("rushing first downs", "rush_first_downs"), ("receiving first downs", "rec_first_downs"),
     # ---- special teams, misc
@@ -525,7 +528,7 @@ STAT_ALIASES = [
     ("forced fumbles", "forced_fumbles"), ("fumbles forced", "forced_fumbles"),
     ("defensive touchdowns", "def_tds"), ("defensive tds", "def_tds"),
     # ---- generic words, resolved by position in _find_stat (POS_SWAP)
-    ("touchdowns", "any_tds"), ("tds", "any_tds"), ("yards", "any_yards"),
+    ("touchdowns", "any_tds"), ("tds", "any_tds"), ("air yards", "any_air_yards"), ("yards", "any_yards"),
 ]
 
 # word/phrase -> (list of raw position codes in the data, friendly label)
@@ -747,6 +750,12 @@ POS_SWAP = {
     # a back's "yards per attempt" / "attempts" are carries, not throws
     "ypa": {"RB": "ypc", "FB": "ypc"},
     "pass_attempts": {"RB": "carries", "FB": "carries"},
+    # bare "air yards": thrown for a passer, caught-at depth for everyone else
+    "any_air_yards": {"QB": "pass_air_yards", "RB": "rec_air_yards", "FB": "rec_air_yards", "WR": "rec_air_yards", "TE": "rec_air_yards", "*": "pass_air_yards"},
+    # a passer's aDOT, intended air yards and YAC are the ones on his throws
+    "adot": {"QB": "ngs_iay"},
+    "rec_iay": {"QB": "ngs_iay"},
+    "rec_yac": {"QB": "pass_yac"},
 }
 _POS_GROUP = None   # set by parse() for the one question being read
 

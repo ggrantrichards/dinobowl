@@ -337,6 +337,15 @@ def current_year():
     today = dt.date.today()
     return today.year if today.month >= 9 else today.year - 1
 
+def cached(path, year, rebuild=False):
+    """True when a season's cache file can stand in for a download: it was written
+    after that season's Super Bowl. A file written mid-season is a snapshot of the
+    weeks played so far (2026 was cached after its opener and stayed one game long),
+    so it is fetched again until the season is over."""
+    if rebuild or not os.path.exists(path):
+        return False
+    return dt.date.fromtimestamp(os.path.getmtime(path)) >= dt.date(year + 1, 3, 1)
+
 def _read(url):
     return pd.read_parquet(url)
 
@@ -354,7 +363,7 @@ def passer_rating(cmp, att, yds, td, ints):
 
 def load_season(year, rebuild=False):
     cache = os.path.join(CACHE_DIR, f"season_{year}.parquet")
-    if os.path.exists(cache) and not rebuild:
+    if cached(cache, year, rebuild):
         return pd.read_parquet(cache)
     try:
         reg = _read(REG_URL.format(year=year))
@@ -441,7 +450,7 @@ def load_pbp(year, rebuild=False):
     """Per-player big-play and deep-ball counts for one season, from play-by-play."""
     cache = os.path.join(CACHE_DIR, f"pbp_{year}.parquet")
     jcache = os.path.join(CACHE_DIR, f"post_{year}.json")
-    if os.path.exists(cache) and os.path.exists(jcache) and not rebuild:
+    if cached(cache, year, rebuild) and cached(jcache, year, rebuild):
         return pd.read_parquet(cache)
     try:
         p = pd.read_parquet(PBP_URL.format(year=year), columns=PBP_COLS)
@@ -517,7 +526,7 @@ def load_post_games(year):
     """Every postseason game of a season: who won, whether it was the Super Bowl, and
     which skill players took part (passer attempts, rushers, receivers) for which team."""
     jcache = os.path.join(CACHE_DIR, f"postgames_{year}.json")
-    if os.path.exists(jcache):
+    if cached(jcache, year):
         return json.load(open(jcache))
     try:
         p = pd.read_parquet(PBP_URL.format(year=year), columns=POST_COLS)
@@ -612,7 +621,7 @@ def load_snaps(years, pfr_to_gsis, rebuild=False):
     for year in years:
         cache = os.path.join(CACHE_DIR, f"snaps_{year}.parquet")
         try:
-            if os.path.exists(cache) and not rebuild:
+            if cached(cache, year, rebuild):
                 s = pd.read_parquet(cache)
             else:
                 s = _read(SNAP_URL.format(year=year))

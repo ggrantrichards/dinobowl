@@ -61,6 +61,10 @@
       any_yards: { QB: "passing_yards", RB: "rushing_yards", FB: "rushing_yards", WR: "receiving_yards", TE: "receiving_yards", "*": "total_yards" },
       ypa: { RB: "ypc", FB: "ypc" },                 // a back's yards per attempt are carries
       pass_attempts: { RB: "carries", FB: "carries" },
+      any_air_yards: { QB: "pass_air_yards", RB: "rec_air_yards", FB: "rec_air_yards", WR: "rec_air_yards", TE: "rec_air_yards", "*": "pass_air_yards" },
+      adot: { QB: "ngs_iay" },                       // a passer's aDOT, IAY and YAC are on his throws
+      rec_iay: { QB: "ngs_iay" },
+      rec_yac: { QB: "pass_yac" },
     };
     let posGroup = null;   // set by parse() for the one question being read
     const posGroupOf = (codes) => !codes ? null : (codes.some((c) => DEF_CODES.has(c)) ? "DEF" : codes[0]);
