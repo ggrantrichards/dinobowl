@@ -374,6 +374,8 @@ STAT_ALIASES = [
     ("passer rating allowed", "cov_rating"), ("rating allowed", "cov_rating"),
     ("passer rating", "passer_rating"), ("qb rating", "passer_rating"), ("quarterback rating", "passer_rating"),
     # ---- per-attempt / per-game rates
+    ("passing touchdowns per game", "pass_tds_pg"), ("passing tds per game", "pass_tds_pg"), ("pass tds per game", "pass_tds_pg"),
+    ("passing td per game", "pass_tds_pg"), ("td passes per game", "pass_tds_pg"), ("passing tds/game", "pass_tds_pg"),
     ("passing yards per game", "pass_ypg"), ("pass yards per game", "pass_ypg"), ("passing yards/game", "pass_ypg"),
     ("rushing yards per game", "rush_ypg"), ("rush yards per game", "rush_ypg"),
     ("receiving yards per game", "rec_ypg"), ("rec yards per game", "rec_ypg"),
@@ -455,6 +457,9 @@ STAT_ALIASES = [
     ("rush percentage over expected", "rush_pct_oe"), ("stacked box rate", "stacked_box_pct"), ("eight defenders in the box", "stacked_box_pct"),
     ("rushing efficiency", "rush_efficiency"), ("time to line of scrimmage", "time_to_los"), ("time to los", "time_to_los"),
     ("passing air yards", "pass_air_yards"), ("receiving air yards", "rec_air_yards"), ("air yards share", "air_yards_share"),
+    ("completed air yards", "ngs_cay"), ("air yards differential", "air_yards_diff"), ("air-yards differential", "air_yards_diff"),
+    ("longest completed air", "max_completed_air"), ("air yards per attempt", "iay_per_att"), ("air yards per target", "adot"),
+    ("air-yards share", "air_yards_share"),
     ("intended air yards", "rec_iay"), ("target share", "target_share"), ("wopr", "wopr"), ("racr", "racr"), ("pacr", "pacr"),
     ("passing first downs", "pass_first_downs"), ("rushing first downs", "rush_first_downs"), ("receiving first downs", "rec_first_downs"),
     # ---- special teams, misc
@@ -503,6 +508,8 @@ STAT_ALIASES = [
     ("completion percent", "completion_pct"), ("completion pct", "completion_pct"),
     ("comp percentage", "completion_pct"), ("comp percent", "completion_pct"),
     ("comp pct", "completion_pct"), ("completions", "completions"),
+    # singular "completion" is the rate ("65% completion"); "completions" above wins the tie
+    ("completion %", "completion_pct"), ("completion rate", "completion_pct"), ("completion", "completion_pct"),
     ("rushing yards", "rushing_yards"), ("rush yards", "rushing_yards"),
     ("rushing touchdowns", "rushing_tds"), ("rushing tds", "rushing_tds"),
     ("rush tds", "rushing_tds"), ("carries", "carries"),
@@ -525,7 +532,7 @@ STAT_ALIASES = [
     ("forced fumbles", "forced_fumbles"), ("fumbles forced", "forced_fumbles"),
     ("defensive touchdowns", "def_tds"), ("defensive tds", "def_tds"),
     # ---- generic words, resolved by position in _find_stat (POS_SWAP)
-    ("touchdowns", "any_tds"), ("tds", "any_tds"), ("yards", "any_yards"),
+    ("touchdowns", "any_tds"), ("tds", "any_tds"), ("air yards", "any_air_yards"), ("yards", "any_yards"),
 ]
 
 # word/phrase -> (list of raw position codes in the data, friendly label)
@@ -610,7 +617,7 @@ DISPLAY = {
     "contract_apy": "contract $M/yr", "contract_value": "contract total $M", "contract_guaranteed": "guaranteed $M",
     "contract_cap_pct": "% of cap", "contract_years": "contract years", "contract_signed": "signed",
     "passer_rating": "passer rating", "td_pct": "TD %", "ypa": "yards/attempt", "ypc": "yards/carry", "ypr": "yards/reception",
-    "catch_pct": "catch %", "pass_ypg": "passing yards/game", "rush_ypg": "rushing yards/game", "rec_ypg": "receiving yards/game",
+    "catch_pct": "catch %", "pass_ypg": "passing yards/game", "pass_tds_pg": "passing TDs/game", "rush_ypg": "rushing yards/game", "rec_ypg": "receiving yards/game",
     "total_ypg": "yards/game", "total_yards": "total yards", "touches": "touches",
     "pacr": "PACR", "racr": "RACR", "target_share": "target share", "air_yards_share": "air-yards share", "wopr": "WOPR",
     # sacks, ball security
@@ -684,7 +691,7 @@ PP_STATS = {"cpoe", "cpoe_ngs"}
 # column that is empty for every matched row is dropped afterwards.
 ALWAYS_COLS = ["headshot_url", "player_id", "season", "player_display_name", "position", "recent_team", "games", "made_playoffs", "age"]
 POS_DEFAULTS = {
-    "QB": ["pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "interceptions", "int_rate",
+    "QB": ["pass_attempts", "completions", "completion_pct", "passing_yards", "passing_tds", "pass_tds_pg", "interceptions", "int_rate",
            "passer_rating", "qbr", "epa_per_play", "cpoe", "ypa", "sacks_taken", "sack_pct", "turnover_pct", "rushing_yards", "rushing_tds", "total_yards", "contract_apy"],
     "RB": ["carries", "rushing_yards", "ypc", "rushing_tds", "receptions", "receiving_yards", "receiving_tds", "total_yards",
            "total_ypg", "fumbles_lost", "epa_per_play", "ryoe_per_att", "fantasy_ppr", "contract_apy"],
@@ -747,6 +754,12 @@ POS_SWAP = {
     # a back's "yards per attempt" / "attempts" are carries, not throws
     "ypa": {"RB": "ypc", "FB": "ypc"},
     "pass_attempts": {"RB": "carries", "FB": "carries"},
+    # bare "air yards": thrown for a passer, caught-at depth for everyone else
+    "any_air_yards": {"QB": "pass_air_yards", "RB": "rec_air_yards", "FB": "rec_air_yards", "WR": "rec_air_yards", "TE": "rec_air_yards", "*": "pass_air_yards"},
+    # a passer's aDOT, intended air yards and YAC are the ones on his throws
+    "adot": {"QB": "ngs_iay"},
+    "rec_iay": {"QB": "ngs_iay"},
+    "rec_yac": {"QB": "pass_yac"},
 }
 _POS_GROUP = None   # set by parse() for the one question being read
 
@@ -870,7 +883,9 @@ def _stat_for_number(q, start, end, fwd_len):
     if st: return st
     return _find_stat_last(q[max(0, start - 40):start])
 
-_NUM_RE = re.compile(r"\d[\d,\.]*")
+# a number ends on a digit: "over 65, interception rate" is 65 and a clause
+# break, and the comma must not ride along and hide the break
+_NUM_RE = re.compile(r"\d(?:[\d,\.]*\d)?")
 _PCT_TAIL_RE = re.compile(r"\s*(%|percent)")
 
 def _covered(i, spans):
@@ -1022,7 +1037,7 @@ def parse(query):
                 conds.append({"kind": "sort", "col": st[0], "asc": asc})
                 notes.append(f"sorted by {DISPLAY.get(st[0], st[0])} ({'lowest' if asc else 'highest'} first)")
 
-    thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]+)\s*(%|percent)?"
+    thresh_pat = r"(" + _COMPARE_RE + r")\s+([\d,\.]*\d)\s*(%|percent)?"
     for mm in re.finditer(thresh_pat, q):
         op_word, num, pct_mark = mm.group(1), float(mm.group(2).replace(",", "")), bool(mm.group(3))
         st = None
@@ -1036,7 +1051,9 @@ def parse(query):
         elif op_word == "at least": op = ">="
         elif op_word in COMPARE_LT: op = "<"
         else: op = "<="
+        col = _pct_col(col, pct_mark)
         num = _pct_value(col, num, pct_mark)
+        op = _zero_op(col, num, op)
         conds.append({"kind": "threshold", "col": col, "op": op, "value": num})
         shown = f"{num*100:g}%" if col in PCT_STATS else f"{num:g}"
         notes.append(f"{DISPLAY.get(col, col)} {_SIGN[op]} {shown}")
@@ -1045,7 +1062,7 @@ def parse(query):
     # "12%+" and "12+%" mean the same thing, so the percent mark is allowed on
     # either side of the plus. It used to be accepted only after it, which made
     # "12%+ pressure rate" parse as nothing.
-    post_pat = (r"(?P<num>[\d,\.]+)\s*(?P<pre>%|percent)?\s*"
+    post_pat = (r"(?P<num>[\d,\.]*\d)\s*(?P<pre>%|percent)?\s*"
                 r"(?P<word>\+|or more|or fewer|or less|or higher|or lower|or younger|or older)"
                 r"\s*(?P<post>%|percent|years old)?")
     for mm in re.finditer(post_pat, q):

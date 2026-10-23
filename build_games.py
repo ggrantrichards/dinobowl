@@ -33,7 +33,7 @@ PRODUCTION = ["pass_attempts", "carries", "targets", "tackles_solo", "tackles_as
 
 def load_week(year, rebuild=False):
     cache = os.path.join(fd.CACHE_DIR, f"week_{year}.parquet")
-    if os.path.exists(cache) and not rebuild:
+    if fd.cached(cache, year, rebuild):
         return pd.read_parquet(cache)
     try:
         w = pd.read_parquet(WEEK_URL.format(year=year))

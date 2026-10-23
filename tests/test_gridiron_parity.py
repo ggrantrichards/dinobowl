@@ -18,6 +18,26 @@ import query_engine as qe
 import fetch_data as fd
 
 QUERIES = [
+    # the in-progress season must be the whole season so far, not the weeks first cached
+    "QBs in 2026 with 65% completion or higher",
+    # bare "air yards", aDOT, intended air yards and YAC read as a passer's own on a QB
+    "QBs with the most air yards in 2025",
+    "WRs with 1500+ air yards since 2020",
+    "QBs with an aDOT over 9 since 2020",
+    "QBs with intended air yards over 9 since 2020",
+    "QBs with completed air yards over 7 and an air yards differential above -2 since 2020",
+    "QBs with 2000+ yards after catch in 2024",
+    # "per game" is its own column, not dropped: 2+ TD passes a game, not 2+ in the season
+    "QBs with 2+ passing touchdowns per game in 2025",
+    "QBs with the most passing tds per game since 2020",
+    "QBs top 5 in passing touchdowns per game in 2024",
+    # a comma after a number is a clause break ("over 65, interception rate" is
+    # two clauses), and singular "completion" is the rate
+    "In 2026, QBs with over completion percentage over 65, interception rate under 1.5%, and 230+ passing yards/game",
+    "In 2026, QBs with over 65% completion, interception rate under 1.5%, and 230+ passing yards/game",
+    "QBs with over 65% completions in 2026",
+    "QBs with 300+ completions in 2024",
+    "QBs with over 1,500 passing yards, and 10+ passing tds in 2026",
     "QBs top 10 in passing yards and passing touchdowns with a top 5 lowest interception rate who had a playoff game",
     "WRs with over 100 receptions and top 5 in receiving yards since 2015",
     "Qbs under 25 years old",

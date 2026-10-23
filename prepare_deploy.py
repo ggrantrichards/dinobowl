@@ -1,7 +1,7 @@
 """
 Gridiron — deploy guard (runs as firebase.json's hosting predeploy).
 
-static/gridiron/data.json and games.json are generated and git-ignored, and a
+static/gridiron/data.json, games.json and teams.json are generated and git-ignored, and a
 Firebase deploy replaces the whole site: deploying from a checkout without them
 took the stat table off the live site ("/gridiron/data.json 404"). Before every
 deploy this rebuilds whichever is missing or older than its parquet or the
@@ -23,11 +23,12 @@ OUTPUTS = [
     # (generated file, its source, the script that writes it)
     ("static/gridiron/data.json", "data/players.parquet", "export_gridiron.py"),
     ("static/gridiron/games.json", "data/games.parquet", "export_games.py"),
+    ("static/gridiron/teams.json", "data/teams.parquet", "export_teams.py"),
 ]
 
 # the code that shapes the exports: a change here (a new derived column, a new
 # alias) must rebuild them even when the parquet itself has not changed
-CODE = ["fetch_data.py", "query_engine.py", "export_gridiron.py", "export_games.py"]
+CODE = ["fetch_data.py", "query_engine.py", "export_gridiron.py", "export_games.py", "build_teams.py", "export_teams.py"]
 
 def stale(out, src):
     out = os.path.join(HERE, out)
