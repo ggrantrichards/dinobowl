@@ -17,6 +17,10 @@ Sources, all from https://github.com/nflverse/nflverse-data/releases :
                                                  pressures, blitzes, hurries, QB
                                                  knockdowns, coverage, drops,
                                                  pocket time ... 2018-present
+  pfr_advstats/advstats_week_def_{year}.parquet  the same defensive numbers per
+                                                 game; summed for the season in
+                                                 progress, which the season file
+                                                 lags by weeks
   snap_counts/snap_counts_{year}.parquet         offense / defense / ST snaps,
                                                  2012-present (rate denominators)
 
@@ -146,6 +150,17 @@ ADV_COLS = {
     "rec": {"drop": "drops", "drop_percent": "drop_pct", "adot": "adot", "brk_tkl": "broken_tackles_rec",
             "yac_r": "rec_yac_per_rec"},
 }
+# The season-level PFR file is reloaded only a few times a year (2026's stopped
+# after week 3), while the per-game file follows the schedule. For the season in
+# progress, defensive totals are summed from the per-game file instead: weekly
+# column -> our column. Checked on 2025: the sums land within one of PFR's season
+# pressures for 98% of players.
+ADV_WEEK_DEF = {"def_times_blitzed": "blitzes", "def_times_hurried": "hurries", "def_times_hitqb": "qb_knockdowns",
+                "def_pressures": "pressures", "def_tackles_combined": "pfr_comb_tackles",
+                "def_missed_tackles": "missed_tackles", "def_targets": "cov_targets",
+                "def_completions_allowed": "cov_completions", "def_yards_allowed": "cov_yards",
+                "def_receiving_td_allowed": "cov_tds", "def_ints": "cov_ints"}
+ADV_WEEK_URL = BASE + "pfr_advstats/advstats_week_{kind}_{year}.parquet"
 ADV_PCT = {"missed_tackle_pct", "cov_cmp_pct", "pressured_pct", "drop_pct_suffered", "bad_throw_pct",
            "on_target_pct", "drop_pct"}
 
@@ -261,6 +276,7 @@ DERIVED = {
     "turnover_pct": "turnovers / touches",
     "tackles": "solo + with-assist + assists (press total tackles)",
     "tackles_per_game": "tackles / games",
+    "pressures": "PFR pressures (hurries + QB knockdowns + sacks), never fewer than the player's sacks rounded up: every sack is a pressure, and in season PFR trails the box score by about a week",
     "pressure_rate": "PFR pressures / defensive snaps (all defensive snaps, not pass-rush snaps only)",
     "blitz_pct": "PFR blitzes / defensive snaps",
     "qb_hit_rate": "qb_hits / defensive snaps",
@@ -584,6 +600,34 @@ def playoff_results(year):
     j = json.load(open(jcache))
     return j["wins"], j["super_bowl"]
 
+def load_adv_week_def(year, pfr_to_gsis, season_file_games):
+    """The season in progress's PFR defense totals, summed from the per-game file,
+    or None when that file is no further along than the season file. Without this
+    every 2026 pressure, blitz and coverage number stopped at week 3, and anyone
+    whose first sacks came later (Kyler Gordon) had no pressures at all."""
+    try:
+        w = _read(ADV_WEEK_URL.format(kind="def", year=year))
+    except Exception as e:
+        print(f"  ! PFR weekly def {year} unavailable ({e})")
+        return None
+    w = w[(w["game_type"] == "REG") & w["pfr_player_id"].notna()]
+    if not len(w) or w.groupby("pfr_player_id")["game_id"].nunique().max() <= season_file_games:
+        return None
+    w = w.assign(adot_x_tgt=w["def_adot"] * w["def_targets"].fillna(0))
+    s = w.groupby("pfr_player_id")[list(ADV_WEEK_DEF) + ["adot_x_tgt"]].sum(min_count=1).rename(columns=ADV_WEEK_DEF)
+    tgt, comb, mt = s["cov_targets"], s["pfr_comb_tackles"], s["missed_tackles"]
+    has_tgt = tgt.where(tgt > 0)
+    # the same formulas PFR's season file uses (missed tackle % checked exact on 2025)
+    s["missed_tackle_pct"] = (mt / (comb + mt).where(comb + mt > 0)).round(4)
+    s["cov_cmp_pct"] = (s["cov_completions"] / has_tgt).round(4)
+    s["cov_rating"] = passer_rating(s["cov_completions"], has_tgt, s["cov_yards"], s["cov_tds"], s["cov_ints"])
+    s["cov_adot"] = (s["adot_x_tgt"] / has_tgt).round(1)
+    s = s.drop(columns=["adot_x_tgt", "cov_ints"])
+    s["player_id"] = s.index.map(pfr_to_gsis)
+    s = s[s["player_id"].notna()].assign(season=year)
+    print(f"  PFR def {year}: {len(s):,} players summed from weeks 1-{int(w['week'].max())}")
+    return s.set_index(["player_id", "season"])
+
 def load_advstats(pfr_to_gsis):
     """PFR advanced stats, one row per (player, season), keyed back to gsis ids."""
     frames = []
@@ -611,7 +655,15 @@ def load_advstats(pfr_to_gsis):
                 # fractions (0-1). Detect per column rather than assume.
                 v = pd.to_numeric(part[c], errors="coerce")
                 part[c] = (v / 100 if v.max() > 1.5 else v).round(4)
-        frames.append(part.set_index(["player_id", "season"]))
+        part = part.set_index(["player_id", "season"])
+        if kind == "def":
+            year = current_year()
+            g = adv.loc[adv["season"] == year, "g"].max()
+            weekly = load_adv_week_def(year, pfr_to_gsis, int(g) if pd.notna(g) else 0)
+            if weekly is not None:
+                # per-game totals win; players the weekly file never saw keep their row
+                part = weekly.combine_first(part)[part.columns]
+        frames.append(part)
         print(f"  PFR {kind}: {len(part):,} player-seasons")
     if not frames:
         return None
@@ -800,6 +852,11 @@ def main():
     adv = load_advstats(pfr_to_gsis) if pfr_to_gsis else None
     if adv is not None:
         df = df.merge(adv, on=["player_id", "season"], how="left")
+        if "pressures" in df:
+            # every sack is a pressure, and in season PFR trails the box score by
+            # a week: Kyler Gordon's week-7 sack was in nflverse days before PFR
+            floor = np.ceil(df["sacks"].fillna(0)).where(df["season"] >= PFR_FROM)
+            df["pressures"] = np.fmax(df["pressures"], floor.where(floor > 0))
     print("Snap counts (2012+)...")
     snaps = load_snaps(range(max(SNAPS_FROM, START_YEAR), end + 1), pfr_to_gsis, rebuild=args.rebuild) if pfr_to_gsis else None
     if snaps is not None:
