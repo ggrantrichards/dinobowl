@@ -627,7 +627,7 @@ DISPLAY = {
     "fumble_recoveries": "fumble recoveries", "fumble_rec_own": "own fumbles recovered", "fumble_rec_tds": "fumble-return TDs",
     "int_tds": "interception-return TDs", "int_plus_pd": "INT + PD", "def_int_yards": "interception return yards",
     # pass rush / pressure / blitz
-    "pressures": "pressures", "pressure_rate": "pressure rate (pressures per defensive snap; ESPN PRWR is not public)",
+    "pressures": "pressures", "pressure_rate": "pressure rate",
     "hurries": "hurries", "qb_knockdowns": "QB knockdowns", "qb_hits": "QB hits", "qb_hit_rate": "QB hit rate",
     "blitzes": "blitzes", "blitz_pct": "blitz %", "sack_per_blitz": "sacks per blitz", "sack_yards": "sack yards",
     "times_blitzed": "times blitzed", "times_hurried": "times hurried", "times_hit": "times hit", "times_pressured": "times pressured",

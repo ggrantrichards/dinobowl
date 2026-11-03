@@ -535,6 +535,9 @@ BODY = r"""
       const range = S.conds.find(c => c.kind === 'season_range');
       const from = range && range.min != null ? range.min : META.seasons[0];
       const notes = (S.readNotes || []).map(esc);
+      // the win rates answer with stand-ins; say so only when the question asked for one
+      if (/pass[- ]rush win rate|\bprwr\b/i.test(S.text || '')) notes.push("ESPN's Pass Rush Win Rate isn't published as data, so this answers with pressure rate (pressures per defensive snap)");
+      if (/run[- ](?:stop|defense) win rate|\brswr\b/i.test(S.text || '')) notes.push("ESPN's Run Stop Win Rate isn't published as data, so this answers with tackles for loss");
       for (const c of S.conds) {
         if (!c.col) continue;
         const s = sourceOf(c.col);
