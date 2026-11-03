@@ -1,5 +1,5 @@
-# Keeps gridiron-den.web.app current: every morning, pull the latest nflverse
-# files, rebuild the season and game tables, and deploy the site.
+# Keeps gridiron-den.web.app current: twice a day, pull the latest nflverse
+# files, rebuild the season, game and team tables, and deploy the site.
 #
 # One-time setup: add a repository secret FIREBASE_SERVICE_ACCOUNT holding the
 # JSON key of a service account on football-dino with the "Firebase Hosting
@@ -8,7 +8,11 @@ name: Refresh stats
 
 on:
   schedule:
-    - cron: "0 11 * * *"   # 11:00 UTC, after nflverse's overnight update
+    # nflverse posts a game day's stats overnight but not at a fixed hour, so a
+    # morning and an afternoon run catch Thursday, Sunday and Monday games (and
+    # the odd Saturday, Christmas or international game) within a day
+    - cron: "0 11 * * *"   # 11:00 UTC
+    - cron: "0 19 * * *"   # 19:00 UTC
   workflow_dispatch:        # "Run workflow" button for an on-demand refresh
 
 concurrency: refresh-stats
@@ -18,13 +22,24 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
+      # stop in seconds, not after ten minutes of downloads, when the deploy key is missing
+      - name: Check the deploy key
+        env:
+          SA: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SA" ]; then
+            echo "::error::Add the FIREBASE_SERVICE_ACCOUNT repository secret (see the top of this file)."
+            exit 1
+          fi
+
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 
-      - run: python -m pip install --only-binary=:all: -r requirements.txt
+      # quoted: unquoted, YAML reads ":all: " as a key and rejects the whole file
+      - run: "python -m pip install --only-binary=:all: -r requirements.txt"
 
       # finished seasons never change, so keep their downloads between runs;
       # fetch_data.cached() re-downloads any season that was still in progress
@@ -42,5 +57,5 @@ jobs:
         with:
           credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
 
-      # the hosting predeploy (prepare_deploy.py) rebuilds data.json and games.json
+      # the hosting predeploy (prepare_deploy.py) rebuilds data.json, games.json and teams.json
       - run: npx --yes firebase-tools@15 deploy --only hosting:gridiron-den --project football-dino --non-interactive
