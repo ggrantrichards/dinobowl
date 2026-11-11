@@ -68,6 +68,15 @@
     };
     let posGroup = null;   // set by parse() for the one question being read
     const posGroupOf = (codes) => !codes ? null : (codes.some((c) => DEF_CODES.has(c)) ? "DEF" : codes[0]);
+    // with no position named, a stat only a defender has makes it a defender's
+    // question (mirrors query_engine.DEF_CONTEXT_COLS / _implied_group)
+    const DEF_CONTEXT_COLS = new Set(["cov_cmp_pct", "cov_rating", "cov_yards", "cov_tds", "def_interceptions", "passes_defended",
+      "int_plus_pd", "forced_fumbles", "def_tds", "int_tds", "fumble_rec_tds", "def_int_yards",
+      "tackles", "tackles_solo", "tackles_for_loss", "tfl_yards", "missed_tackle_pct",
+      "qb_hits", "qb_knockdowns", "hurries", "pressure_rate", "sack_per_blitz", "safeties"]);
+    const DEF_CONTEXT_RES = ALIASES.filter(([, col]) => DEF_CONTEXT_COLS.has(col))
+      .map(([phrase]) => new RegExp("(?<![\\w%])" + esc(phrase) + "(?![\\w%])"));
+    const impliedGroup = (q) => DEF_CONTEXT_RES.some((re) => re.test(q)) ? "DEF" : null;
     function findStat(text, start) {
       const r = findStatRaw(text, start);
       const swap = r && POS_SWAP[r[0]];
@@ -81,7 +90,8 @@
       let best = null;
       for (const [phrase, col] of ALIASES) {
         const idx = text.indexOf(phrase, start);
-        if (idx !== -1 && (best === null || idx < best[1])) best = [col, idx, idx + phrase.length];
+        // earliest phrase, and at the same spot the longest ("interceptions made" over "interceptions")
+        if (idx !== -1 && (best === null || idx < best[1] || (idx === best[1] && idx + phrase.length > best[2]))) best = [col, idx, idx + phrase.length];
       }
       if (best) return best;
       const words = search.split(/\s+/).filter(Boolean);
@@ -209,7 +219,7 @@
           break;
         }
       }
-      posGroup = posGroupOf(posCodes);
+      posGroup = posGroupOf(posCodes) || impliedGroup(q);
       q = rewriteLengths(q, posCodes, ignored);
       let m = q.match(/between (\d{4}) and (\d{4})/);
       if (m) {

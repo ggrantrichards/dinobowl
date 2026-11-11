@@ -55,6 +55,15 @@ QUERIES = [
     "edge rushers with 50+ pressures and a pressure rate over 7% since 2020",
     "edge rushers top 5 in pressure rate since 2020",
     "CBs top 5 in interceptions plus passes defended with a completion percentage allowed under 55%",
+    # no position named, but coverage stats make it a defender's question: the
+    # interceptions are the ones he made (Beanie Bishop Jr. 2024), not thrown
+    "at least 4 interceptions, completion % allowed under 60%, passer rating allowed under 60, at least 0.5 sacks",
+    "players with 100 tackles and 3 interceptions",
+    # ...while a passer's question keeps them thrown
+    "4000 passing yards and under 10 interceptions",
+    # at the same spot the longer phrase wins: "interceptions made", "fumbles forced"
+    "at least 4 interceptions made since 2020",
+    "players with 4+ fumbles forced",
     "RBs over 1500 rushing yards with a turnover percentage under 1%",
     "WRs taller than 6'3 with over 1000 receiving yards and a drop rate under 5% in 2024",
     "linebackers heavier than 250 pounds with over 100 tackles and 5+ sacks",
