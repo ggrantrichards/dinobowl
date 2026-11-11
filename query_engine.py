@@ -627,7 +627,7 @@ DISPLAY = {
     "fumble_recoveries": "fumble recoveries", "fumble_rec_own": "own fumbles recovered", "fumble_rec_tds": "fumble-return TDs",
     "int_tds": "interception-return TDs", "int_plus_pd": "INT + PD", "def_int_yards": "interception return yards",
     # pass rush / pressure / blitz
-    "pressures": "pressures", "pressure_rate": "pressure rate (pressures per defensive snap; ESPN PRWR is not public)",
+    "pressures": "pressures", "pressure_rate": "pressure rate",
     "hurries": "hurries", "qb_knockdowns": "QB knockdowns", "qb_hits": "QB hits", "qb_hit_rate": "QB hit rate",
     "blitzes": "blitzes", "blitz_pct": "blitz %", "sack_per_blitz": "sacks per blitz", "sack_yards": "sack yards",
     "times_blitzed": "times blitzed", "times_hurried": "times hurried", "times_hit": "times hit", "times_pressured": "times pressured",
@@ -763,10 +763,25 @@ POS_SWAP = {
 }
 _POS_GROUP = None   # set by parse() for the one question being read
 
+# With no position named, a stat only a defender has makes it a defender's
+# question: "4+ interceptions with a passer rating allowed under 60" asks for
+# the picks he MADE. Sacks, pressures, blitzes and contracts belong to both
+# sides of the ball ("interceptions under pressure" is a passer), so they don't.
+DEF_CONTEXT_COLS = {"cov_cmp_pct", "cov_rating", "cov_yards", "cov_tds", "def_interceptions", "passes_defended",
+                    "int_plus_pd", "forced_fumbles", "def_tds", "int_tds", "fumble_rec_tds", "def_int_yards",
+                    "tackles", "tackles_solo", "tackles_for_loss", "tfl_yards", "missed_tackle_pct",
+                    "qb_hits", "qb_knockdowns", "hurries", "pressure_rate", "sack_per_blitz", "safeties"}
+
 def _pos_group(codes):
     if not codes:
         return None
     return "DEF" if any(c in _DEF_CODES for c in codes) else codes[0]
+
+def _implied_group(q):
+    for phrase, col in STAT_ALIASES:
+        if col in DEF_CONTEXT_COLS and re.search(rf"(?<![\w%]){re.escape(phrase)}(?![\w%])", q):
+            return "DEF"
+    return None
 
 def _find_stat(text, start=0):
     r = _find_stat_raw(text, start)
@@ -783,10 +798,11 @@ def _find_stat_raw(text, start=0):
 
     best = None
 
-    # 1. Exact Match
+    # 1. Exact Match: the earliest phrase, and at the same spot the longest one —
+    # "interceptions made" is not "interceptions" with a word left over
     for phrase, col in STAT_ALIASES:
         idx = text.find(phrase, start)
-        if idx != -1 and (best is None or idx < best[1]):
+        if idx != -1 and (best is None or idx < best[1] or (idx == best[1] and idx + len(phrase) > best[2])):
             best = (col, idx, idx + len(phrase))
 
     if best: return best
@@ -939,7 +955,7 @@ def parse(query):
             conds.append({"kind": "position", "value": pos["codes"], "flag": pos.get("flag")})
             notes.append(f"position is {pos['label']}")
             break
-    _POS_GROUP = _pos_group(pos_codes)
+    _POS_GROUP = _pos_group(pos_codes) or _implied_group(q)
     q = _rewrite_lengths(q, pos_codes, ignored)
 
     m = re.search(r"between (\d{4}) and (\d{4})", q)
